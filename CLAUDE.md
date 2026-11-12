@@ -48,6 +48,29 @@ flutter build apk --release --target-platform android-arm64
 
 CI (`.github/workflows`) aynı adımları izler; **testler geçmezse APK üretilmez**.
 
+### Bilgisayar uygulaması (Linux)
+
+Aynı depo, Flutter Linux hedefi. `lib/main.dart` tek dalla `lib/desktop/`
+köküne geçer; platform kontrolü YALNIZCA `lib/app/platform.dart`'ta.
+
+```bash
+flutter config --no-enable-android --no-enable-web --enable-linux-desktop
+flutter create --org com.kocum --project-name kocum --platforms linux /tmp/iskelet  # linux/ yoksa
+cp -r /tmp/iskelet/linux ./linux
+flutter run -d linux
+flutter build linux --release      # build/linux/x64/release/bundle/kocum
+```
+
+- Veriler `~/.local/share/<uygulama kimliği>/` altında (Belgeler'e yazılmaz).
+- Telefon verisi yedek ZIP'indeki `kocum.db` ile satır satır birleşir
+  (`lib/desktop/import/`): telefon kazanır, hiçbir şey sessizce silinmez,
+  `app_meta` alınmaz. Bilgisayarın kendi ayarları `app_meta`'da `masaustu.`
+  önekiyle.
+- Masaüstünde telefonun arka plan işleri (metin okuma, kamera, hatırlatıcı)
+  başlamaz; masaüstü ekranları `sessionChronometerProvider` ve
+  `reminderServiceProvider` okumamalı (override edilmezler).
+- Yeni paket eklerken Android derlemesini de düşün: `pubspec.yaml` ortaktır.
+
 ## Kurallar
 
 - Her özellik testle gelir; domain mantığı saf fonksiyonlarda.
