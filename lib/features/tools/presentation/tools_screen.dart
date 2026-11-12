@@ -9,7 +9,6 @@ import 'package:share_plus/share_plus.dart';
 import '../../../app/palette.dart';
 import '../../../app/routes.dart';
 import '../../../app/widgets/tone_icon.dart';
-import '../../../core/database/database_snapshot.dart';
 import '../../../core/di/core_providers.dart';
 import '../../../core/utils/formatters.dart';
 import '../../curriculum/curriculum_providers.dart';
@@ -30,6 +29,7 @@ import '../../question_bank/question_bank_providers.dart';
 import '../../settings/settings_providers.dart';
 import '../../study_session/study_session_providers.dart';
 import '../data/full_export.dart';
+import '../full_backup.dart';
 import '../domain/export_log.dart';
 import '../tools_providers.dart';
 import '../../../core/export/xlsx_writer.dart';
@@ -121,42 +121,16 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen> {
     setState(() => _busy = true);
     try {
       final now = ref.read(clockProvider)();
-      final cards = await ref.read(allQuestionsProvider.future);
-      final notes = ref.read(notesProvider).value ?? const <StudyNote>[];
-      final data = fullDataJson(
-        now: now,
-        cards: cards,
-        books: ref.read(libraryProvider).value ?? const <Book>[],
-        results: ref.read(testResultsProvider).value ?? const {},
-        sessions: await ref.read(studySessionRepositoryProvider).watchHistory(limit: 100000).first,
-        exams: ref.read(mockExamsProvider).value ?? const <MockExam>[],
-        plans: ref.read(plansProvider).value ?? const <StudyPlan>[],
-        notes: notes,
-        ocr: [for (final r in (ref.read(ocrRecordsProvider).value ?? const {}).values) r.toDatasetJson()],
-      );
-      // Arama veri seti (varsa) de pakete girer.
-      final extra = <String, List<int>>{};
-      final log = await ref.read(searchLogProvider).file();
-      final ocrLog = await ref.read(ocrLogProvider).file();
-      for (final f in [log, File('${log.path}.1'), ocrLog, File('${ocrLog.path}.1')]) {
-        if (await f.exists()) extra['veri/${f.uri.pathSegments.last}'] = await f.readAsBytes();
-      }
-      // Veritabanının birebir kopyası: bilgisayar uygulaması bununla eksiksiz
-      // içe aktarır. Alınamazsa yedek yine çıkar (JSON ve fotoğraflar).
-      List<int>? database;
-      String? databaseError;
-      try {
-        database = await databaseSnapshot(ref.read(appDatabaseProvider), await _temp('kocum_anlik.db'));
-      } on Exception catch (e) {
-        databaseError = '$e';
-      }
+      final backup = await collectFullBackup(ref.read, scratch: await _temp('kocum_anlik.db'));
+      final cards = backup.cards;
+      final databaseError = backup.databaseError;
       final zip = await buildFullExportZip(
-        data: data,
+        data: backup.data,
         cards: cards,
-        notes: notes,
+        notes: backup.notes,
         media: ref.read(mediaStorageProvider),
-        extraFiles: extra,
-        database: database,
+        extraFiles: backup.extraFiles,
+        database: backup.database,
       );
       final out = await _temp('Kocum_Tum_Veri_${_stamp(now)}.zip');
       await out.writeAsBytes(zip.bytes, flush: true);

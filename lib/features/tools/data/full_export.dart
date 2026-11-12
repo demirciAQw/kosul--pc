@@ -146,6 +146,13 @@ Map<String, dynamic> fullDataJson({
       ],
     };
 
+/// Uygulamadaki bütün fotoğrafların medya köküne göre yolları (soru, çözüm,
+/// not), tekrarsız.
+Set<String> photoPathsOf(List<QuestionCard> cards, List<StudyNote> notes) => {
+      for (final c in cards) ...[c.questionImage, c.solutionImage].whereType<String>(),
+      for (final n in notes) ...n.photos,
+    };
+
 /// Yedek ZIP: kocum_yedek.json + kocum.db (veritabanı kopyası, varsa) +
 /// media/… (soru, çözüm ve not fotoğrafları). [withPhotos] kapalıysa fotoğrafsız.
 Future<({Uint8List bytes, int photos, int missing})> buildFullExportZip({
@@ -166,11 +173,7 @@ Future<({Uint8List bytes, int photos, int missing})> buildFullExportZip({
   }
   var photos = 0, missing = 0;
   if (withPhotos) {
-    final paths = <String>{
-      for (final c in cards) ...[c.questionImage, c.solutionImage].whereType<String>(),
-      for (final n in notes) ...n.photos,
-    };
-    for (final p in paths) {
+    for (final p in photoPathsOf(cards, notes)) {
       final f = media.resolve(p);
       if (await f.exists()) {
         zip.add('media/$p', await f.readAsBytes());
