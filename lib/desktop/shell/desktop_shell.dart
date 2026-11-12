@@ -6,6 +6,7 @@ import '../desktop_providers.dart';
 import '../import/import_providers.dart';
 import '../import/presentation/auto_import.dart';
 import '../import/presentation/import_flow.dart';
+import '../notebook/notebook_page.dart';
 import '../settings/desktop_settings_page.dart';
 import '../widgets/desktop_page.dart';
 
@@ -62,7 +63,7 @@ class DesktopShell extends ConsumerWidget {
 }
 
 Widget _page(DesktopSection section) => switch (section) {
-      DesktopSection.notebook => DesktopPlaceholder(title: section.label, icon: section.icon),
+      DesktopSection.notebook => const NotebookPage(),
       DesktopSection.books => DesktopPlaceholder(title: section.label, icon: section.icon),
       DesktopSection.exams => DesktopPlaceholder(title: section.label, icon: section.icon),
       DesktopSection.sessions => DesktopPlaceholder(title: section.label, icon: section.icon),
