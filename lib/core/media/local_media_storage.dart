@@ -11,8 +11,12 @@ class LocalMediaStorage implements MediaStorage {
 
   static Future<LocalMediaStorage> open({IdGenerator ids = const UuidV7Generator()}) async {
     final docs = await getApplicationDocumentsDirectory();
+    return openAt(Directory(p.join(docs.path, 'media')), ids: ids);
+  }
+
+  /// Belirli bir kökte açar (bilgisayar uygulaması: ~/.local/share/…/media).
+  static Future<LocalMediaStorage> openAt(Directory root, {IdGenerator ids = const UuidV7Generator()}) async {
     final temp = await getTemporaryDirectory();
-    final root = Directory(p.join(docs.path, 'media'));
     await root.create(recursive: true);
     return LocalMediaStorage._(root, temp.path, ids);
   }

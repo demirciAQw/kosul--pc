@@ -3,16 +3,21 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app/app.dart';
+import 'app/platform.dart';
 import 'core/database/app_database.dart';
 import 'core/di/core_providers.dart';
 import 'core/media/local_media_storage.dart';
 import 'core/notifications/reminder_service.dart';
 import 'core/notifications/session_chronometer.dart';
+import 'desktop/desktop_main.dart';
 import 'features/curriculum/data/curriculum_data.dart';
 import 'features/settings/settings_providers.dart';
 
 /// Kompozisyon kökü: asenkron altyapı burada kurulur ve DI'a verilir.
 Future<void> main() async {
+  // Bilgisayar uygulaması ayrı kökten başlar; telefon akışı aşağıda aynen kalır.
+  if (isDesktop) return runDesktop();
+
   WidgetsFlutterBinding.ensureInitialized();
 
   // Android 15 uygulamaları kenardan kenara çizer. Bunu her sürümde aynı
