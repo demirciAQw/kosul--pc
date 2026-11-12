@@ -7,6 +7,7 @@ abstract final class AppRoutes {
   static const insights = '/insights';
   static const tools = '/tools';
   static const practiceTest = '/tools/test';
+  static const sendToComputer = '/tools/computer';
 
   // Tam ekran sayfalar
   static const newSession = '/session/new';

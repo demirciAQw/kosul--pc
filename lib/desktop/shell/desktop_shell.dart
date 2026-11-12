@@ -8,6 +8,7 @@ import '../import/presentation/auto_import.dart';
 import '../import/presentation/import_flow.dart';
 import '../notebook/notebook_page.dart';
 import '../settings/desktop_settings_page.dart';
+import '../sync/wireless_controller.dart';
 import '../widgets/desktop_page.dart';
 
 /// Geniş ekran düzeni: solda kalıcı gezinme, sağda seçili bölüm.
@@ -17,8 +18,12 @@ class DesktopShell extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final section = ref.watch(desktopSectionProvider);
-    // İzlenen klasör uygulama açıldığı andan itibaren dinlenir.
+    // İzlenen klasör ve (açıksa) kablosuz alma uygulama açıldığı andan
+    // itibaren dinlenir.
     ref.watch(autoImportProvider);
+    // Kablosuz almanın her olayında (ör. her fotoğraf) kabuk yeniden
+    // çizilmesin: yalnızca canlı tutulur.
+    ref.listen(wirelessProvider, (previous, next) {});
     final theme = Theme.of(context);
     return Scaffold(
       body: Row(

@@ -25,6 +25,7 @@ import '../features/study_session/presentation/screens/active_session_screen.dar
 import '../features/study_session/presentation/screens/session_history_screen.dart';
 import '../features/study_session/presentation/screens/session_results_screen.dart';
 import '../features/study_session/presentation/screens/session_setup_screen.dart';
+import '../features/sync/presentation/send_to_computer_screen.dart';
 import 'app_shell.dart';
 import 'routes.dart';
 import '../features/tools/presentation/tools_screen.dart';
@@ -85,6 +86,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: AppRoutes.sessions, builder: (context, state) => const SessionHistoryScreen()),
       GoRoute(path: AppRoutes.settings, builder: (context, state) => const SettingsScreen()),
       GoRoute(path: AppRoutes.practiceTest, builder: (context, state) => const PracticeTestScreen()),
+      GoRoute(path: AppRoutes.sendToComputer, builder: (context, state) => const SendToComputerScreen()),
       GoRoute(
         path: AppRoutes.newNote,
         builder: (context, state) => NoteEditorScreen(initialSubject: state.extra as String?),

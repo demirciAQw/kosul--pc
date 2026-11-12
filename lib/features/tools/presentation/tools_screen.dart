@@ -269,6 +269,16 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen> {
                   ],
                 ),
               ),
+              const _Section('Bilgisayar'),
+              Card(
+                child: tile(
+                  Icons.computer,
+                  KocumColors.blue,
+                  'Bilgisayara gönder',
+                  'Aynı Wi-Fi\'daki bilgisayardaki Koçum\'a (Linux); yalnızca eksik fotoğraflar gider',
+                  () => context.push(AppRoutes.sendToComputer),
+                ),
+              ),
               const _Section('Dışa aktar'),
               Card(
                 child: Column(

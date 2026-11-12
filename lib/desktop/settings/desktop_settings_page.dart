@@ -12,7 +12,9 @@ import '../import/domain/import_models.dart';
 import '../import/import_providers.dart';
 import '../import/presentation/auto_import.dart';
 import '../import/presentation/import_flow.dart';
+import '../sync/wireless_section.dart';
 import '../widgets/desktop_page.dart';
+import '../widgets/settings_card.dart';
 
 class DesktopSettingsPage extends ConsumerWidget {
   const DesktopSettingsPage({super.key});
@@ -21,7 +23,7 @@ class DesktopSettingsPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return DesktopPage(
       title: 'Ayarlar',
-      subtitle: 'Telefondan veri alma, izlenen klasör, koç klasörü, görünüm',
+      subtitle: 'Telefondan veri alma, kablosuz alma, izlenen klasör, koç klasörü, görünüm',
       child: Align(
         alignment: Alignment.topCenter,
         child: ConstrainedBox(
@@ -30,6 +32,7 @@ class DesktopSettingsPage extends ConsumerWidget {
             padding: const EdgeInsets.all(24),
             children: [
               const _ImportSection(),
+              const WirelessSection(),
               const _WatchedFolderSection(),
               const _CoachSection(),
               const _TombstoneSection(),
@@ -48,42 +51,6 @@ class DesktopSettingsPage extends ConsumerWidget {
   }
 }
 
-class _Section extends StatelessWidget {
-  const _Section({required this.icon, required this.title, required this.children});
-
-  final IconData icon;
-  final String title;
-  final List<Widget> children;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Card(
-      margin: const EdgeInsets.only(bottom: 16),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(icon, color: theme.colorScheme.primary),
-                const SizedBox(width: 10),
-                Expanded(child: Text(title, style: theme.textTheme.titleMedium)),
-              ],
-            ),
-            const SizedBox(height: 10),
-            ...children,
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-TextStyle? _muted(BuildContext context) =>
-    Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant);
-
 class _ImportSection extends ConsumerWidget {
   const _ImportSection();
 
@@ -92,14 +59,14 @@ class _ImportSection extends ConsumerWidget {
     final busy = ref.watch(importBusyProvider);
     final last = ref.watch(importHistoryProvider).value?.firstOrNull;
     final exported = last?.exportedAt;
-    return _Section(
+    return SettingsCard(
       icon: Icons.phone_android,
       title: 'Telefondan veri al',
       children: [
         Text(
           'Telefonda Araçlar → Tüm veriyi dışa aktar ile aldığın ZIP\'i seç. Açılmış bir yedek klasörü de olur. '
           'Var olan kayıtlar güncellenir, yeniler eklenir; hiçbir şey sessizce silinmez.',
-          style: _muted(context),
+          style: mutedStyle(context),
         ),
         const SizedBox(height: 12),
         Wrap(
@@ -144,14 +111,14 @@ class _WatchedFolderSection extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final auto = ref.watch(autoImportProvider);
     final folder = auto.folder;
-    return _Section(
+    return SettingsCard(
       icon: Icons.sync,
       title: 'İzlenen klasör',
       children: [
         Text(
           'Syncthing, KDE Connect ya da USB ile bu klasöre gelen yeni yedek ZIP\'i, yazılması bitince '
           'kendiliğinden içe aktarılır. Son içe aktarılandan eski yedekler alınmaz.',
-          style: _muted(context),
+          style: mutedStyle(context),
         ),
         const SizedBox(height: 10),
         _PathRow(
@@ -179,14 +146,14 @@ class _CoachSection extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final folder = ref.watch(coachFolderProvider).value;
     final state = ref.read(importServiceProvider).state;
-    return _Section(
+    return SettingsCard(
       icon: Icons.psychology_alt_outlined,
       title: 'Koç klasörü (ör. Obsidian kasası)',
       children: [
         Text(
           'Her içe aktarmadan sonra güncel yedek fotoğrafsız olarak bu klasörde Koçum/kocum_yedek.json '
           'adıyla yazılır.',
-          style: _muted(context),
+          style: mutedStyle(context),
         ),
         const SizedBox(height: 10),
         _PathRow(
@@ -275,7 +242,7 @@ class _TombstoneSection extends ConsumerWidget {
       (groups[v.tombstone.table] ??= []).add(v);
     }
     final theme = Theme.of(context);
-    return _Section(
+    return SettingsCard(
       icon: Icons.delete_sweep_outlined,
       title: 'Telefonda silinenler (${all.length})',
       children: [
@@ -284,7 +251,7 @@ class _TombstoneSection extends ConsumerWidget {
         if (!async.isLoading && all.isEmpty)
           Text(
             'Yok. Telefonda silinen kayıtlar bir sonraki içe aktarmada burada görünür; bilgisayardan elle silersin.',
-            style: _muted(context),
+            style: mutedStyle(context),
           ),
         for (final g in groups.entries) ...[
           Row(
@@ -311,7 +278,7 @@ class _TombstoneSection extends ConsumerWidget {
           if (g.value.length > _shown)
             Padding(
               padding: const EdgeInsets.only(left: 8, bottom: 8),
-              child: Text('… ve ${g.value.length - _shown} kayıt daha', style: _muted(context)),
+              child: Text('… ve ${g.value.length - _shown} kayıt daha', style: mutedStyle(context)),
             ),
         ],
       ],
@@ -325,7 +292,7 @@ class _AppearanceSection extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final settings = ref.watch(settingsProvider).value;
-    return _Section(
+    return SettingsCard(
       icon: Icons.palette_outlined,
       title: 'Görünüm',
       children: [
@@ -352,11 +319,11 @@ class _HistorySection extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final history = ref.watch(importHistoryProvider).value ?? const <ImportSummary>[];
     final theme = Theme.of(context);
-    return _Section(
+    return SettingsCard(
       icon: Icons.history,
       title: 'İçe aktarma geçmişi',
       children: [
-        if (history.isEmpty) Text('Henüz içe aktarma yok.', style: _muted(context)),
+        if (history.isEmpty) Text('Henüz içe aktarma yok.', style: mutedStyle(context)),
         for (final s in history.take(10))
           ListTile(
             dense: true,
