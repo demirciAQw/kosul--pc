@@ -8,6 +8,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 final desktopDataDirProvider = Provider<Directory>(
     (ref) => throw UnimplementedError('desktopDataDirProvider runDesktop() içinde override edilmeli'));
 
+/// Veri klasörü içinde fotoğrafların durduğu alt klasör.
+const desktopMediaFolder = 'media';
+
 /// Uygulama genelinde bildirim (SnackBar) göstermek için; ör. izlenen klasörden
 /// yedek gelince hangi sayfa açık olursa olsun.
 final desktopMessengerKey = GlobalKey<ScaffoldMessengerState>();

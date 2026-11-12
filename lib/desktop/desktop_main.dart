@@ -26,7 +26,7 @@ Future<void> runDesktop() async {
     name: 'kocum',
     native: DriftNativeOptions(databasePath: () async => p.join(root.path, 'kocum.sqlite')),
   ));
-  final media = await LocalMediaStorage.openAt(Directory(p.join(root.path, 'media')));
+  final media = await LocalMediaStorage.openAt(Directory(p.join(root.path, desktopMediaFolder)));
   await CurriculumSeeder(database).run();
 
   runApp(ProviderScope(
