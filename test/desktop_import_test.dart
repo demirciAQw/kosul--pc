@@ -217,6 +217,21 @@ void main() {
       expect(exportedAtOf(null), isNull);
     });
 
+    test('izlenen klasör: işlenmemişlerin en yenisi alınır, eskiler atlanır', () {
+      final eski = BackupFileInfo('Kocum_1.zip', 10, t0);
+      final yeni = BackupFileInfo('Kocum_2.zip', 20, t1);
+      final islenmis = BackupFileInfo('Kocum_0.zip', 5, DateTime(2026, 10, 1));
+      final pick = pickBackupToImport(
+        [eski, yeni, islenmis, BackupFileInfo('.syncthing.x.zip', 1, t1)],
+        {islenmis.name: islenmis.fingerprint},
+      );
+      expect(pick.import?.name, 'Kocum_2.zip');
+      expect(pick.skip.map((f) => f.name), ['Kocum_1.zip']);
+      // Aynı ad ama değişmiş dosya yeniden alınır.
+      expect(pickBackupToImport([yeni], {yeni.name: '1:1'}).import, yeni);
+      expect(pickBackupToImport([yeni], {yeni.name: yeni.fingerprint}).import, isNull);
+    });
+
     test('özet JSON gidiş-dönüş', () {
       final s = ImportSummary(
         at: t1,

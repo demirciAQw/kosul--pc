@@ -24,3 +24,7 @@ final deletedOnPhoneQuestionIdsProvider = Provider<Set<String>>((ref) => {
       for (final v in ref.watch(tombstonesProvider).value ?? const <TombstoneView>[])
         if (v.tombstone.table == 'question_cards') v.tombstone.id,
     });
+
+/// Koç klasörü (ör. Obsidian kasası); seçilmediyse null.
+final coachFolderProvider =
+    FutureProvider<String?>((ref) => ref.watch(importServiceProvider).state.coachFolder());

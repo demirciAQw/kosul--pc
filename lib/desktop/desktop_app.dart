@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../app/theme.dart';
 import '../features/settings/settings_providers.dart';
+import 'desktop_providers.dart';
 import 'shell/desktop_shell.dart';
 
 class DesktopApp extends ConsumerWidget {
@@ -14,6 +15,7 @@ class DesktopApp extends ConsumerWidget {
     return MaterialApp(
       title: 'Koçum',
       debugShowCheckedModeBanner: false,
+      scaffoldMessengerKey: desktopMessengerKey,
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
       themeMode: ref.watch(settingsProvider).value?.themeMode ?? ThemeMode.system,

@@ -8,6 +8,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 final desktopDataDirProvider = Provider<Directory>(
     (ref) => throw UnimplementedError('desktopDataDirProvider runDesktop() içinde override edilmeli'));
 
+/// Uygulama genelinde bildirim (SnackBar) göstermek için; ör. izlenen klasörden
+/// yedek gelince hangi sayfa açık olursa olsun.
+final desktopMessengerKey = GlobalKey<ScaffoldMessengerState>();
+
 /// Soldaki kalıcı gezinmenin bölümleri.
 enum DesktopSection {
   notebook('Defter', Icons.menu_book_outlined, Icons.menu_book),

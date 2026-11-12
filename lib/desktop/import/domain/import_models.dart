@@ -65,6 +65,17 @@ class ImportSummary {
   int get totalMissing => tables.fold(0, (s, t) => s + t.missingIds.length);
   bool get hasChanges => totalAdded + totalUpdated + photosAdded > 0;
 
+  /// Tek satırlık özet: "12 yeni, 3 güncellendi, 5 fotoğraf".
+  String get shortText {
+    final parts = [
+      if (totalAdded > 0) '$totalAdded yeni',
+      if (totalUpdated > 0) '$totalUpdated güncellendi',
+      if (totalMissing > 0) '$totalMissing telefonda silindi',
+      if (photosAdded > 0) '$photosAdded fotoğraf',
+    ];
+    return parts.isEmpty ? 'değişiklik yok' : parts.join(', ');
+  }
+
   Map<String, Object?> toJson() => {
         'at': at.toIso8601String(),
         'source': source,

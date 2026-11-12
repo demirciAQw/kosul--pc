@@ -54,3 +54,28 @@ bool isBackupCandidate(String fileName) {
 
 /// Aynı dosyayı iki kez içe aktarmamak için parmak izi.
 String fileFingerprint(int size, DateTime modified) => '$size:${modified.millisecondsSinceEpoch}';
+
+/// İzlenen klasördeki bir yedek dosyası.
+class BackupFileInfo {
+  const BackupFileInfo(this.name, this.size, this.modified);
+
+  final String name;
+  final int size;
+  final DateTime modified;
+
+  String get fingerprint => fileFingerprint(size, modified);
+}
+
+/// İzlenen klasörde içe aktarılacak yedek: işlenmemişlerin en yenisi (en yeni
+/// yedek her şeyi içerir). İşlenmemiş daha eskiler "atla" listesine düşer.
+({BackupFileInfo? import, List<BackupFileInfo> skip}) pickBackupToImport(
+  List<BackupFileInfo> files,
+  Map<String, String> processed,
+) {
+  final fresh = [
+    for (final f in files)
+      if (isBackupCandidate(f.name) && processed[f.name] != f.fingerprint) f,
+  ]..sort((a, b) => b.modified.compareTo(a.modified));
+  if (fresh.isEmpty) return (import: null, skip: const <BackupFileInfo>[]);
+  return (import: fresh.first, skip: fresh.sublist(1));
+}
