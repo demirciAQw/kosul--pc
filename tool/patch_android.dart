@@ -2,6 +2,7 @@
 //   dart tool/patch_android.dart
 //
 //  - Bildirim izni (oturum kronometresi için)
+//  - Ağ izni (yalnızca yerel ağdaki bilgisayara kablosuz aktarım için)
 //  - Uygulama adı: Koçum
 //  - flutter_local_notifications için core library desugaring
 //  - Sabit imza: android/key.properties varsa release APK onunla imzalanır
@@ -13,6 +14,7 @@ import 'dart:io';
 
 import 'camera_patch.dart';
 import 'genai_patch.dart';
+import 'network_patch.dart';
 import 'r8_patch.dart';
 
 const _desugarVersion = '2.1.4';
@@ -133,6 +135,8 @@ void _patchManifest(File file) {
   s = s.replaceFirst(RegExp(r'android:label="[^"]*"'), 'android:label="Koçum"');
   // Kamera eklentisinin eklediği mikrofon izni (ses kaydı yok).
   s = removeAudioPermission(s);
+  // Kablosuz aktarım: yalnızca yerel ağdaki eşleşmiş bilgisayara.
+  s = addInternetPermission(s);
   file.writeAsStringSync(s);
 }
 

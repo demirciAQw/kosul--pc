@@ -71,6 +71,27 @@ flutter build linux --release      # build/linux/x64/release/bundle/kocum
   `reminderServiceProvider` okumamalı (override edilmezler).
 - Yeni paket eklerken Android derlemesini de düşün: `pubspec.yaml` ortaktır.
 
+### Kablosuz aktarım (telefon → bilgisayar, yerel ağ)
+
+- Ortak sözleşme ve kurallar `lib/features/sync/domain/` (saf Dart);
+  telefon istemcisi `lib/features/sync/data/`, bilgisayar sunucusu
+  `lib/desktop/sync/data/sync_server.dart`. Yeni paket yok; `crypto`
+  (HMAC/SHA-256) zaten `uuid` üzerinden gelir.
+- Eşleştirme: bilgisayar ekranında 6 haneli tek seferlik kod (5 dk, 5 hak).
+  Anahtar Diffie-Hellman (RFC 7919 ffdhe2048) + kodla iki tarafta ayrı
+  hesaplanır, ağdan geçmez. Her istek HMAC imzalı ve sıra numaralı.
+- Kısıtlar: en fazla bir telefon ve bir bilgisayar; yalnızca Android telefon
+  eşleşir, yalnızca Linux bilgisayar alır; yalnızca yerel ağ adresleri
+  (100.64/10 ve 127.0.0.1 hayır); tarayıcı başlıkları ve alan adıyla Host
+  reddedilir; yalnızca `questions|solutions|notes/yyyy/mm/ad.uzantı`
+  fotoğrafları yazılır. Okuma/listeleme isteği yoktur.
+- Anahtarlar veritabanında değil ayrı dosyada (`esitleme.json`): telefonun
+  veritabanı kopyası bilgisayara ve yedeklere gider, anahtar gitmemeli.
+- Veri içeriği şifrelenmez (yalnızca imzalı); ortak Wi-Fi için uyarı var.
+- Testler `test/sync_*_test.dart`: gerçek sunucu ve istemci 127.0.0.1'de;
+  geri döngü yalnızca `allowLoopback: true` ile açılır.
+- Android'de INTERNET izni `tool/network_patch.dart` ile eklenir.
+
 ## Kurallar
 
 - Her özellik testle gelir; domain mantığı saf fonksiyonlarda.
