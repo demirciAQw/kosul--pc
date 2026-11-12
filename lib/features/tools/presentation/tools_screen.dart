@@ -9,6 +9,7 @@ import 'package:share_plus/share_plus.dart';
 import '../../../app/palette.dart';
 import '../../../app/routes.dart';
 import '../../../app/widgets/tone_icon.dart';
+import '../../../core/database/database_snapshot.dart';
 import '../../../core/di/core_providers.dart';
 import '../../../core/utils/formatters.dart';
 import '../../curriculum/curriculum_providers.dart';
@@ -140,19 +141,30 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen> {
       for (final f in [log, File('${log.path}.1'), ocrLog, File('${ocrLog.path}.1')]) {
         if (await f.exists()) extra['veri/${f.uri.pathSegments.last}'] = await f.readAsBytes();
       }
+      // Veritabanının birebir kopyası: bilgisayar uygulaması bununla eksiksiz
+      // içe aktarır. Alınamazsa yedek yine çıkar (JSON ve fotoğraflar).
+      List<int>? database;
+      String? databaseError;
+      try {
+        database = await databaseSnapshot(ref.read(appDatabaseProvider), await _temp('kocum_anlik.db'));
+      } on Exception catch (e) {
+        databaseError = '$e';
+      }
       final zip = await buildFullExportZip(
         data: data,
         cards: cards,
         notes: notes,
         media: ref.read(mediaStorageProvider),
         extraFiles: extra,
+        database: database,
       );
       final out = await _temp('Kocum_Tum_Veri_${_stamp(now)}.zip');
       await out.writeAsBytes(zip.bytes, flush: true);
       await SharePlus.instance.share(ShareParams(
         files: [XFile(out.path, mimeType: 'application/zip')],
         subject: 'Koçum tüm veri',
-        text: '${cards.length} soru, ${zip.photos} fotoğraf${zip.missing > 0 ? ' (${zip.missing} bulunamadı)' : ''}',
+        text: '${cards.length} soru, ${zip.photos} fotoğraf${zip.missing > 0 ? ' (${zip.missing} bulunamadı)' : ''}'
+            '${databaseError == null ? '' : '. Veritabanı kopyası alınamadı: $databaseError'}',
       ));
     } on Exception catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('Dışa aktarılamadı: $e')));

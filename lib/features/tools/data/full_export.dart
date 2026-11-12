@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import '../../../core/database/database_snapshot.dart';
 import '../../../core/export/zip_writer.dart';
 import '../../../core/media/media_storage.dart';
 import '../../library/data/models/book_template_model.dart';
@@ -145,8 +146,8 @@ Map<String, dynamic> fullDataJson({
       ],
     };
 
-/// Yedek ZIP: kocum_yedek.json + media/… (soru, çözüm ve not fotoğrafları).
-/// [withPhotos] kapalıysa yalnızca JSON.
+/// Yedek ZIP: kocum_yedek.json + kocum.db (veritabanı kopyası, varsa) +
+/// media/… (soru, çözüm ve not fotoğrafları). [withPhotos] kapalıysa fotoğrafsız.
 Future<({Uint8List bytes, int photos, int missing})> buildFullExportZip({
   required Map<String, dynamic> data,
   required List<QuestionCard> cards,
@@ -154,8 +155,11 @@ Future<({Uint8List bytes, int photos, int missing})> buildFullExportZip({
   required MediaStorage media,
   bool withPhotos = true,
   Map<String, List<int>> extraFiles = const {},
+  List<int>? database,
 }) async {
   final zip = ZipWriter()..addText('kocum_yedek.json', const JsonEncoder.withIndent(' ').convert(data));
+  // Bilgisayar uygulaması bu kopyayı satır satır birleştirir.
+  if (database != null) zip.add(databaseSnapshotName, database);
   // Uygulamanın kendi tuttuğu veri setleri (ör. arama kayıtları).
   for (final e in extraFiles.entries) {
     zip.add(e.key, e.value);
