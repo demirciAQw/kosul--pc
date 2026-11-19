@@ -9,6 +9,7 @@ import '../../features/ledger/presentation/ledger_views.dart';
 import '../entry/books_page.dart';
 import '../entry/exams_page.dart';
 import '../entry/optic_page.dart';
+import '../entry/sessions_page.dart';
 import '../import/import_providers.dart';
 import '../import/presentation/auto_import.dart';
 import '../import/presentation/import_flow.dart';
@@ -80,7 +81,7 @@ Widget _page(DesktopSection section) => switch (section) {
       DesktopSection.books => const DesktopBooksPage(),
       DesktopSection.optic => const DesktopOpticPage(),
       DesktopSection.exams => const DesktopExamsPage(),
-      DesktopSection.sessions => DesktopPlaceholder(title: section.label, icon: section.icon),
+      DesktopSection.sessions => const DesktopSessionsPage(),
       DesktopSection.analysis => DesktopPlaceholder(title: section.label, icon: section.icon),
       DesktopSection.plans => DesktopPlaceholder(title: section.label, icon: section.icon),
       DesktopSection.notes => const DesktopNotesPage(),
