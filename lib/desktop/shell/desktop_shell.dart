@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/utils/formatters.dart';
 import '../desktop_providers.dart';
+import '../anlik/notes_page.dart';
+import '../anlik/people_page.dart';
 import '../import/import_providers.dart';
 import '../import/presentation/auto_import.dart';
 import '../import/presentation/import_flow.dart';
@@ -74,7 +76,9 @@ Widget _page(DesktopSection section) => switch (section) {
       DesktopSection.sessions => DesktopPlaceholder(title: section.label, icon: section.icon),
       DesktopSection.analysis => DesktopPlaceholder(title: section.label, icon: section.icon),
       DesktopSection.plans => DesktopPlaceholder(title: section.label, icon: section.icon),
-      DesktopSection.notes => DesktopPlaceholder(title: section.label, icon: section.icon),
+      DesktopSection.notes => const DesktopNotesPage(),
+      DesktopSection.people => const DesktopPeoplePage(),
+      DesktopSection.tags => const DesktopTagsPage(),
       DesktopSection.settings => const DesktopSettingsPage(),
     };
 

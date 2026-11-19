@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/palette.dart';
 import '../../core/utils/formatters.dart';
+import '../../features/anlik/presentation/widgets/card_links.dart';
 import '../../features/ocr/domain/ocr.dart';
 import '../../features/ocr/ocr_providers.dart';
 import '../../features/question_bank/domain/question_card.dart';
@@ -467,6 +468,8 @@ class _DetailPane extends ConsumerWidget {
             if (r.deletedOnPhone) const _Tag('Telefonda silindi', color: KocumColors.amber),
           ],
         ),
+        const SizedBox(height: 12),
+        CardTagsSection(cardId: card.id),
         if (card.answerText != null) ...[
           const SizedBox(height: 12),
           Text(card.answerText!, style: theme.textTheme.bodyLarge),

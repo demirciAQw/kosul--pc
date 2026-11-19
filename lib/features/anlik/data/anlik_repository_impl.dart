@@ -158,6 +158,20 @@ class DriftAnlikRepository implements AnlikRepository {
   Future<void> deleteNote(String id) => (_db.delete(_db.anlikNotes)..where((n) => n.id.equals(id))).go();
 
   @override
+  Future<void> linkNoteToCard(String noteId, String cardId, {String source = Source.ben}) =>
+      _db.into(_db.anlikLinks).insertOnConflictUpdate(AnlikLinksCompanion.insert(
+            id: '$noteId>c:$cardId',
+            fromNoteId: noteId,
+            toCardId: Value(cardId),
+            source: Value(source),
+            createdAt: DateTime.now(),
+          ));
+
+  @override
+  Future<void> unlinkNoteFromCard(String noteId, String cardId) =>
+      (_db.delete(_db.anlikLinks)..where((l) => l.id.equals('$noteId>c:$cardId'))).go();
+
+  @override
   Stream<List<Tag>> watchTags() => (_db.select(_db.tags)..orderBy([(t) => OrderingTerm.asc(t.name)])).watch().map(
         (rows) => [for (final r in rows) _tag(r)],
       );

@@ -21,6 +21,7 @@ class AnlikEditor extends ConsumerStatefulWidget {
     this.onCancel,
     this.autofocus = true,
     this.focusNode,
+    this.linkCardId,
   });
 
   final AnlikNote? existing;
@@ -28,6 +29,9 @@ class AnlikEditor extends ConsumerStatefulWidget {
   final VoidCallback? onCancel;
   final bool autofocus;
   final FocusNode? focusNode;
+
+  /// Yeni notun bağlanacağı soru kartı (Defter'den "Bu soruya not yaz").
+  final String? linkCardId;
 
   @override
   ConsumerState<AnlikEditor> createState() => AnlikEditorState();
@@ -47,13 +51,29 @@ class AnlikEditorState extends ConsumerState<AnlikEditor> {
   @override
   void initState() {
     super.initState();
-    final n = widget.existing;
-    _body = TextEditingController(text: n?.body ?? '');
+    _body = TextEditingController();
+    _load(widget.existing);
+  }
+
+  /// Alanları verilen nottan (ya da boş yeni nottan) doldurur.
+  void _load(AnlikNote? n) {
+    _body.text = n?.body ?? '';
     _tags = {...?n?.tagIds};
     _auto = {...?n?.autoTagIds};
     _people = {...?n?.personIds};
     _at = n?.createdAt ?? ref.read(clockProvider)();
     _mood = n?.mood;
+    _error = null;
+    _dismissed.clear();
+  }
+
+  @override
+  void didUpdateWidget(AnlikEditor old) {
+    super.didUpdateWidget(old);
+    // Bilgisayarda yan panel başka nota geçince form baştan kurulur.
+    if (old.existing?.id != widget.existing?.id) {
+      setState(() => _load(widget.existing));
+    }
   }
 
   @override
@@ -85,7 +105,7 @@ class AnlikEditorState extends ConsumerState<AnlikEditor> {
         tagIds: _tags,
         personIds: _people,
         linkedNoteIds: existing?.linkedNoteIds ?? const {},
-        linkedCardIds: existing?.linkedCardIds ?? const {},
+        linkedCardIds: existing?.linkedCardIds ?? {if (widget.linkCardId != null) widget.linkCardId!},
         approvedTags: approvedTags,
         approvedPeople: approvedPeople,
         dismissedAutoKeys: _dismissed,

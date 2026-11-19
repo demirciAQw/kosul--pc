@@ -24,6 +24,8 @@ enum DesktopSection {
   analysis('Analiz', Icons.insights_outlined, Icons.insights),
   plans('Planlar', Icons.event_note_outlined, Icons.event_note),
   notes('Notlar', Icons.sticky_note_2_outlined, Icons.sticky_note_2),
+  people('Kişiler', Icons.people_outline, Icons.people),
+  tags('Etiketler', Icons.sell_outlined, Icons.sell),
   settings('Ayarlar', Icons.settings_outlined, Icons.settings);
 
   const DesktopSection(this.label, this.icon, this.selectedIcon);

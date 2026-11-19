@@ -1,3 +1,4 @@
+import '../../../anlik/presentation/widgets/card_links.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -111,6 +112,8 @@ class _QuestionDetailScreenState extends ConsumerState<QuestionDetailScreen> {
               meta(formatShortDate(card.createdAt)),
             ],
           ),
+          const SizedBox(height: 12),
+          CardTagsSection(cardId: card.id),
           const SizedBox(height: 16),
           if (!card.hasSolution)
             OutlinedButton.icon(

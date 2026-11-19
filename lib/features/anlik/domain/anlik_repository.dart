@@ -17,6 +17,10 @@ abstract interface class AnlikRepository {
   });
   Future<void> deleteNote(String id);
 
+  /// Notu soru kartına bağlar / bağı kaldırır (notun kalanına dokunmaz).
+  Future<void> linkNoteToCard(String noteId, String cardId, {String source = Source.ben});
+  Future<void> unlinkNoteFromCard(String noteId, String cardId);
+
   Stream<List<Tag>> watchTags();
   Future<List<Tag>> allTags();
   Future<void> saveTag(Tag tag);
