@@ -50,6 +50,7 @@ dependencies:
   # Kablosuz aktarımda imza (HMAC-SHA256) ve özet (SHA-256). dart.dev'in
   # paketi; uuid zaten buna bağlı olduğu için uygulamaya yeni kod girmez.
   crypto: ^3.0.3
+  desktop_drop: ^0.8.4
 
 dev_dependencies:
   flutter_test:
