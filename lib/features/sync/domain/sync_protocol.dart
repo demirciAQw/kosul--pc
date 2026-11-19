@@ -28,6 +28,11 @@ abstract final class SyncPaths {
   static const photoList = '$prefix/fotograflar';
   static const photo = '$prefix/fotograf';
   static const backup = '$prefix/yedek';
+
+  /// İki yönlü senkron (v8.8): değişiklik defteri alışverişi ve bilgisayarın
+  /// telefona gönderdiği fotoğraflar (yalnızca kendi değişikliklerinde geçenler).
+  static const ledger = '$prefix/degisiklikler';
+  static const photoGet = '$prefix/fotograf-al';
 }
 
 /// İmzalı isteklerin başlıkları (küçük harf; HTTP başlıkları harf duyarsız).
@@ -36,6 +41,9 @@ abstract final class SyncHeaders {
   static const sequence = 'x-kocum-sira';
   static const signature = 'x-kocum-imza';
   static const mediaPath = 'x-kocum-yol';
+
+  /// Bilgisayarın yanıt imzası (telefon doğrular; ağdaki biri yanıtı değiştiremez).
+  static const responseSignature = 'x-kocum-yanit-imza';
 }
 
 abstract final class SyncLimits {
@@ -79,6 +87,7 @@ abstract final class ProofLabels {
   static const phoneSession = 'telefon-oturum';
   static const computerSession = 'bilgisayar-oturum';
   static const request = 'istek';
+  static const response = 'yanit';
 }
 
 class SyncException implements Exception {

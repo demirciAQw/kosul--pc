@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import '../domain/ledger_protocol.dart';
 import '../domain/media_rules.dart';
 import '../domain/network_rules.dart';
 import '../domain/sync_crypto.dart';
@@ -215,6 +216,69 @@ class SyncClient {
   Future<BackupResponse> sendBackup(SyncConnection connection, File zip) async => BackupResponse.fromJson(
       await _signed(connection, 'PUT', SyncPaths.backup, file: zip, timeout: const Duration(minutes: 10)));
 
+  /// Değişiklik defteri alışverişi. Yanıtın imzası doğrulanmadan hiçbir
+  /// değişiklik döndürülmez (ağdaki biri yanıtı değiştirip veri sokamaz).
+  Future<LedgerResponse> exchangeLedger(SyncConnection connection, LedgerRequest request) async {
+    final body = utf8.encode(jsonEncode(request.toJson()));
+    return LedgerResponse.fromJson(
+        await _signed(connection, 'POST', SyncPaths.ledger, body: body, verifyResponse: true, timeout: const Duration(minutes: 5)));
+  }
+
+  /// Bilgisayarın verdiği bir fotoğrafı [target] yoluna indirir. Önce geçici
+  /// dosyaya yazılır; imza ve boyut tutarsa yerine konur.
+  Future<void> fetchPhoto(SyncConnection connection, MediaEntry entry, File target) async {
+    if (!isTransferableMediaPath(entry.path)) throw SyncException('Fotoğraf yolu kurallara uymuyor: ${entry.path}');
+    final computer = connection.computer;
+    _checkHost(computer.host);
+    final body = utf8.encode(jsonEncode(PhotoGetRequest(entry.path).toJson()));
+    final sequence = connection._next();
+    final request =
+        await _http.openUrl('POST', _uri(computer.host, computer.port, SyncPaths.photoGet)).timeout(_requestTimeout);
+    request.headers
+      ..set(SyncHeaders.session, connection.session)
+      ..set(SyncHeaders.sequence, '$sequence')
+      ..set(
+        SyncHeaders.signature,
+        requestSignature(computer.key,
+            method: 'POST',
+            path: SyncPaths.photoGet,
+            session: connection.session,
+            sequence: sequence,
+            mediaPath: '',
+            bodyHash: sha256Hex(body)),
+      );
+    request.contentLength = body.length;
+    request.add(body);
+    final response = await request.close().timeout(_requestTimeout);
+    if (response.statusCode != HttpStatus.ok) {
+      await _readJson(response); // hata iletisini fırlatır
+      throw SyncException('Bilgisayar fotoğrafı vermedi (${response.statusCode}).');
+    }
+    await target.parent.create(recursive: true);
+    final temp = File('${target.path}.part');
+    final hash = StreamingSha256();
+    final sink = temp.openWrite();
+    var total = 0;
+    try {
+      await for (final chunk in response.timeout(const Duration(minutes: 2))) {
+        total += chunk.length;
+        if (total > SyncLimits.photo) throw const SyncException('Fotoğraf beklenenden büyük geldi.');
+        hash.add(chunk);
+        sink.add(chunk);
+      }
+      await sink.flush();
+    } finally {
+      await sink.close();
+    }
+    final expected = responseSignature(computer.key,
+        session: connection.session, sequence: sequence, bodyHash: hash.close());
+    if (!safeEquals(expected, response.headers.value(SyncHeaders.responseSignature) ?? '')) {
+      await temp.delete();
+      throw const SyncException('Fotoğrafın imzası tutmadı; alınmadı.');
+    }
+    await temp.rename(target.path);
+  }
+
   // ───────────── Yardımcılar ─────────────
 
   void _checkHost(String host) {
@@ -244,6 +308,7 @@ class SyncClient {
     File? file,
     String mediaPath = '',
     Duration timeout = const Duration(minutes: 2),
+    bool verifyResponse = false,
   }) async {
     final computer = connection.computer;
     _checkHost(computer.host);
@@ -287,10 +352,16 @@ class SyncClient {
     } else if (body != null) {
       request.add(body);
     }
-    return _readJson(await request.close().timeout(timeout));
+    return _readJson(
+      await request.close().timeout(timeout),
+      verify: verifyResponse ? (key: computer.key, session: connection.session, sequence: sequence) : null,
+    );
   }
 
-  Future<Object?> _readJson(HttpClientResponse response) async {
+  Future<Object?> _readJson(
+    HttpClientResponse response, {
+    ({List<int> key, String session, int sequence})? verify,
+  }) async {
     final out = BytesBuilder(copy: false);
     await for (final chunk in response) {
       if (out.length + chunk.length > SyncLimits.jsonBody) {
@@ -298,9 +369,17 @@ class SyncClient {
       }
       out.add(chunk);
     }
+    final raw = out.takeBytes();
+    if (verify != null && response.statusCode == HttpStatus.ok) {
+      final expected = responseSignature(verify.key,
+          session: verify.session, sequence: verify.sequence, bodyHash: sha256Hex(raw));
+      if (!safeEquals(expected, response.headers.value(SyncHeaders.responseSignature) ?? '')) {
+        throw const SyncException('Bilgisayarın yanıtının imzası tutmadı; hiçbir şey uygulanmadı.');
+      }
+    }
     Object? json;
     try {
-      json = jsonDecode(utf8.decode(out.takeBytes()));
+      json = jsonDecode(utf8.decode(raw));
     } on FormatException {
       json = null;
     }

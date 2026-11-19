@@ -9,6 +9,8 @@ abstract final class AppRoutes {
   static const tools = '/tools';
   static const practiceTest = '/tools/test';
   static const sendToComputer = '/tools/computer';
+  static const claudeChanges = '/tools/degisiklikler';
+  static const conflicts = '/tools/cakismalar';
 
   // Tam ekran sayfalar
   static const newSession = '/session/new';

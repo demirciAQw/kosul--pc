@@ -12,6 +12,8 @@ import '../../../features/sync/domain/pairing_window.dart';
 import '../../../features/sync/domain/sync_crypto.dart';
 import '../../../features/sync/domain/sync_protocol.dart';
 import '../../../features/sync/domain/sync_session.dart';
+import '../../../features/sync/data/ledger_exchange.dart';
+import '../../../features/sync/domain/ledger_protocol.dart';
 import 'desktop_sync_store.dart';
 
 /// Gelen yedeği (fotoğrafsız ZIP) içe aktarır, kısa özet döner.
@@ -31,7 +33,8 @@ class SyncEvent {
 ///
 /// Neye dokunur: yalnızca fotoğraf klasörü (doğrulanmış yollar) ve kendi
 /// geçici klasörü; veriyi içe aktarma her zamanki birleştirmeden geçer.
-/// Telefona hiçbir dosya okutmaz; listeleme ya da indirme isteği yoktur.
+/// Telefona genel dosya okutmaz; listeleme isteği yoktur. Tek istisna: bilgisayarın
+/// kendi değişikliklerinde geçen fotoğrafların telefona verilmesi (`_photoGet`).
 class SyncServer {
   SyncServer({
     required this.store,
@@ -39,6 +42,7 @@ class SyncServer {
     required this.workDir,
     required this.importBackup,
     required this.platform,
+    this.ledger,
     Random? random,
     DateTime Function()? now,
     this.allowLoopback = false,
@@ -56,6 +60,9 @@ class SyncServer {
 
   /// Bu bilgisayarın platformu (telefona bildirilir; yalnızca "linux" kabul edilir).
   final String platform;
+
+  /// İki yönlü değişiklik alışverişi (yoksa yalnızca yedek alınır).
+  final LedgerExchange? ledger;
 
   /// Yalnızca testler: aynı bilgisayardan (127.0.0.1) gelen isteği kabul et.
   final bool allowLoopback;
@@ -195,6 +202,10 @@ class SyncServer {
       if (!isIpLiteralHost(request.headers.value(HttpHeaders.hostHeader))) {
         throw const _Reject(403, 'Bilgisayara IP adresiyle bağlanılmalı.');
       }
+      if (request.method == 'POST' && request.uri.path == SyncPaths.photoGet) {
+        await _photoGet(ctx);
+        return;
+      }
       final handlers = <String, Future<Map<String, Object?>> Function()>{
         'GET ${SyncPaths.hello}': _hello,
         'POST ${SyncPaths.pair}': () => _pair(ctx),
@@ -202,10 +213,12 @@ class SyncServer {
         'POST ${SyncPaths.photoList}': () => _photoList(ctx),
         'PUT ${SyncPaths.photo}': () => _photo(ctx),
         'PUT ${SyncPaths.backup}': () => _backup(ctx),
+        'POST ${SyncPaths.ledger}': () => _ledger(ctx),
       };
       final handler = handlers['${request.method} ${request.uri.path}'];
       if (handler == null) throw const _Reject(404, 'Bilinmeyen istek.');
-      await _respond(request, 200, await handler());
+      final body = await handler();
+      await _respond(request, 200, body, sign: ctx.signed);
     } on _Reject catch (e) {
       if (e.counts && address.isNotEmpty) _guard.record(address);
       await _drain(ctx);
@@ -359,6 +372,65 @@ class SyncServer {
     return {'tamam': true};
   }
 
+  /// Değişiklik defteri alışverişi: telefonun satırlarını uygular, kendi
+  /// satırlarını döner. Yanıt imzalıdır; telefon doğrulamadan uygulamaz.
+  Future<Map<String, Object?>> _ledger(_Ctx ctx) async {
+    final exchange = ledger;
+    if (exchange == null) throw const _Reject(404, 'Bu bilgisayar değişiklik alışverişini desteklemiyor.', counts: false);
+    final signed = await _claim(ctx.request);
+    final bytes = await _readBytes(ctx, SyncLimits.jsonBody);
+    _verify(ctx.request, signed, sha256Hex(bytes));
+    ctx.signed = signed;
+    if (_importing) {
+      throw const _Reject(409, 'Bilgisayar şu an bir yedeği içe aktarıyor; biraz sonra tekrar dene.', counts: false);
+    }
+    final req = _parse(() => LedgerRequest.fromJson(_decode(bytes)));
+    _importing = true;
+    try {
+      final response = await exchange.handle(req);
+      _emit(SyncEventKind.imported, 'Değişiklikler: ${response.summary}; ${response.changes.length} değişiklik telefona gidiyor.');
+      return response.toJson();
+    } finally {
+      _importing = false;
+    }
+  }
+
+  /// Bilgisayarın telefona vereceği fotoğraf: yalnızca bilgisayarın kendi
+  /// değişikliğinde geçen, kurala uyan yol. Genel dosya okuma değildir.
+  Future<void> _photoGet(_Ctx ctx) async {
+    final exchange = ledger;
+    if (exchange == null) throw const _Reject(404, 'Bilinmeyen istek.');
+    final signed = await _claim(ctx.request);
+    final bytes = await _readBytes(ctx, SyncLimits.jsonBody);
+    _verify(ctx.request, signed, sha256Hex(bytes));
+    final path = _parse(() => PhotoGetRequest.fromJson(_decode(bytes))).path;
+    if (!await exchange.maySend(path)) throw const _Reject(404, 'Bu fotoğraf verilemez.');
+    final file = _mediaFile(path);
+    await _ensureInsideMedia(file);
+    final stat = await file.stat();
+    if (stat.type != FileSystemEntityType.file || stat.size > SyncLimits.photo) {
+      throw const _Reject(404, 'Fotoğraf bilgisayarda yok.', counts: false);
+    }
+    final hash = StreamingSha256();
+    await for (final chunk in file.openRead()) {
+      hash.add(chunk);
+    }
+    final signature = responseSignature(signed.phone.key,
+        session: signed.session.id, sequence: signed.sequence, bodyHash: hash.close());
+    final response = ctx.request.response
+      ..statusCode = 200
+      ..headers.contentType = ContentType.binary
+      ..headers.set(HttpHeaders.cacheControlHeader, 'no-store')
+      ..headers.set(SyncHeaders.responseSignature, signature)
+      ..contentLength = stat.size;
+    try {
+      await response.addStream(file.openRead(0, stat.size));
+      await response.close();
+    } on Exception {
+      // Telefon bağlantıyı kapatmış olabilir; yeniden ister.
+    }
+  }
+
   Future<Map<String, Object?>> _backup(_Ctx ctx) async {
     final signed = await _claim(ctx.request);
     if (_importing) {
@@ -484,14 +556,22 @@ class SyncServer {
     }
   }
 
-  Future<void> _respond(HttpRequest request, int status, Map<String, Object?> body) async {
+  Future<void> _respond(HttpRequest request, int status, Map<String, Object?> body, {_Signed? sign}) async {
     final response = request.response;
     try {
+      final bytes = utf8.encode(jsonEncode(body));
       response
         ..statusCode = status
         ..headers.contentType = ContentType.json
         ..headers.set(HttpHeaders.cacheControlHeader, 'no-store')
-        ..write(jsonEncode(body));
+        ..contentLength = bytes.length;
+      if (sign != null && status == 200) {
+        response.headers.set(
+          SyncHeaders.responseSignature,
+          responseSignature(sign.phone.key, session: sign.session.id, sequence: sign.sequence, bodyHash: sha256Hex(bytes)),
+        );
+      }
+      response.add(bytes);
       await response.close();
     } on Exception {
       // Telefon bağlantıyı kapatmış olabilir.
@@ -525,6 +605,9 @@ class _Ctx {
 
   final HttpRequest request;
   bool bodyTaken = false;
+
+  /// İmzalı bir istek kabul edildiyse: yanıt da imzalanır.
+  _Signed? signed;
 }
 
 class _Signed {

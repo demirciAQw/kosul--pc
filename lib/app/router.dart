@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 
 import '../features/anlik/presentation/anlik_screens.dart';
 import '../features/dashboard/presentation/dashboard_screen.dart';
+import '../features/ledger/presentation/ledger_screens.dart';
 import '../features/home/home_screen.dart';
 import '../features/library/presentation/book_detail_screen.dart';
 import '../features/library/presentation/books_screen.dart';
@@ -101,6 +102,8 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: AppRoutes.sessions, builder: (context, state) => const SessionHistoryScreen()),
       GoRoute(path: AppRoutes.settings, builder: (context, state) => const SettingsScreen()),
       GoRoute(path: AppRoutes.practiceTest, builder: (context, state) => const PracticeTestScreen()),
+      GoRoute(path: AppRoutes.claudeChanges, builder: (context, state) => const ClaudeChangesScreen()),
+      GoRoute(path: AppRoutes.conflicts, builder: (context, state) => const ConflictsScreen()),
       GoRoute(path: AppRoutes.sendToComputer, builder: (context, state) => const SendToComputerScreen()),
       GoRoute(
         path: AppRoutes.newNote,

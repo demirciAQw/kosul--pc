@@ -25,7 +25,7 @@ Future<void> runDesktop() async {
   final database = AppDatabase(driftDatabase(
     name: 'kocum',
     native: DriftNativeOptions(databasePath: () async => p.join(root.path, 'kocum.sqlite')),
-  ));
+  ), 'pc');
   final media = await LocalMediaStorage.openAt(Directory(p.join(root.path, desktopMediaFolder)));
   await CurriculumSeeder(database).run();
 

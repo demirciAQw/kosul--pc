@@ -5,6 +5,7 @@ import '../../core/utils/formatters.dart';
 import '../desktop_providers.dart';
 import '../anlik/notes_page.dart';
 import '../anlik/people_page.dart';
+import '../../features/ledger/presentation/ledger_views.dart';
 import '../import/import_providers.dart';
 import '../import/presentation/auto_import.dart';
 import '../import/presentation/import_flow.dart';
@@ -79,6 +80,8 @@ Widget _page(DesktopSection section) => switch (section) {
       DesktopSection.notes => const DesktopNotesPage(),
       DesktopSection.people => const DesktopPeoplePage(),
       DesktopSection.tags => const DesktopTagsPage(),
+      DesktopSection.changes => const DesktopPage(title: 'Claude\'un değişiklikleri', subtitle: 'Oturum oturum; geri alınabilir', child: ClaudeChangesView()),
+      DesktopSection.conflicts => const DesktopPage(title: 'Çakışmalar', subtitle: 'Telefonla bilgisayarın ikisinde de değişen satırlar', child: ConflictsView()),
       DesktopSection.settings => const DesktopSettingsPage(),
     };
 

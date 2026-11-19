@@ -467,3 +467,89 @@ class AnlikLinks extends Table {
   @override
   Set<Column> get primaryKey => {id};
 }
+
+// ───────────── Değişiklik defteri ve senkron (v13) ─────────────
+
+/// Her kullanıcı verisi değişikliği, SQLite tetikleyicileriyle buraya yazılır.
+/// Telefon ve bilgisayar birbirinin satırlarını alır; Claude'un değişiklikleri
+/// geri alınabilir. `eski` ve `yeni`: satırın tamamı (JSON); biri boş olabilir.
+@DataClassName('DegisiklikRow')
+class Degisiklikler extends Table {
+  /// Yerel sıra: bu cihazdaki ekleniş sırası (karşıya "gördüğüm son sıra" için).
+  IntColumn get yerelSira => integer().autoIncrement()();
+  TextColumn get id => text().unique()(); // uuid benzeri; iki cihazda aynıdır
+  TextColumn get cihazId => text()(); // değişikliği yapan cihaz
+  /// telefon | pc | claude | senkron | geri_al
+  TextColumn get kaynak => text()();
+  TextColumn get oturumId => text().nullable()();
+  TextColumn get tablo => text()();
+  TextColumn get satirId => text()();
+  TextColumn get islem => text()(); // ekle | degistir | sil
+  TextColumn get eski => text().nullable()();
+  TextColumn get yeni => text().nullable()();
+  /// Hibrit mantıksal saat (bkz. core/ledger/hlc.dart).
+  TextColumn get saat => text()();
+
+  /// Karşı cihazdan geldi: geri gönderilmez.
+  BoolColumn get uzak => boolean().withDefault(const Constant(false))();
+
+  /// Bu değişikliği geri alan değişikliğin kimliği (geri alma kaydında dolu:
+  /// "şu değişiklik geri alındı" bilgisi).
+  TextColumn get geriAlinan => text().nullable()();
+
+}
+
+/// Tek satırlık bağlam: tetikleyiciler yazanın kim olduğunu ve saati buradan
+/// alır. Dışarıdan yazan araçlar (kocum aracı) işlemden önce burayı doldurur.
+@DataClassName('BaglamRow')
+class Baglam extends Table {
+  @override
+  String get tableName => '_baglam';
+
+  IntColumn get id => integer().withDefault(const Constant(1))();
+  TextColumn get cihazId => text()();
+  TextColumn get kaynak => text().withDefault(const Constant('telefon'))();
+  TextColumn get varsayilan => text().withDefault(const Constant('telefon'))();
+  TextColumn get oturumId => text().nullable()();
+
+  /// 1: tetikleyiciler yazmaz (senkron uygulaması, yedek birleştirme).
+  IntColumn get bastir => integer().withDefault(const Constant(0))();
+  IntColumn get hlcMs => integer().withDefault(const Constant(0))();
+  IntColumn get hlcN => integer().withDefault(const Constant(0))();
+
+  /// Yalnızca testler: gerçek saat yerine bu değer (ms) kullanılır.
+  IntColumn get saatMs => integer().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// İki tarafta da değişen satırın kaybeden sürümü. Silinmez; iki uygulamada
+/// da görünür ve istenirse geri alınır.
+@DataClassName('CakismaRow')
+class Cakismalar extends Table {
+  TextColumn get id => text()();
+  TextColumn get tablo => text()();
+  TextColumn get satirId => text()();
+  TextColumn get kazanan => text().nullable()(); // JSON (null: satır silinmişti)
+  TextColumn get kaybeden => text().nullable()();
+
+  /// yerel | uzak: kazanan taraf. geri_al: geri alma satırın değişmiş olması yüzünden yapılamadı.
+  TextColumn get taraf => text()();
+  TextColumn get saat => text()();
+  DateTimeColumn get createdAt => dateTime()();
+  BoolColumn get cozuldu => boolean().withDefault(const Constant(false))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// Senkron imleçleri (anahtar → değer). Bilgisayara ve yedeğe gitmez.
+@DataClassName('EsitlemeDurumRow')
+class EsitlemeDurum extends Table {
+  TextColumn get key => text()();
+  TextColumn get value => text()();
+
+  @override
+  Set<Column> get primaryKey => {key};
+}

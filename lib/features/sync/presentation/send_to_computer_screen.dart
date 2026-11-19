@@ -23,7 +23,7 @@ class SendToComputerScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final computer = ref.watch(pairedComputerProvider);
     return Scaffold(
-      appBar: AppBar(title: const Text('Bilgisayara gönder')),
+      appBar: AppBar(title: const Text('Bilgisayarla eşitle')),
       body: computer.when(
         data: (c) => c == null ? const _PairView() : _SendView(computer: c),
         loading: () => const Center(child: CircularProgressIndicator()),
@@ -264,7 +264,7 @@ class _SendView extends ConsumerWidget {
         FilledButton.icon(
           onPressed: send.busy ? null : () => unawaited(controller.send()),
           icon: const Icon(Icons.send),
-          label: const Text('Gönder'),
+          label: const Text('Eşitle'),
         ),
         const SizedBox(height: 12),
         if (send.busy) ...[
@@ -283,8 +283,9 @@ class _SendView extends ConsumerWidget {
           ),
         const SizedBox(height: 16),
         Text(
-          'Giden: bilgisayarda olmayan fotoğraflar ve verilerin kopyası. Telefondaki kayıtlar bilgisayardakinin '
-          'yerine geçer; hiçbir şey sessizce silinmez. Bağlantı koparsa yeniden gönder: kaldığı yerden devam eder.',
+          'İlk eşitlemede tam yedek bilgisayarla birleşir (telefondaki kayıtlar kazanır). Sonrasında yalnızca '
+          'değişiklikler iki yöne gider; fotoğraflar da. Aynı satır iki yerde değişirse yeni olan kazanır, '
+          'kaybeden sürüm Çakışmalar\'da kalır. Hiçbir şey sessizce silinmez. Bağlantı koparsa yeniden eşitle.',
           style: theme.textTheme.bodySmall,
         ),
         const SizedBox(height: 8),

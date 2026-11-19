@@ -26,6 +26,8 @@ enum DesktopSection {
   notes('Notlar', Icons.sticky_note_2_outlined, Icons.sticky_note_2),
   people('Kişiler', Icons.people_outline, Icons.people),
   tags('Etiketler', Icons.sell_outlined, Icons.sell),
+  changes('Claude\'un değişiklikleri', Icons.auto_fix_high_outlined, Icons.auto_fix_high),
+  conflicts('Çakışmalar', Icons.merge_type_outlined, Icons.merge_type),
   settings('Ayarlar', Icons.settings_outlined, Icons.settings);
 
   const DesktopSection(this.label, this.icon, this.selectedIcon);

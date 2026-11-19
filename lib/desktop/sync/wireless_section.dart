@@ -46,7 +46,7 @@ class _WirelessSectionState extends ConsumerState<WirelessSection> {
       title: 'Kablosuz alma (yerel ağ)',
       children: [
         Text(
-          'Telefon aynı Wi-Fi\'dayken Koçum\'da Araçlar → Bilgisayara gönder. İnternet ya da bulut kullanılmaz; '
+          'Telefon aynı Wi-Fi\'dayken Koçum\'da Araçlar → Bilgisayarla eşitle. İnternet ya da bulut kullanılmaz; '
           'yalnızca eşleşmiş tek telefon kabul edilir ve yalnızca bilgisayarda olmayan fotoğraflar gelir.',
           style: mutedStyle(context),
         ),
@@ -113,7 +113,7 @@ class _WirelessSectionState extends ConsumerState<WirelessSection> {
         title: const Text('Eşleşme kaldırılsın mı?'),
         content: Text(
           '${phone.name} artık bu bilgisayara veri gönderemez. Bilgisayardaki veriler silinmez. '
-          'Telefonda da Bilgisayara gönder → Eşleşmeyi kaldır yap.',
+          'Telefonda da Bilgisayarla eşitle → Eşleşmeyi kaldır yap.',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Vazgeç')),

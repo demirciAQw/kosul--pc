@@ -6,6 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 
 import '../../app/platform.dart';
+import '../../core/di/core_providers.dart';
+import '../../features/sync/data/ledger_exchange.dart';
 import '../../features/sync/domain/network_rules.dart';
 import '../../features/sync/domain/pairing_window.dart';
 import '../../features/sync/domain/sync_protocol.dart';
@@ -95,7 +97,7 @@ class WirelessController extends Notifier<WirelessState> {
     try {
       await server.openPairing();
       _error = null;
-      _message = 'Telefonda Araçlar → Bilgisayara gönder → kodu yaz.';
+      _message = 'Telefonda Araçlar → Bilgisayarla eşitle → kodu yaz.';
     } on SyncException catch (e) {
       _error = e.message;
     }
@@ -128,6 +130,11 @@ class WirelessController extends Notifier<WirelessState> {
       workDir: dir,
       importBackup: _import,
       platform: platformName,
+      ledger: LedgerExchange(
+        ledger: ref.read(ledgerServiceProvider),
+        schemaVersion: ref.read(appDatabaseProvider).schemaVersion,
+        mediaFile: (path) => File(p.joinAll([dir.path, desktopMediaFolder, ...p.posix.split(path)])),
+      ),
     );
     try {
       await server.start();

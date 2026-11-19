@@ -1,11 +1,11 @@
 import 'import_models.dart';
 
 /// İçe aktarılmayan tablo: uygulama ayarları ve bilgisayarın kendi durumu.
-const skippedTables = {'app_meta'};
+const skippedTables = {'app_meta', 'degisiklikler', '_baglam', 'cakismalar', 'esitleme_durum'};
 
 /// "Telefonda silindi" sayılmayan tablolar: MEB konuları her iki tarafta da
 /// uygulamanın kendi listesinden kurulur; sürüm farkı silinme demek değildir.
-const tombstoneExempt = {'curriculum_nodes', 'app_meta'};
+const tombstoneExempt = {'curriculum_nodes', 'app_meta', 'degisiklikler', '_baglam', 'cakismalar', 'esitleme_durum'};
 
 /// Telefonda silinmiş kayıtların güncel listesi: şu an eksik olanlar.
 /// Daha önce de eksik olanlar ilk görülme tarihini korur; geri gelenler ve
