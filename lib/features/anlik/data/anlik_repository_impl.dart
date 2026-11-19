@@ -121,6 +121,7 @@ class DriftAnlikRepository implements AnlikRepository {
         await (_db.delete(_db.anlikNoteTags)..where((r) => r.noteId.equals(note.id))).go();
         for (final id in note.tagIds) {
           await _db.into(_db.anlikNoteTags).insert(AnlikNoteTagsCompanion.insert(
+                id: '${note.id}:$id',
                 noteId: note.id,
                 tagId: id,
                 source: Value(note.autoTagIds.contains(id) ? Source.otomatik : source),
@@ -129,7 +130,7 @@ class DriftAnlikRepository implements AnlikRepository {
         await (_db.delete(_db.anlikNotePeople)..where((r) => r.noteId.equals(note.id))).go();
         for (final id in note.personIds) {
           await _db.into(_db.anlikNotePeople).insert(
-                AnlikNotePeopleCompanion.insert(noteId: note.id, personId: id, source: Value(source)),
+                AnlikNotePeopleCompanion.insert(id: '${note.id}:$id', noteId: note.id, personId: id, source: Value(source)),
               );
         }
         await (_db.delete(_db.anlikLinks)..where((r) => r.fromNoteId.equals(note.id))).go();
@@ -173,13 +174,13 @@ class DriftAnlikRepository implements AnlikRepository {
     return _db.transaction(() async {
       // Aynı nota iki etiket de bağlıysa çift kayıt olmasın (INSERT OR IGNORE).
       await _db.customStatement(
-        'INSERT OR IGNORE INTO anlik_note_tags (note_id, tag_id, source) '
-        'SELECT note_id, ?, source FROM anlik_note_tags WHERE tag_id = ?',
+        'INSERT OR IGNORE INTO anlik_note_tags (id, note_id, tag_id, source) '
+        "SELECT note_id || ':' || ?1, note_id, ?1, source FROM anlik_note_tags WHERE tag_id = ?2",
         [into, from],
       );
       await _db.customStatement(
-        'INSERT OR IGNORE INTO question_card_tags (card_id, tag_id, source) '
-        'SELECT card_id, ?, source FROM question_card_tags WHERE tag_id = ?',
+        'INSERT OR IGNORE INTO question_card_tags (id, card_id, tag_id, source) '
+        "SELECT card_id || ':' || ?1, card_id, ?1, source FROM question_card_tags WHERE tag_id = ?2",
         [into, from],
       );
       final fromParent = await (_db.select(_db.tags)..where((t) => t.id.equals(from))).getSingleOrNull();
@@ -217,7 +218,7 @@ class DriftAnlikRepository implements AnlikRepository {
         await (_db.delete(_db.questionCardTags)..where((r) => r.cardId.equals(cardId))).go();
         for (final id in tagIds) {
           await _db.into(_db.questionCardTags).insert(
-                QuestionCardTagsCompanion.insert(cardId: cardId, tagId: id, source: Value(source)),
+                QuestionCardTagsCompanion.insert(id: '$cardId:$id', cardId: cardId, tagId: id, source: Value(source)),
               );
         }
       });

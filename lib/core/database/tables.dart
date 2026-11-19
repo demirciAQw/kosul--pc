@@ -391,22 +391,36 @@ class Tags extends Table {
 
 @DataClassName('AnlikNoteTagRow')
 class AnlikNoteTags extends Table {
+  /// "<noteId>:<tagId>": tek sütunlu anahtar (birleştirme ve defter için).
+  TextColumn get id => text()();
   TextColumn get noteId => text().customConstraint('NOT NULL REFERENCES anlik_notes(id) ON DELETE CASCADE')();
   TextColumn get tagId => text().customConstraint('NOT NULL REFERENCES tags(id) ON DELETE CASCADE')();
   TextColumn get source => text().withDefault(const Constant('ben'))();
 
   @override
-  Set<Column> get primaryKey => {noteId, tagId};
+  Set<Column> get primaryKey => {id};
+
+  @override
+  List<Set<Column>> get uniqueKeys => [
+        {noteId, tagId},
+      ];
 }
 
 @DataClassName('QuestionCardTagRow')
 class QuestionCardTags extends Table {
+  /// "<cardId>:<tagId>": tek sütunlu anahtar (birleştirme ve defter için).
+  TextColumn get id => text()();
   TextColumn get cardId => text().customConstraint('NOT NULL REFERENCES question_cards(id) ON DELETE CASCADE')();
   TextColumn get tagId => text().customConstraint('NOT NULL REFERENCES tags(id) ON DELETE CASCADE')();
   TextColumn get source => text().withDefault(const Constant('ben'))();
 
   @override
-  Set<Column> get primaryKey => {cardId, tagId};
+  Set<Column> get primaryKey => {id};
+
+  @override
+  List<Set<Column>> get uniqueKeys => [
+        {cardId, tagId},
+      ];
 }
 
 /// Kişiler (v12). `aliases`: aynı kişinin diğer adları (JSON listesi).
@@ -425,12 +439,19 @@ class People extends Table {
 
 @DataClassName('AnlikNotePersonRow')
 class AnlikNotePeople extends Table {
+  /// "<noteId>:<personId>": tek sütunlu anahtar (birleştirme ve defter için).
+  TextColumn get id => text()();
   TextColumn get noteId => text().customConstraint('NOT NULL REFERENCES anlik_notes(id) ON DELETE CASCADE')();
   TextColumn get personId => text().customConstraint('NOT NULL REFERENCES people(id) ON DELETE CASCADE')();
   TextColumn get source => text().withDefault(const Constant('ben'))();
 
   @override
-  Set<Column> get primaryKey => {noteId, personId};
+  Set<Column> get primaryKey => {id};
+
+  @override
+  List<Set<Column>> get uniqueKeys => [
+        {noteId, personId},
+      ];
 }
 
 /// Nottan nota ya da soru kartına bağ (v12). Biri dolu, öbürü boş.
