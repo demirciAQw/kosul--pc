@@ -515,6 +515,29 @@ class LedgerService {
     return out;
   }
 
+  // ───────────── Silme önerileri ─────────────
+
+  Stream<List<SilmeOnerisiRow>> watchDeleteSuggestions() => (_db.select(_db.silmeOnerileri)
+        ..where((s) => s.durum.equals('bekliyor'))
+        ..orderBy([(s) => OrderingTerm.desc(s.createdAt)]))
+      .watch();
+
+  /// Kullanıcı onayladı: satır silinir (normal bir silme olarak deftere ve
+  /// karşıya geçer; kaynak Claude değil kullanıcıdır).
+  Future<void> approveDeletion(String id) async {
+    final s = await (_db.select(_db.silmeOnerileri)..where((x) => x.id.equals(id))).getSingleOrNull();
+    if (s == null || s.durum != 'bekliyor') return;
+    await _db.transaction(() async {
+      if (_table(s.tablo) != null) await _writeRow(s.tablo, s.satirId, null);
+      await (_db.update(_db.silmeOnerileri)..where((x) => x.id.equals(id)))
+          .write(const SilmeOnerileriCompanion(durum: Value('onaylandi')));
+    });
+    _flushTouched();
+  }
+
+  Future<void> rejectDeletion(String id) => (_db.update(_db.silmeOnerileri)..where((x) => x.id.equals(id)))
+      .write(const SilmeOnerileriCompanion(durum: Value('reddedildi')));
+
   // ───────────── Çakışmalar ─────────────
 
   Future<void> resolveConflict(String id) =>

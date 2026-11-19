@@ -7,3 +7,4 @@
 - 02:24 Adım 1 bitti (v8.7): telefon arayüzü (Anlık sekmesi, editör, Kişiler, Etiketler, süzgeç, uyku kartı), 28 test (alan+widget). Sıra: 1b bilgisayar
 - 02:28 Adım 1b bitti: bilgisayarda Notlar (Ctrl+N/S/F, Esc, dar pencere), Kişiler, Etiketler, Defter'de soru etiketi ve bağlı not; telefonda soru ayrıntısında etiket. 252 test geçiyor.
 - 02:39 Adım 2 bitti (v8.8): defter+tetikleyiciler+HLC, iki yönlü senkron (imzalı yanıt, fotoğraf iki yön), çakışma, geri alma, ekranlar. 286 test. NOT: fotograf-al ucu 'okuma ucu yok' kuralına dar bir istisna (yalnızca bilgisayarın kendi değişikliğinde geçen yollar); ayrıntı KABLOSUZ_AKTARIM.md. Sıra: Adım 3 kocum aracı
+- 02:45 Adım 3 bitti (v8.9): bin/kocum.dart + lib/cli, 12 komut, Markdown dışa aktarma, silme önerileri (şema 14), WAL+busy_timeout, data_version izleyici. Gerçek ikili geçici veritabanında denendi. 301 test. Sıra: Adım 4 (bilgisayarda veri girişi)

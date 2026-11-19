@@ -553,3 +553,22 @@ class EsitlemeDurum extends Table {
   @override
   Set<Column> get primaryKey => {key};
 }
+
+/// Silme önerisi (v14): Claude bir satırı silmez, yalnızca işaretler; kullanıcı
+/// iki uygulamadan birinde onaylar ya da reddeder. Senkronlanır.
+@DataClassName('SilmeOnerisiRow')
+class SilmeOnerileri extends Table {
+  TextColumn get id => text()();
+  TextColumn get tablo => text()();
+  TextColumn get satirId => text()();
+  TextColumn get neden => text().withDefault(const Constant(''))();
+  TextColumn get oneren => text().withDefault(const Constant('claude'))();
+  TextColumn get oturumId => text().nullable()();
+
+  /// bekliyor | onaylandi | reddedildi
+  TextColumn get durum => text().withDefault(const Constant('bekliyor'))();
+  DateTimeColumn get createdAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}

@@ -3,6 +3,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/di/core_providers.dart';
+import 'data/external_change_watcher.dart';
+
 /// Bilgisayar uygulamasının veri klasörü (~/.local/share/…): veritabanı,
 /// fotoğraflar ve içe aktarma sırasındaki geçici dosyalar.
 final desktopDataDirProvider = Provider<Directory>(
@@ -45,3 +48,10 @@ class DesktopSectionNotifier extends Notifier<DesktopSection> {
 
 final desktopSectionProvider =
     NotifierProvider<DesktopSectionNotifier, DesktopSection>(DesktopSectionNotifier.new);
+
+/// Dış değişiklik izleyici (kocum aracı vb.): kabuk açıkken çalışır.
+final externalChangeWatcherProvider = Provider<ExternalChangeWatcher>((ref) {
+  final watcher = ExternalChangeWatcher(ref.watch(appDatabaseProvider))..start();
+  ref.onDispose(watcher.stop);
+  return watcher;
+});

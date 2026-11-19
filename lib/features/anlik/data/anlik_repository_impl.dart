@@ -172,6 +172,48 @@ class DriftAnlikRepository implements AnlikRepository {
       (_db.delete(_db.anlikLinks)..where((l) => l.id.equals('$noteId>c:$cardId'))).go();
 
   @override
+  Future<void> addNoteTag(String noteId, String tagId, {String source = Source.ben}) =>
+      _db.into(_db.anlikNoteTags).insert(
+            AnlikNoteTagsCompanion.insert(id: '$noteId:$tagId', noteId: noteId, tagId: tagId, source: Value(source)),
+            mode: InsertMode.insertOrIgnore,
+          );
+
+  @override
+  Future<void> removeNoteTag(String noteId, String tagId) =>
+      (_db.delete(_db.anlikNoteTags)..where((r) => r.noteId.equals(noteId) & r.tagId.equals(tagId))).go();
+
+  @override
+  Future<void> addCardTag(String cardId, String tagId, {String source = Source.ben}) =>
+      _db.into(_db.questionCardTags).insert(
+            QuestionCardTagsCompanion.insert(id: '$cardId:$tagId', cardId: cardId, tagId: tagId, source: Value(source)),
+            mode: InsertMode.insertOrIgnore,
+          );
+
+  @override
+  Future<void> removeCardTag(String cardId, String tagId) =>
+      (_db.delete(_db.questionCardTags)..where((r) => r.cardId.equals(cardId) & r.tagId.equals(tagId))).go();
+
+  @override
+  Future<void> addNotePerson(String noteId, String personId, {String source = Source.ben}) =>
+      _db.into(_db.anlikNotePeople).insert(
+            AnlikNotePeopleCompanion.insert(id: '$noteId:$personId', noteId: noteId, personId: personId, source: Value(source)),
+            mode: InsertMode.insertOrIgnore,
+          );
+
+  @override
+  Future<void> linkNoteToNote(String fromId, String toId, {String source = Source.ben}) =>
+      _db.into(_db.anlikLinks).insert(
+            AnlikLinksCompanion.insert(
+              id: '$fromId>n:$toId',
+              fromNoteId: fromId,
+              toNoteId: Value(toId),
+              source: Value(source),
+              createdAt: DateTime.now(),
+            ),
+            mode: InsertMode.insertOrIgnore,
+          );
+
+  @override
   Stream<List<Tag>> watchTags() => (_db.select(_db.tags)..orderBy([(t) => OrderingTerm.asc(t.name)])).watch().map(
         (rows) => [for (final r in rows) _tag(r)],
       );

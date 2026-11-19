@@ -1,5 +1,4 @@
 import 'package:drift/drift.dart';
-import 'package:drift_flutter/drift_flutter.dart';
 
 import '../ledger/ledger_service.dart';
 import 'converters.dart';
@@ -35,10 +34,11 @@ part 'app_database.g.dart';
   Baglam,
   Cakismalar,
   EsitlemeDurum,
+  SilmeOnerileri,
 ])
 class AppDatabase extends _$AppDatabase {
   /// Testlerde: `AppDatabase(NativeDatabase.memory())`
-  AppDatabase([QueryExecutor? executor, this.ledgerSource = 'telefon']) : super(executor ?? driftDatabase(name: 'kocum'));
+  AppDatabase(QueryExecutor executor, [this.ledgerSource = 'telefon']) : super(executor);
 
   /// Bu cihazın değişiklik defterindeki varsayılan kaynağı: `telefon` ya da `pc`.
   final String ledgerSource;
@@ -51,8 +51,9 @@ class AppDatabase extends _$AppDatabase {
   /// v7: ders notları (study_notes).
   /// v12: anlık notlar, ortak etiketler, kişiler ve bağlar.
   /// v13: değişiklik defteri, bağlam, çakışmalar, senkron imleçleri; tetikleyiciler.
+  /// v14: silme önerileri (Claude silmez, işaretler).
   @override
-  int get schemaVersion => 13;
+  int get schemaVersion => 14;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -144,6 +145,7 @@ class AppDatabase extends _$AppDatabase {
             await m.createTable(anlikLinks);
           }
           if (from < 13) await _createLedgerTables(m);
+          if (from < 14) await m.createTable(silmeOnerileri);
           // Tablolar yeniden kurulmuş ya da sütun eklenmiş olabilir: tetikleyiciler baştan.
           await LedgerService(this).installTriggers(rebuild: true);
         },

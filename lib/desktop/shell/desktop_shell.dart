@@ -24,6 +24,8 @@ class DesktopShell extends ConsumerWidget {
     // İzlenen klasör ve (açıksa) kablosuz alma uygulama açıldığı andan
     // itibaren dinlenir.
     ref.watch(autoImportProvider);
+    // Başka bir süreç (kocum aracı) veriyi değiştirirse ekranlar yenilenir.
+    ref.watch(externalChangeWatcherProvider);
     // Kablosuz almanın her olayında (ör. her fotoğraf) kabuk yeniden
     // çizilmesin: yalnızca canlı tutulur.
     ref.listen(wirelessProvider, (previous, next) {});

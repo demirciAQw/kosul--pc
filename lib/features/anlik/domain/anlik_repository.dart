@@ -21,6 +21,14 @@ abstract interface class AnlikRepository {
   Future<void> linkNoteToCard(String noteId, String cardId, {String source = Source.ben});
   Future<void> unlinkNoteFromCard(String noteId, String cardId);
 
+  /// Tek ilişki işlemleri (notun kalanındaki etiket ve kişi kaynakları bozulmaz).
+  Future<void> addNoteTag(String noteId, String tagId, {String source = Source.ben});
+  Future<void> removeNoteTag(String noteId, String tagId);
+  Future<void> addCardTag(String cardId, String tagId, {String source = Source.ben});
+  Future<void> removeCardTag(String cardId, String tagId);
+  Future<void> addNotePerson(String noteId, String personId, {String source = Source.ben});
+  Future<void> linkNoteToNote(String fromId, String toId, {String source = Source.ben});
+
   Stream<List<Tag>> watchTags();
   Future<List<Tag>> allTags();
   Future<void> saveTag(Tag tag);

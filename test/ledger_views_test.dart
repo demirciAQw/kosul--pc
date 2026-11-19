@@ -94,6 +94,28 @@ void main() {
       expect(await db.select(db.anlikNotes).get(), isEmpty);
     });
 
+    testWidgets('Silme önerileri: Kalsın ve Sil; silme normal değişiklik olarak yazılır', (tester) async {
+      await pump(tester, const ClaudeChangesView());
+      await note('a', 'silinecek');
+      await note('b', 'kalacak');
+      for (final (id, row) in [('s1', 'a'), ('s2', 'b')]) {
+        await db.into(db.silmeOnerileri).insert(SilmeOnerileriCompanion.insert(
+            id: id, tablo: 'anlik_notes', satirId: row, neden: const Value('tekrar'), createdAt: DateTime(2026)));
+      }
+      await settle(tester);
+      expect(find.text('Silme önerileri (2)'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('silme-onayla:s1')));
+      await settle(tester);
+      await settle(tester);
+      await tester.tap(find.byKey(const ValueKey('silme-reddet:s2')));
+      await settle(tester);
+      await settle(tester);
+      expect((await db.select(db.anlikNotes).get()).map((n) => n.id), ['b']);
+      expect((await db.select(db.silmeOnerileri).get()).map((s) => s.durum).toSet(), {'onaylandi', 'reddedildi'});
+      final del = (await ledger.history()).firstWhere((c) => c.op == 'sil');
+      expect(del.source, 'pc'); // kullanıcı onayladı: Claude'a yazılmaz
+    });
+
     testWidgets('Çakışmalar: kaybeden sürüm geri getirilir ve çakışma kapanır', (tester) async {
       await pump(tester, const ConflictsView());
       expect(find.textContaining('Çakışma yok'), findsOneWidget);

@@ -10,6 +10,8 @@ import '../domain/change_view.dart';
 final claudeChangesProvider =
     StreamProvider<List<LedgerChange>>((ref) => ref.watch(ledgerServiceProvider).watchHistory(source: 'claude'));
 final undoneChangesProvider = StreamProvider<Set<String>>((ref) => ref.watch(ledgerServiceProvider).watchUndone());
+final deleteSuggestionsProvider =
+    StreamProvider<List<SilmeOnerisiRow>>((ref) => ref.watch(ledgerServiceProvider).watchDeleteSuggestions());
 final conflictsProvider = StreamProvider<List<CakismaRow>>((ref) => ref.watch(ledgerServiceProvider).watchConflicts());
 
 void _say(BuildContext context, String text) =>
@@ -33,13 +35,14 @@ class ClaudeChangesView extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(claudeChangesProvider);
     final undone = ref.watch(undoneChangesProvider).value ?? const <String>{};
+    final suggestions = ref.watch(deleteSuggestionsProvider).value ?? const <SilmeOnerisiRow>[];
     final theme = Theme.of(context);
     return async.when(
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => Center(child: Text('Değişiklikler okunamadı: $e')),
       data: (all) {
         final groups = groupBySession(all);
-        if (groups.isEmpty) {
+        if (groups.isEmpty && suggestions.isEmpty) {
           return const Center(
             child: Padding(
               padding: EdgeInsets.all(24),
@@ -50,6 +53,7 @@ class ClaudeChangesView extends ConsumerWidget {
         }
         return ListView(
           children: [
+            if (suggestions.isNotEmpty) _DeleteSuggestions(suggestions),
             for (final g in groups)
               ExpansionTile(
                 key: ValueKey('oturum:${g.session}'),
@@ -186,5 +190,52 @@ class ConflictsView extends ConsumerWidget {
       neu: json,
     ));
     return t.detail.isEmpty ? json : t.detail;
+  }
+}
+
+
+/// Claude'un silmeyi önerdiği satırlar: yalnızca kullanıcı onaylayınca silinir.
+class _DeleteSuggestions extends ConsumerWidget {
+  const _DeleteSuggestions(this.list);
+  final List<SilmeOnerisiRow> list;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ledger = ref.read(ledgerServiceProvider);
+    return Card(
+      key: const ValueKey('silme-onerileri'),
+      margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+            child: Text('Silme önerileri (${list.length})', style: Theme.of(context).textTheme.titleSmall),
+          ),
+          for (final s in list)
+            ListTile(
+              key: ValueKey('silme:${s.id}'),
+              dense: true,
+              title: Text('${tableTitle(s.tablo)} silinsin mi?'),
+              subtitle: Text(s.neden.isEmpty ? s.satirId : s.neden),
+              trailing: Wrap(
+                spacing: 4,
+                children: [
+                  TextButton(
+                    key: ValueKey('silme-reddet:${s.id}'),
+                    onPressed: () => ledger.rejectDeletion(s.id),
+                    child: const Text('Kalsın'),
+                  ),
+                  FilledButton.tonal(
+                    key: ValueKey('silme-onayla:${s.id}'),
+                    onPressed: () => ledger.approveDeletion(s.id),
+                    child: const Text('Sil'),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
   }
 }
