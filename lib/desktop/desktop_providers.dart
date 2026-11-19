@@ -22,6 +22,7 @@ final desktopMessengerKey = GlobalKey<ScaffoldMessengerState>();
 enum DesktopSection {
   notebook('Defter', Icons.menu_book_outlined, Icons.menu_book),
   books('Kitaplar', Icons.library_books_outlined, Icons.library_books),
+  optic('Optik', Icons.grid_on_outlined, Icons.grid_on),
   exams('Denemeler', Icons.assignment_outlined, Icons.assignment),
   sessions('Oturumlar', Icons.timer_outlined, Icons.timer),
   analysis('Analiz', Icons.insights_outlined, Icons.insights),

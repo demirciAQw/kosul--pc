@@ -167,6 +167,8 @@ class QuestionCard {
     QuestionStatus? status,
     String? Function()? topicText,
     String? Function()? mebNodeId,
+    String? Function()? correctAnswer,
+    String? Function()? givenAnswer,
   }) =>
       QuestionCard(
         id: id,
@@ -185,8 +187,8 @@ class QuestionCard {
         reason: reason,
         reasonNote: reasonNote,
         topicText: topicText != null ? topicText() : this.topicText,
-        correctAnswer: correctAnswer,
-        givenAnswer: givenAnswer,
+        correctAnswer: correctAnswer != null ? correctAnswer() : this.correctAnswer,
+        givenAnswer: givenAnswer != null ? givenAnswer() : this.givenAnswer,
         avgSecondsPerQuestion: avgSecondsPerQuestion,
         difficulty: difficulty,
         isStarred: isStarred ?? this.isStarred,

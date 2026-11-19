@@ -8,7 +8,9 @@ import '../../features/library/domain/progress.dart';
 import '../../features/library/library_providers.dart';
 import '../../features/library/presentation/library_sheet.dart';
 import '../widgets/desktop_page.dart';
+import '../desktop_providers.dart';
 import 'book_tree_edit.dart';
+import 'optic_page.dart';
 
 class DesktopBookSelection extends Notifier<String?> {
   @override
@@ -470,6 +472,7 @@ class _NodeRow extends ConsumerWidget {
                 itemBuilder: (_) => [
                   const PopupMenuItem(value: 'duzenle', child: Text('Düzenle')),
                   if (isLeaf) ...[
+                    if (node.questionCount != null) const PopupMenuItem(value: 'optik', child: Text('Optik gir')),
                     const PopupMenuItem(value: 'cozuldu', child: Text('Çözüldü işaretle')),
                     const PopupMenuItem(value: 'sonuc', child: Text('Sonuç gir (D/Y/B)')),
                     if (result != null) const PopupMenuItem(value: 'temizle', child: Text('Çözülmedi yap')),
@@ -518,6 +521,9 @@ class _NodeRow extends ConsumerWidget {
             clearPages: r.pageStart == null,
           ),
         ));
+      case 'optik':
+        ref.read(opticTargetProvider.notifier).set(node.id);
+        ref.read(desktopSectionProvider.notifier).select(DesktopSection.optic);
       case 'cozuldu':
         await progress.save(TestResult(nodeId: node.id, bookId: book.id, solvedAt: now, total: node.questionCount));
       case 'sonuc':
