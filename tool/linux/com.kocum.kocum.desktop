@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Koçum
+GenericName=YKS çalışma takibi
+Comment=Telefondaki Koçum verisini bilgisayarda gör ve yönet
+Exec=@EXEC@
+Icon=com.kocum.kocum
+Terminal=false
+Categories=Education;Office;
+Keywords=YKS;ders;soru;defter;deneme;
+StartupWMClass=kocum

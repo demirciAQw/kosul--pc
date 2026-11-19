@@ -18,3 +18,7 @@ imza_bilgileri.txt
 .idea/
 .vscode/
 *.iml
+
+# Linux iskeleti de üretilir (tool/setup_linux.sh, CI)
+/linux/
+/dist/

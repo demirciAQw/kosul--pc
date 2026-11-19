@@ -36,10 +36,11 @@ flutter test
 
 **Bilgisayar (Linux):**
 ```bash
+tool/setup_linux.sh        # linux/ iskeleti + paketler + kod üretimi
 flutter run -d linux
-flutter build linux --release      # build/linux/x64/release/bundle/kocum
+tool/install_linux.sh      # isteğe bağlı: uygulama menüsüne kur
 ```
-Masaüstü verisi `~/.local/share/<uygulama kimliği>/` altında durur.
+Ya da GitHub Actions → **Linux derle** ile hazır paket (`kocum-linux-x64.tar.gz`). Masaüstü verisi `~/.local/share/com.kocum.kocum/` altında durur. Ayrıntı: [docs/MASAUSTU.md](docs/MASAUSTU.md).
 
 ## Telefon ile bilgisayar nasıl konuşur?
 
@@ -70,6 +71,7 @@ Kurallar: domain saf Dart; bağımlılık yönü içe doğrudur; masaüstüne ö
 
 | Belge | İçerik |
 |---|---|
+| [docs/MASAUSTU.md](docs/MASAUSTU.md) | Bilgisayar sürümü: ne yapar, birleştirme, dosya haritası, kurulum |
 | [docs/MIMARI.md](docs/MIMARI.md) | Katmanlar, ortak ve masaüstüne özel kod, veri akışı, kararlar |
 | [docs/KABLOSUZ_AKTARIM.md](docs/KABLOSUZ_AKTARIM.md) | Eşleşme, imza, ağ ve dosya kuralları, tehdit modeli, sınırlar |
 | [docs/MOBIL_OZELLIKLER.md](docs/MOBIL_OZELLIKLER.md) | Telefon modülleri, önemli kararlar, kitap şablonu JSON sözleşmesi v1, bilinen sınırlar |

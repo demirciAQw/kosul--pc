@@ -53,6 +53,9 @@ CI (`.github/workflows`) aynı adımları izler; **testler geçmezse APK üretil
 Aynı depo, Flutter Linux hedefi. `lib/main.dart` tek dalla `lib/desktop/`
 köküne geçer; platform kontrolü YALNIZCA `lib/app/platform.dart`'ta.
 
+Kısa yol: `tool/setup_linux.sh` (iskelet + paketler + kod), `tool/install_linux.sh`
+(menüye kurar). CI: `.github/workflows/build-linux.yml`. Ayrıntı: `docs/MASAUSTU.md`.
+
 ```bash
 flutter config --no-enable-android --no-enable-web --enable-linux-desktop
 flutter create --org com.kocum --project-name kocum --platforms linux /tmp/iskelet  # linux/ yoksa
