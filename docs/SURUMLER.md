@@ -61,3 +61,4 @@ Sürüm numarası `pubspec.yaml` içindedir; her sürüm bir git etiketidir (`v8
 | eşitleme 2 | bilgisayarın yerel ağ sunucusu |
 | eşitleme 3 | telefon istemcisi ve uçtan uca testler |
 | eşitleme 4 | Android ağ izni ve belgeler |
+| v8.7 | 2026-11-20 | Anlık notlar, ortak etiketler, Kişiler, uyku kaydı (Yattım/Kalktım); şema 12 |

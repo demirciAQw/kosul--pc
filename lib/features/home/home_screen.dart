@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../app/routes.dart';
 import '../../core/utils/formatters.dart';
 import '../../core/di/core_providers.dart';
+import '../anlik/presentation/sleep_card.dart';
 import '../library/presentation/library_sheet.dart';
 import '../planning/domain/planning.dart';
 import '../planning/planning_providers.dart';
@@ -93,6 +94,8 @@ class HomeScreen extends ConsumerWidget {
               ),
             ),
           ],
+          const SizedBox(height: 8),
+          const SleepCard(),
           const SizedBox(height: 8),
           Card(
             child: ListTile(

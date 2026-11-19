@@ -5,6 +5,7 @@ abstract final class AppRoutes {
   static const notebook = '/notebook';
   static const mockExams = '/mock';
   static const insights = '/insights';
+  static const anlikTab = '/anlik';
   static const tools = '/tools';
   static const practiceTest = '/tools/test';
   static const sendToComputer = '/tools/computer';
@@ -21,6 +22,11 @@ abstract final class AppRoutes {
   static const newPlan = '/plan/new';
   static const sessions = '/sessions';
   static const newNote = '/notes/new';
+  static const newAnlik = '/anlik/yeni';
+  static String anlik(String id) => '/anlik/not/$id';
+  static const people = '/kisiler';
+  static String person(String id) => '/kisiler/$id';
+  static const tags = '/etiketler';
   static const settings = '/settings';
   static String note(String id) => '/notes/$id';
   static String book(String id) => '/books/$id';

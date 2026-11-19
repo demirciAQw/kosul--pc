@@ -187,7 +187,7 @@ void main() {
       await expectLater(
         save(body: 'Bugün ((his > tiksinti)) vardı, @Şule gördü'),
         throwsA(isA<UnknownMentionsException>()
-            .having((e) => e.tags, 'etiketler', ['his'])
+            .having((e) => e.tags, 'etiketler', ['his', 'tiksinti'])
             .having((e) => e.people, 'kişiler', ['Şule'])),
       );
       expect(await repo.allNotes(), isEmpty);

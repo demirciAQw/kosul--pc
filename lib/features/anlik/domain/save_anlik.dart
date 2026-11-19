@@ -65,8 +65,10 @@ class SaveAnlik {
         var t = byKey[key];
         if (t == null) {
           if (!approvedTags.map(tagKey).contains(key)) {
+            // Yoldaki bütün yeni adlar tek seferde sorulur.
             if (!unknownTags.contains(label)) unknownTags.add(label);
-            break; // altındakiler de onay bekler; üstü onaylanınca sorulur
+            parent = null;
+            continue;
           }
           t = Tag(id: _ids.next(), name: key, label: label, parentId: parent, source: source, createdAt: now);
           byKey[key] = t;
