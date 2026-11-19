@@ -196,7 +196,6 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final settings = ref.watch(settingsProvider).value;
     final log = ref.watch(claudeExportLogProvider).value ?? const <ClaudeBatch>[];
     final last = log.isEmpty ? null : log.last;

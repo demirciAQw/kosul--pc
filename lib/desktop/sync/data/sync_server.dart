@@ -232,7 +232,7 @@ class SyncServer {
       pairingOpen: open,
       paired: phone != null,
       challenge: _challenges.issue(),
-      dhPublic: open ? dh?.publicHex : null,
+      dhPublic: open ? dh.publicHex : null,
     ).toJson();
   }
 

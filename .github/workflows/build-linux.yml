@@ -40,7 +40,6 @@ jobs:
 
       - name: Testler
         run: flutter test
-        continue-on-error: true
 
       - name: Linux derle
         run: flutter build linux --release --build-number=${{ github.run_number }}
