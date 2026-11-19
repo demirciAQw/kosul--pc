@@ -349,3 +349,100 @@ class AppMeta extends Table {
   @override
   Set<Column> get primaryKey => {metaKey};
 }
+
+// ───────────── Anlık notlar, ortak etiketler, kişiler (v12) ─────────────
+
+/// Anlık not (v12): bir kelimeden bir sayfaya. Ders notundan (StudyNotes)
+/// ayrıdır. `kind`: anlik | uyku_yattim | uyku_kalktim.
+@DataClassName('AnlikNoteRow')
+class AnlikNotes extends Table {
+  TextColumn get id => text()();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+  TextColumn get body => text()();
+  TextColumn get kind => text().withDefault(const Constant('anlik'))();
+  IntColumn get mood => integer().nullable()(); // 1–5
+  TextColumn get searchText => text().withDefault(const Constant(''))(); // normalizeTr
+  TextColumn get subject => text().nullable()();
+  TextColumn get mebNodeId => text().nullable()();
+  TextColumn get topicText => text().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// Not: bu Drift sürümü `references(...)` kuralını SQL'e yazmıyor; v12 tablolarında
+/// yabancı anahtar `customConstraint` ile açıkça verilir (CASCADE çalışsın).
+/// Ortak etiket (v12): notlarda ve soru kartlarında. `name` normalizeTr ile
+/// benzersiz anahtardır, `label` görünen addır. `parentId`: üst etiket.
+/// `source`: ben | claude | otomatik.
+@DataClassName('TagRow')
+class Tags extends Table {
+  TextColumn get id => text()();
+  TextColumn get name => text().unique()();
+  TextColumn get label => text()();
+  TextColumn get parentId => text().nullable().customConstraint('REFERENCES tags(id) ON DELETE SET NULL')();
+  TextColumn get source => text().withDefault(const Constant('ben'))();
+  DateTimeColumn get createdAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+@DataClassName('AnlikNoteTagRow')
+class AnlikNoteTags extends Table {
+  TextColumn get noteId => text().customConstraint('NOT NULL REFERENCES anlik_notes(id) ON DELETE CASCADE')();
+  TextColumn get tagId => text().customConstraint('NOT NULL REFERENCES tags(id) ON DELETE CASCADE')();
+  TextColumn get source => text().withDefault(const Constant('ben'))();
+
+  @override
+  Set<Column> get primaryKey => {noteId, tagId};
+}
+
+@DataClassName('QuestionCardTagRow')
+class QuestionCardTags extends Table {
+  TextColumn get cardId => text().customConstraint('NOT NULL REFERENCES question_cards(id) ON DELETE CASCADE')();
+  TextColumn get tagId => text().customConstraint('NOT NULL REFERENCES tags(id) ON DELETE CASCADE')();
+  TextColumn get source => text().withDefault(const Constant('ben'))();
+
+  @override
+  Set<Column> get primaryKey => {cardId, tagId};
+}
+
+/// Kişiler (v12). `aliases`: aynı kişinin diğer adları (JSON listesi).
+@DataClassName('PersonRow')
+class People extends Table {
+  TextColumn get id => text()();
+  TextColumn get name => text()();
+  TextColumn get aliases => text().withDefault(const Constant('[]')).map(const StringListConverter())();
+  TextColumn get about => text().withDefault(const Constant(''))(); // "sınıf arkadaşı"
+  TextColumn get source => text().withDefault(const Constant('ben'))(); // ben | claude
+  DateTimeColumn get createdAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+@DataClassName('AnlikNotePersonRow')
+class AnlikNotePeople extends Table {
+  TextColumn get noteId => text().customConstraint('NOT NULL REFERENCES anlik_notes(id) ON DELETE CASCADE')();
+  TextColumn get personId => text().customConstraint('NOT NULL REFERENCES people(id) ON DELETE CASCADE')();
+  TextColumn get source => text().withDefault(const Constant('ben'))();
+
+  @override
+  Set<Column> get primaryKey => {noteId, personId};
+}
+
+/// Nottan nota ya da soru kartına bağ (v12). Biri dolu, öbürü boş.
+@DataClassName('AnlikLinkRow')
+class AnlikLinks extends Table {
+  TextColumn get id => text()();
+  TextColumn get fromNoteId => text().customConstraint('NOT NULL REFERENCES anlik_notes(id) ON DELETE CASCADE')();
+  TextColumn get toNoteId => text().nullable().customConstraint('REFERENCES anlik_notes(id) ON DELETE CASCADE')();
+  TextColumn get toCardId => text().nullable().customConstraint('REFERENCES question_cards(id) ON DELETE CASCADE')();
+  TextColumn get source => text().withDefault(const Constant('ben'))();
+  DateTimeColumn get createdAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}

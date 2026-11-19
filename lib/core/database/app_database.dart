@@ -23,7 +23,13 @@ part 'app_database.g.dart';
   NotePhotos,
   OcrResults,
   AppMeta,
-
+  AnlikNotes,
+  Tags,
+  AnlikNoteTags,
+  QuestionCardTags,
+  People,
+  AnlikNotePeople,
+  AnlikLinks,
 ])
 class AppDatabase extends _$AppDatabase {
   /// Testlerde: `AppDatabase(NativeDatabase.memory())`
@@ -35,8 +41,9 @@ class AppDatabase extends _$AppDatabase {
   /// v5: kartlarda serbest konu/kazanım adı (karneden içe aktarma).
   /// v6: eski sürümlerden kalan yetim tekrar kayıtlarını temizler.
   /// v7: ders notları (study_notes).
+  /// v12: anlık notlar, ortak etiketler, kişiler ve bağlar.
   @override
-  int get schemaVersion => 11;
+  int get schemaVersion => 12;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -115,6 +122,16 @@ class AppDatabase extends _$AppDatabase {
           }
           if (from == 10) {
             await m.addColumn(ocrResults, ocrResults.structureJson);
+          }
+          // Anlık notlar ve etiketler (v12). Sıra: bağlananlar önce.
+          if (from < 12) {
+            await m.createTable(anlikNotes);
+            await m.createTable(tags);
+            await m.createTable(anlikNoteTags);
+            await m.createTable(questionCardTags);
+            await m.createTable(people);
+            await m.createTable(anlikNotePeople);
+            await m.createTable(anlikLinks);
           }
         },
         beforeOpen: (details) async {
