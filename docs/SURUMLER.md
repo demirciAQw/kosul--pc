@@ -65,3 +65,5 @@ Sürüm numarası `pubspec.yaml` içindedir; her sürüm bir git etiketidir (`v8
 | v8.7.1 | 2026-11-20 | telefonda ve bilgisayarda veri girişi arayüzleri (Notlar, Kişiler, Etiketler, Defter'de etiket) |
 | v8.8 | 2026-11-20 | değişiklik defteri, iki yönlü senkron, çakışmalar, geri alma; şema 13 |
 | v8.9 | 2026-11-20 | kocum aracı (Claude için düzenleme ve geri alma), silme önerileri, dış değişiklik izleme; şema 14 |
+| masaüstü 7–12 | 2026-11-20 | bilgisayarda veri girişi: soru, kitaplar, optik, denemeler, oturumlar, planlar; Analiz salt okunur |
+| v8.10 | 2026-11-20 | bilgisayarda tüm veri girişi |

@@ -6,6 +6,7 @@ import '../desktop_providers.dart';
 import '../anlik/notes_page.dart';
 import '../anlik/people_page.dart';
 import '../../features/ledger/presentation/ledger_views.dart';
+import '../analysis/analysis_page.dart';
 import '../entry/books_page.dart';
 import '../entry/exams_page.dart';
 import '../entry/optic_page.dart';
@@ -83,7 +84,7 @@ Widget _page(DesktopSection section) => switch (section) {
       DesktopSection.optic => const DesktopOpticPage(),
       DesktopSection.exams => const DesktopExamsPage(),
       DesktopSection.sessions => const DesktopSessionsPage(),
-      DesktopSection.analysis => DesktopPlaceholder(title: section.label, icon: section.icon),
+      DesktopSection.analysis => const DesktopAnalysisPage(),
       DesktopSection.plans => const DesktopPlansPage(),
       DesktopSection.notes => const DesktopNotesPage(),
       DesktopSection.people => const DesktopPeoplePage(),
