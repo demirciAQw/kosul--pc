@@ -6,6 +6,7 @@ import '../../features/curriculum/domain/yks.dart';
 import '../../features/library/domain/library.dart';
 import '../../features/library/domain/progress.dart';
 import '../../features/library/library_providers.dart';
+import '../../features/library/presentation/books_screen.dart' show BookShelf;
 import '../../features/library/presentation/library_sheet.dart';
 import '../widgets/desktop_page.dart';
 import '../desktop_providers.dart';
@@ -20,6 +21,15 @@ class DesktopBookSelection extends Notifier<String?> {
 
 final desktopBookSelectionProvider = NotifierProvider<DesktopBookSelection, String?>(DesktopBookSelection.new);
 
+/// Kitaplar sayfasında açık raf (TYT, AYT ya da MEB ders kitapları).
+class DesktopBookShelf extends Notifier<BookShelf> {
+  @override
+  BookShelf build() => BookShelf.tyt;
+  void select(BookShelf shelf) => state = shelf;
+}
+
+final desktopBookShelfProvider = NotifierProvider<DesktopBookShelf, BookShelf>(DesktopBookShelf.new);
+
 /// Kitaplar: kitap ekle (şablon dosyası, hazır şablon, elle), bölüm ve test
 /// ağacını düzenle, test sonucunu işaretle. İş kuralı telefondakiyle aynı:
 /// `LibraryRepository`, `ImportBookTemplate`, `TestProgressRepository`.
@@ -30,6 +40,7 @@ class DesktopBooksPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final progress = ref.watch(bookProgressProvider);
     final selectedId = ref.watch(desktopBookSelectionProvider);
+    final shelf = ref.watch(desktopBookShelfProvider);
     final theme = Theme.of(context);
     return DesktopPage(
       title: 'Kitaplar',
@@ -76,28 +87,40 @@ class DesktopBooksPage extends ConsumerWidget {
           final book = list.where((p) => p.book.id == selectedId).firstOrNull?.book;
           return LayoutBuilder(builder: (context, box) {
             final wide = box.maxWidth >= 860;
-            final listPane = ListView.builder(
-              itemCount: list.length,
-              itemBuilder: (_, i) {
-                final p = list[i];
-                final pct = p.totalLeaves == 0 ? 0.0 : p.doneLeaves / p.totalLeaves;
-                return ListTile(
-                  key: ValueKey('kitap-satir:${p.book.id}'),
-                  selected: p.book.id == selectedId,
-                  title: Text(p.book.title),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('${p.book.examType} ${p.book.subject} · ${p.doneLeaves}/${p.totalLeaves} bölüm'),
-                      const SizedBox(height: 4),
-                      LinearProgressIndicator(value: pct, minHeight: 4),
-                    ],
-                  ),
-                  isThreeLine: true,
-                  onTap: () => ref.read(desktopBookSelectionProvider.notifier).select(p.book.id),
-                );
-              },
+            final shelfList = [for (final p in list) if (BookShelf.of(p.book) == shelf) p];
+            int countOf(BookShelf s) => list.where((p) => BookShelf.of(p.book) == s).length;
+            final shelfBar = Padding(
+              padding: const EdgeInsets.all(12),
+              child: SegmentedButton<BookShelf>(
+                key: const ValueKey('kitap-raf'),
+                showSelectedIcon: false,
+                segments: [
+                  for (final s in BookShelf.values)
+                    ButtonSegment(value: s, label: Text('${s.label} (${countOf(s)})')),
+                ],
+                selected: {shelf},
+                onSelectionChanged: (v) => ref.read(desktopBookShelfProvider.notifier).select(v.first),
+              ),
             );
+            final listPane = Column(children: [
+              shelfBar,
+              Expanded(
+                child: shelfList.isEmpty
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Text(
+                            shelf == BookShelf.meb
+                                ? 'MEB ders kitabı yok. Kitap ekle → Hazır şablonlardan ile MEB kitaplarını ekleyebilirsin.'
+                                : 'Bu rafta kitap yok.',
+                            textAlign: TextAlign.center,
+                            style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                          ),
+                        ),
+                      )
+                    : _bookList(shelfList, selectedId, ref),
+              ),
+            ]);
             final detail = book == null
                 ? Center(child: Text('Soldan bir kitap seç.', style: theme.textTheme.bodyLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant)))
                 : BookEditor(key: ValueKey(book.id), book: book, showBack: !wide);
@@ -592,4 +615,31 @@ class _NodeRow extends ConsumerWidget {
       ),
     );
   }
+}
+
+
+/// Bir rafın kitap listesi: ilerleme çubuklu satırlar.
+Widget _bookList(List<BookProgress> list, String? selectedId, WidgetRef ref) {
+  return ListView.builder(
+    itemCount: list.length,
+    itemBuilder: (_, i) {
+      final p = list[i];
+      final pct = p.totalLeaves == 0 ? 0.0 : p.doneLeaves / p.totalLeaves;
+      return ListTile(
+        key: ValueKey('kitap-satir:${p.book.id}'),
+        selected: p.book.id == selectedId,
+        title: Text(p.book.title),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('${p.book.examType} ${p.book.subject} · ${p.doneLeaves}/${p.totalLeaves} bölüm'),
+            const SizedBox(height: 4),
+            LinearProgressIndicator(value: pct, minHeight: 4),
+          ],
+        ),
+        isThreeLine: true,
+        onTap: () => ref.read(desktopBookSelectionProvider.notifier).select(p.book.id),
+      );
+    },
+  );
 }

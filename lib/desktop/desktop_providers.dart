@@ -20,6 +20,7 @@ final desktopMessengerKey = GlobalKey<ScaffoldMessengerState>();
 
 /// Soldaki kalıcı gezinmenin bölümleri.
 enum DesktopSection {
+  today('Bugün', Icons.today_outlined, Icons.today),
   notebook('Defter', Icons.menu_book_outlined, Icons.menu_book),
   books('Kitaplar', Icons.library_books_outlined, Icons.library_books),
   optic('Optik', Icons.grid_on_outlined, Icons.grid_on),
@@ -42,7 +43,7 @@ enum DesktopSection {
 
 class DesktopSectionNotifier extends Notifier<DesktopSection> {
   @override
-  DesktopSection build() => DesktopSection.notebook;
+  DesktopSection build() => DesktopSection.today;
 
   void select(DesktopSection section) => state = section;
 }

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/utils/formatters.dart';
 import '../desktop_providers.dart';
+import '../today/today_page.dart';
 import '../anlik/notes_page.dart';
 import '../anlik/people_page.dart';
 import '../../features/ledger/presentation/ledger_views.dart';
@@ -79,6 +80,7 @@ class DesktopShell extends ConsumerWidget {
 }
 
 Widget _page(DesktopSection section) => switch (section) {
+      DesktopSection.today => const DesktopTodayPage(),
       DesktopSection.notebook => const NotebookPage(),
       DesktopSection.books => const DesktopBooksPage(),
       DesktopSection.optic => const DesktopOpticPage(),
