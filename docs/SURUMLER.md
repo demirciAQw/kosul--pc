@@ -67,3 +67,4 @@ Sürüm numarası `pubspec.yaml` içindedir; her sürüm bir git etiketidir (`v8
 | v8.9 | 2026-11-20 | kocum aracı (Claude için düzenleme ve geri alma), silme önerileri, dış değişiklik izleme; şema 14 |
 | masaüstü 7–12 | 2026-11-20 | bilgisayarda veri girişi: soru, kitaplar, optik, denemeler, oturumlar, planlar; Analiz salt okunur |
 | v8.10 | 2026-11-20 | bilgisayarda tüm veri girişi |
+| v8.11 | 2026-11-20 | hoş geldin ekranı; alt çubuk 5 sekme (Bugün çubuktan çıktı, logo ana ekrana götürür); Araçlar Ayarlar içine taşındı |

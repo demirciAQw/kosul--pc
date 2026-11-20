@@ -97,7 +97,7 @@ class WirelessController extends Notifier<WirelessState> {
     try {
       await server.openPairing();
       _error = null;
-      _message = 'Telefonda Araçlar → Bilgisayarla eşitle → kodu yaz.';
+      _message = 'Telefonda Ayarlar → Araçlar → Bilgisayarla eşitle → kodu yaz.';
     } on SyncException catch (e) {
       _error = e.message;
     }

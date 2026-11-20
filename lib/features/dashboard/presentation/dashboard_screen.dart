@@ -10,6 +10,7 @@ import '../domain/patterns.dart';
 import 'ai_report_sheet.dart';
 import 'deep_analysis_section.dart';
 import 'stem_analysis_section.dart';
+import '../../../app/widgets/home_logo_button.dart';
 
 /// "En çok hangi konuda/nedenden yanlış yapıyorum ve ne kadar süre kaybediyorum?"
 class DashboardScreen extends ConsumerWidget {
@@ -19,6 +20,8 @@ class DashboardScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
       appBar: AppBar(
+        leading: const HomeLogoButton(),
+        leadingWidth: HomeLogoButton.width,
         title: const Text('Analiz'),
         actions: [
           TextButton.icon(

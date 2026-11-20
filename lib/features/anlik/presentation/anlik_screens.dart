@@ -10,6 +10,7 @@ import 'widgets/anlik_editor.dart';
 import 'widgets/anlik_tile.dart';
 import 'widgets/filter_sheet.dart';
 import 'widgets/people_tags_manage.dart';
+import '../../../app/widgets/home_logo_button.dart';
 
 /// Kayıttan sonra kısa onay ve "Geri al".
 void showSavedSnack(ScaffoldMessengerState messenger, String text, Future<void> Function() undo) {
@@ -60,6 +61,8 @@ class _AnlikScreenState extends ConsumerState<AnlikScreen> {
     final subjects = {for (final n in all) if (n.subject != null) n.subject!};
     return Scaffold(
       appBar: AppBar(
+        leading: const HomeLogoButton(),
+        leadingWidth: HomeLogoButton.width,
         title: const Text('Anlık'),
         actions: [
           IconButton(

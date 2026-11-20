@@ -57,9 +57,6 @@ final routerProvider = Provider<GoRouter>((ref) {
           StatefulShellBranch(routes: [
             GoRoute(path: AppRoutes.insights, builder: (context, state) => const DashboardScreen()),
           ]),
-          StatefulShellBranch(routes: [
-            GoRoute(path: AppRoutes.tools, builder: (context, state) => const ToolsScreen()),
-          ]),
         ],
       ),
       // Tam ekran sayfalar: alt çubuğun üstünde açılır. Sabit yollar (new,
@@ -101,6 +98,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: AppRoutes.newPlan, builder: (context, state) => const CreatePlanScreen()),
       GoRoute(path: AppRoutes.sessions, builder: (context, state) => const SessionHistoryScreen()),
       GoRoute(path: AppRoutes.settings, builder: (context, state) => const SettingsScreen()),
+      GoRoute(path: AppRoutes.tools, builder: (context, state) => const ToolsScreen()),
       GoRoute(path: AppRoutes.practiceTest, builder: (context, state) => const PracticeTestScreen()),
       GoRoute(path: AppRoutes.claudeChanges, builder: (context, state) => const ClaudeChangesScreen()),
       GoRoute(path: AppRoutes.conflicts, builder: (context, state) => const ConflictsScreen()),

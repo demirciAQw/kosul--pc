@@ -14,6 +14,7 @@ import 'karne_import_screen.dart';
 import 'widgets/net_chart.dart';
 import 'widgets/topic_loss_list.dart';
 import '../../../app/palette.dart';
+import '../../../app/widgets/home_logo_button.dart';
 
 /// Deneme analizi: net seyri, ders bazlı netler, konu bazlı net kaybı ve tüm denemeler.
 class MockExamsScreen extends ConsumerStatefulWidget {
@@ -40,6 +41,8 @@ class _MockExamsScreenState extends ConsumerState<MockExamsScreen> {
 
     return Scaffold(
       appBar: AppBar(
+        leading: const HomeLogoButton(),
+        leadingWidth: HomeLogoButton.width,
         title: const Text('Denemeler'),
         actions: [
           IconButton(

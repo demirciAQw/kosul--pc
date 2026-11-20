@@ -64,7 +64,7 @@ class _ImportSection extends ConsumerWidget {
       title: 'Telefondan veri al',
       children: [
         Text(
-          'Telefonda Araçlar → Tüm veriyi dışa aktar ile aldığın ZIP\'i seç. Açılmış bir yedek klasörü de olur. '
+          'Telefonda Ayarlar → Araçlar → Tüm veriyi dışa aktar ile aldığın ZIP\'i seç. Açılmış bir yedek klasörü de olur. '
           'Var olan kayıtlar güncellenir, yeniler eklenir; hiçbir şey sessizce silinmez.',
           style: mutedStyle(context),
         ),

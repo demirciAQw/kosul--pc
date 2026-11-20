@@ -1,5 +1,5 @@
 abstract final class AppRoutes {
-  // Alt gezinme sekmeleri
+  // Ana ekran ve alt gezinme sekmeleri (ana ekran çubukta yok: logoyla açılır)
   static const home = '/';
   static const books = '/books';
   static const notebook = '/notebook';
