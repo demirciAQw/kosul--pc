@@ -6,8 +6,17 @@
 /// uygulamanın her yeri ve dışarıdan yazan araçlar kendiliğinden kaydolur.
 library;
 
-/// Deftere girmeyen tablolar: uygulama ayarları ve defterin kendisi.
-const ledgerExcludedTables = {'app_meta', 'degisiklikler', '_baglam', 'cakismalar', 'esitleme_durum'};
+/// Deftere girmeyen tablolar: uygulama ayarları, defterin kendisi ve MEB konu
+/// ağacı (`curriculum_nodes`: her cihaz aynı varlıktan kendisi tohumlar; deftere
+/// girse her açılışta binlerce gereksiz satır ve sahte çakışma çıkardı).
+const ledgerExcludedTables = {
+  'app_meta',
+  'degisiklikler',
+  '_baglam',
+  'cakismalar',
+  'esitleme_durum',
+  'curriculum_nodes',
+};
 
 const ledgerTriggerPrefix = 'trg_ledger_';
 

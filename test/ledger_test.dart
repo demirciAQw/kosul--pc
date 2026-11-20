@@ -70,12 +70,13 @@ void main() {
       expect(h[0].clock.compareTo(h[1].clock) < 0 && h[1].clock.compareTo(h[2].clock) < 0, isTrue);
     });
 
-    test('kaynak ve oturum bağlamdan gelir; bastir susturur; app_meta girmez', () async {
+    test('kaynak ve oturum bağlamdan gelir; bastir susturur; app_meta ve MEB ağacı girmez', () async {
       final (db, ledger) = await _open('pc');
       await ledger.withSource('claude', session: 'oturum-1', body: () => _note(db, 'c1', 'claude yazdı'));
       await _note(db, 'k1', 'ben yazdım');
       await ledger.silently(() => _note(db, 's1', 'sessiz'));
       await db.into(db.appMeta).insert(AppMetaCompanion.insert(metaKey: 'x', metaValue: 'y'));
+      await db.customStatement("INSERT INTO curriculum_nodes (id, exam_type, subject, title, aliases, depth, sort_order) VALUES ('m1', 'TYT', 'Matematik', 'Konu', '[]', 0, 0)");
       final h = (await ledger.history()).reversed.toList();
       expect(h.length, 2);
       expect((h[0].source, h[0].session), ('claude', 'oturum-1'));

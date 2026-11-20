@@ -57,7 +57,7 @@ Protokol v1, düz HTTP (`dart:io`). Portlar: TCP **47321**, UDP **47322** (bulma
 - `degisiklikler` tablosu: `id` (iki cihazda aynı), `yerelSira`, `cihazId`, `kaynak` (`telefon | pc | claude | senkron | geri_al`), `oturumId`, `tablo`, `satirId`, `islem` (`ekle | degistir | sil`), `eski`, `yeni` (satırın tamamı, JSON), `saat` (HLC), `uzak`, `geriAlinan`.
 - **SQLite tetikleyicileri** (`lib/core/ledger/ledger_triggers.dart`) her senkron tablosunda ekleme, güncelleme (yalnızca satır gerçekten değişince) ve silmeyi yazar. Böylece uygulamanın her yeri ve dışarıdan yazan araçlar (`kocum`) kendiliğinden kaydolur.
 - Yazanın kim olduğu işlemden önce tek satırlık `_baglam` tablosuna yazılır (`LedgerService.withSource`). `bastir = 1` tetikleyicileri susturur (yedek birleştirme, karşıdan gelen satırların uygulanması).
-- Senkron dışı tablolar: `app_meta`, `degisiklikler`, `_baglam`, `cakismalar`, `esitleme_durum`. Bunlar bilgisayara ve yedek birleştirmeye girmez.
+- Senkron dışı tablolar: `app_meta`, `degisiklikler`, `_baglam`, `cakismalar`, `esitleme_durum` ve `curriculum_nodes` (MEB ağacını her cihaz aynı varlıktan kendisi tohumlar). Bunlar bilgisayara ve yedek birleştirmeye girmez.
 - **HLC** (`lib/core/ledger/hlc.dart`): `<ms>-<sayaç>-<cihaz>`. Karşıdan gelen saati gören cihaz kendi saatini onun üstüne taşır; saati geride olsa da gördüğü değişikliğin üstüne yazan kazanır.
 - Defter sonsuz büyümesin diye budama henüz yok (satır başına birkaç yüz bayt).
 
