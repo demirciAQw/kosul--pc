@@ -87,7 +87,7 @@ class WirelessController extends Notifier<WirelessState> {
     if (on) {
       await _start();
     } else {
-      await _stop('Kablosuz alma kapalı.');
+      await _stop('Telefon eşleştirme kapalı.');
     }
   }
 

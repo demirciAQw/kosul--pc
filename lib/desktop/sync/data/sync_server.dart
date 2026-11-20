@@ -256,7 +256,7 @@ class SyncServer {
       throw const _Reject(
         409,
         'Bu bilgisayar zaten bir telefonla eşleşmiş. Yeni telefon için önce bilgisayarda '
-        'Ayarlar → Kablosuz alma → Eşleşmeyi kaldır.',
+        'Ayarlar → Telefon eşleştirme → Eşleşmeyi kaldır.',
         counts: false,
       );
     }

@@ -13,7 +13,7 @@ Telefondaki Koçum verisinin büyük ekranda görüldüğü ve yönetildiği uyg
 | **Ayarlar → İzlenen klasör** | hazır | Syncthing, KDE Connect ya da USB ile bir klasöre düşen yeni yedek, yazılması bitince (3 sn sessizlik) kendiliğinden içe aktarılır. |
 | **Ayarlar → Koç klasörü** | hazır | Her içe aktarmadan sonra fotoğrafsız `Koçum/kocum_yedek.json` bu klasöre (ör. Obsidian kasası) yazılır; yapay zekâ koçu buradan okuyabilir. |
 | **Ayarlar → Telefonda silinenler** | hazır | Telefonda silinip bilgisayarda duran kayıtlar burada listelenir; yalnızca sen silersen silinir. |
-| **Ayarlar → Kablosuz alma** | hazır | Aynı Wi-Fi'daki eşleşmiş telefondan gönderim alır ([KABLOSUZ_AKTARIM.md](KABLOSUZ_AKTARIM.md)). |
+| **Ayarlar → Telefon eşleştirme** | hazır | Aynı Wi-Fi'daki eşleşmiş telefondan gönderim alır ([KABLOSUZ_AKTARIM.md](KABLOSUZ_AKTARIM.md)). |
 | **Ayarlar → Görünüm, İçe aktarma geçmişi** | hazır | Sistem/açık/koyu tema; geçmiş içe aktarmalar. |
 | **Defter → Soru ekle / Düzenle** | hazır | Soru ve çözüm fotoğrafı: dosya seç ya da pencereye sürükle-bırak; mevcut kırpma ekranıyla kırp (PNG). Ders, MEB konusu, neden, zorluk, şık ya da yazılı cevap, çözüm metni. Ctrl+S kaydeder. Fotoğraftaki yazı telefonda okunur. Seçili soruya etiket ve not bağlanır. |
 | **Kitaplar** | hazır | Elle kitap, şablon dosyası (JSON) ya da hazır şablonlardan ekle; bölüm ve test ağacını düzenle (ekle, yeniden adlandır, sırala, onaylı sil); test sonucu işaretle. |

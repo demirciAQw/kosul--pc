@@ -64,7 +64,7 @@ class _PairViewState extends ConsumerState<_PairView> {
         _found = found;
         if (found.isEmpty) {
           _error = 'Bilgisayar bulunamadı. İkisi aynı Wi-Fi\'da mı, bilgisayarda kablosuz alma açık mı? '
-              'Bulunamazsa adresi elle yaz (bilgisayarda Ayarlar → Kablosuz alma\'da yazar).';
+              'Bulunamazsa adresi elle yaz (bilgisayarda Ayarlar → Telefon eşleştirme\'da yazar).';
         }
       });
     } on Object catch (e) {
@@ -118,7 +118,7 @@ class _PairViewState extends ConsumerState<_PairView> {
               children: [
                 Text('Bilgisayarla eşleş', style: theme.textTheme.titleMedium),
                 const SizedBox(height: 8),
-                const Text('1. Bilgisayarda Koçum → Ayarlar → Kablosuz alma\'yı aç.\n'
+                const Text('1. Bilgisayarda Koçum → Ayarlar → Telefon eşleştirme\'yı aç.\n'
                     '2. "Telefon eşleştir"e bas; ekranda 6 haneli kod çıkar.\n'
                     '3. Burada bilgisayarı seç ve kodu yaz.'),
                 const SizedBox(height: 8),
@@ -188,7 +188,7 @@ class _AddressDialogState extends State<_AddressDialog> {
           autofocus: true,
           keyboardType: TextInputType.url,
           inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.:]'))],
-          decoration: const InputDecoration(hintText: '192.168.1.20', helperText: 'Bilgisayarda Ayarlar → Kablosuz alma'),
+          decoration: const InputDecoration(hintText: '192.168.1.20', helperText: 'Bilgisayarda Ayarlar → Telefon eşleştirme'),
           onSubmitted: (v) => Navigator.pop(context, v),
         ),
         actions: [
@@ -310,7 +310,7 @@ class _SendView extends ConsumerWidget {
         title: const Text('Eşleşme kaldırılsın mı?'),
         content: Text(
           'Telefon artık ${computer.name} adlı bilgisayara gönderemez. Telefondaki ve bilgisayardaki veriler '
-          'silinmez. Bilgisayarda da Ayarlar → Kablosuz alma → Eşleşmeyi kaldır yap.',
+          'silinmez. Bilgisayarda da Ayarlar → Telefon eşleştirme → Eşleşmeyi kaldır yap.',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Vazgeç')),
