@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:pdfrx/pdfrx.dart' as r; // pdfrx YALNIZ data/ ve bu dosyada
 
 import '../../../app/routes.dart';
+import '../../../app/tablet.dart';
 import '../../ink/domain/ink_models.dart';
 import '../../question_bank/domain/question_card.dart';
 import '../domain/pdf_engine.dart' show PdfBox, PdfPageSize;
@@ -232,6 +233,7 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
       appBar: AppBar(
         title: Text(rec.title, overflow: TextOverflow.ellipsis),
         actions: [
+          const FocusModeButton(),
           IconButton(
             key: const Key('pdf-thumbs-toggle'),
             tooltip: 'Küçük resimler',
@@ -413,6 +415,9 @@ class PdfInkToolbar extends StatelessWidget {
       icon: Icon(icon),
       onPressed: () => onTool(t),
     );
+    // Dar tablette (dikey) kalınlık seçimi "…" menüsüne iner; telefonda ve
+    // geniş tablette olduğu gibi (taşarsa yatay kayar).
+    final compact = isTabletContext(context) && MediaQuery.sizeOf(context).width < kToolbarCompactWidth;
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(
@@ -447,6 +452,23 @@ class PdfInkToolbar extends StatelessWidget {
               ),
             ),
           const SizedBox(width: 8),
+          if (compact)
+            PopupMenuButton<double>(
+              key: const Key('pdf-more'),
+              tooltip: 'Kalınlık',
+              icon: const Icon(Icons.more_horiz),
+              onSelected: onWidth,
+              itemBuilder: (_) => [
+                for (final w in _widths)
+                  CheckedPopupMenuItem(
+                    key: Key('pdf-width-${w.toInt()}'),
+                    value: w,
+                    checked: width == w,
+                    child: Text('Kalınlık ${w.toInt()}'),
+                  ),
+              ],
+            )
+          else
           for (final w in _widths)
             InkWell(
               key: Key('pdf-width-${w.toInt()}'),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../app/tablet.dart';
 import '../../ink/domain/pen_profiles.dart';
 import '../../pdf/presentation/pdf_ink_session.dart';
 import '../domain/page_template.dart';
@@ -39,6 +40,9 @@ class NoteInkToolbar extends StatelessWidget {
       listenable: tools,
       builder: (context, _) {
         final t = tools;
+        // Dar tablette (dikey) şekil düzeltme ve sertlik "…" menüsüne iner;
+        // telefonda ve geniş tablette olduğu gibi.
+        final compact = isTabletContext(context) && MediaQuery.sizeOf(context).width < kToolbarCompactWidth;
         return Row(
           children: [
             Expanded(
@@ -69,6 +73,7 @@ class NoteInkToolbar extends StatelessWidget {
                       icon: const Icon(Icons.gesture),
                       onPressed: () => t.setLasso(true),
                     ),
+                    if (!compact)
                     Tooltip(
                       message: 'Şekil düzelt: çizgiyi çizip kalemi bekletince',
                       child: FilterChip(
@@ -160,7 +165,7 @@ class NoteInkToolbar extends StatelessWidget {
                             ),
                           ),
                         ),
-                      if (penProfiles[t.kind]!.pressureSensitive)
+                      if (!compact && penProfiles[t.kind]!.pressureSensitive)
                         Tooltip(
                           message: 'Sertlik (baskı eğrisi)',
                           child: SizedBox(
@@ -198,6 +203,44 @@ class NoteInkToolbar extends StatelessWidget {
                 children: [
                   IconButton(onPressed: null, icon: Icon(Icons.undo_rounded)),
                   IconButton(onPressed: null, icon: Icon(Icons.redo_rounded)),
+                ],
+              ),
+            if (compact)
+              PopupMenuButton<String>(
+                key: const Key('note-more'),
+                tooltip: 'Diğer araçlar',
+                icon: const Icon(Icons.more_horiz),
+                onSelected: (v) {
+                  if (v == 'shape') t.setShapeSnap(!t.shapeSnap);
+                },
+                itemBuilder: (_) => [
+                  CheckedPopupMenuItem(
+                    key: const Key('note-shape-snap'),
+                    value: 'shape',
+                    checked: t.shapeSnap,
+                    child: const Text('Şekil düzelt'),
+                  ),
+                  if (penProfiles[t.kind]!.pressureSensitive)
+                    PopupMenuItem(
+                      enabled: false,
+                      child: StatefulBuilder(
+                        builder: (context, setState) => Row(
+                          children: [
+                            const Text('Sertlik'),
+                            Expanded(
+                              child: Slider(
+                                key: const Key('note-hardness'),
+                                value: t.hardness,
+                                onChanged: (v) {
+                                  t.setHardness(v);
+                                  setState(() {});
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                 ],
               ),
             PopupMenuButton<(PageTemplate, bool)>(

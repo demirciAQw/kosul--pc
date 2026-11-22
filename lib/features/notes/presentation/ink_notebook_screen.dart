@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../app/tablet.dart';
 import '../../ink/data/ink_outline.dart';
 import '../../ink/domain/ink_models.dart';
 import '../../ink/domain/ink_stroke_record.dart';
@@ -239,6 +240,7 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
       appBar: AppBar(
         title: Text(title, overflow: TextOverflow.ellipsis),
         actions: [
+          const FocusModeButton(),
           if (current != null)
             Center(
               child: Text(

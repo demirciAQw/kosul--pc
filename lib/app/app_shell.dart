@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../features/question_bank/question_bank_providers.dart';
+import 'tablet.dart';
 
 /// Alt gezinme çubuğu: Anlık, Kitaplar, Defter, Deneme, Analiz.
 /// Ana ekran (eski "Bugün") çubukta değil: sekmelerdeki logoya basınca açılır.
@@ -19,6 +20,25 @@ class AppShell extends ConsumerWidget {
     final due = ref.watch(dueCountProvider).value ?? 0;
     final onHome = shell.currentIndex == _homeBranch;
     final theme = Theme.of(context);
+
+    // Tablet: alt çubuk yerine sol ray (telefon düzeni aşağıda, aynen).
+    if (isTabletContext(context)) {
+      // Dallar: 0 Bugün, 1 Anlık (Notlar), 2 Kitaplar, 3 Soru defteri, 4 Deneme, 5 Analiz.
+      final selected = switch (shell.currentIndex) {
+        1 => RailItem.notlar,
+        3 => RailItem.soruDefteri,
+        _ => RailItem.daha,
+      };
+      return Scaffold(
+        body: Row(
+          children: [
+            TabletRail(selected: selected, due: due),
+            const VerticalDivider(width: 1),
+            Expanded(child: shell),
+          ],
+        ),
+      );
+    }
 
     Widget badge(IconData icon) =>
         Badge.count(count: due, isLabelVisible: due > 0, child: Icon(icon));
