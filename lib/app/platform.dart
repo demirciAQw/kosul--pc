@@ -13,3 +13,7 @@ String get platformName => kIsWeb ? 'web' : Platform.operatingSystem;
 /// Kablosuz alma (yerel ağ sunucusu) yalnızca Linux bilgisayarda açılır;
 /// Windows ve macOS'ta kapalıdır.
 bool get canReceiveWirelessly => !kIsWeb && Platform.isLinux;
+
+/// Android'e özgü yerel görünümler (kalem denemesi A uygulaması) yalnızca
+/// burada ayrılır.
+bool get isAndroid => !kIsWeb && Platform.isAndroid;

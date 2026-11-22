@@ -15,6 +15,7 @@ import 'dart:io';
 import 'camera_patch.dart';
 import 'gece_patch.dart';
 import 'genai_patch.dart';
+import 'ink_patch.dart';
 import 'network_patch.dart';
 import 'r8_patch.dart';
 
@@ -43,6 +44,7 @@ void main() {
   _patchRootGradle();
   _copyLauncherIcons();
   _patchGenAi(kts, groovy);
+  _patchInk(kts, groovy);
   _patchR8(kts, groovy);
   _patchGece(kts, groovy);
   stdout.writeln('Android ayarları tamam.');
@@ -90,6 +92,30 @@ void _patchGenAi(File kts, File groovy) {
     return;
   }
   activity.writeAsStringSync(genAiMainActivity(pkg));
+}
+
+/// Kalem yüzeyi (Jetpack Ink): bağımlılıklar, Kotlin dosyası, MainActivity kaydı.
+/// _patchGenAi'den SONRA çalışmalı (MainActivity'yi o yeniden yazar).
+/// R8 kuralı _patchR8 içinde değil burada: proguard-rules.pro'ya eklenir.
+void _patchInk(File kts, File groovy) {
+  if (kts.existsSync()) {
+    kts.writeAsStringSync(patchInkKts(kts.readAsStringSync()));
+  } else if (groovy.existsSync()) {
+    groovy.writeAsStringSync(patchInkGroovy(groovy.readAsStringSync()));
+  }
+  final rules = File('android/app/proguard-rules.pro');
+  rules.writeAsStringSync(patchInkProguard(rules.existsSync() ? rules.readAsStringSync() : null));
+  final root = Directory('android/app/src/main/kotlin');
+  final activity = root.existsSync()
+      ? root.listSync(recursive: true).whereType<File>().where((f) => f.path.endsWith('MainActivity.kt')).firstOrNull
+      : null;
+  final pkg = activity == null ? null : packageOf(activity.readAsStringSync());
+  if (activity == null || pkg == null) {
+    stderr.writeln('Uyarı: MainActivity.kt bulunamadı; kalem yüzeyi eklenmedi.');
+    return;
+  }
+  activity.writeAsStringSync(patchInkMainActivity(activity.readAsStringSync()));
+  File('${activity.parent.path}/KocumInk.kt').writeAsStringSync(inkKotlin(pkg));
 }
 
 /// Koçum simgesi: tool/android_icon/res altındakiler (tool/make_icon.py ile

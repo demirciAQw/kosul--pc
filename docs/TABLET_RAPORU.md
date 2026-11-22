@@ -18,3 +18,26 @@ Dal: `tablet-1`. Her adım: saat, sonuç, ölçüm, "Ahmet elle denesin".
 - Hybrid composition'da dokunuşlar Flutter'a yönlenir; kalem verisi (tarihsel noktalar, eğim) yerel view'e kayıpsız geçmeyebilir → InkSurface yerel view'e dokunuşu kendisi aldıracak şekilde denenecek.
 - `perfect_freehand` 2.5.2+1 (MIT) B uygulaması için.
 - `pdfrx` 3.1.0 (MIT; PDFium ikilisi derlemede indirilir, SHA-256 doğrulamalı; APK'ya ~+3-6 MB tahmini). Çakışmasız çözülüyor, `sdk ^3.14.0` ister. Uygulamaya PDFium lisans notu eklenecek.
+
+## T1: Kalem gecikmesi prototipi (22.11.2026)
+- `InkSurface` arayüzü (`lib/features/ink/domain`), saf Dart domain, kanal sözleşmesi ayrıştırıcısı testli.
+- **A (Android yerel):** `androidx.ink` 1.0.0 + MotionEventPredictor, PlatformView `kocum/ink_surface`; yalnız kalem çizer, parmak/avuç çizmez; `tool/ink_patch.dart` ile üretilir (testli, idempotent). Gerçek debug derlemesi geçti (`libink.so` arm64 içinde).
+- **B (saf Flutter):** `perfect_freehand` 2.5.2+1 + CustomPainter; biten çizgiler ayrı RepaintBoundary, süren çizgi 96 noktada bir parçaya donuyor (O(n²) yok). Kalem çizer, parmak kaydırır/yakınlaştırır, ters kalem siler.
+- Deneme ekranı: Ayarlar → Araçlar → "Kalem denemesi (tablet için)" (yalnız Android). A/B düğmesi, araç, renk, kalınlık, "yalnız kalem".
+- İnceleyici ciddi bulgular verdi (avuç/ikinci temas durum makinesi, `recycle`, A/B ölçüm uyumsuzluğu, silgi), hepsi düzeltildi.
+- Ölçüm: **tablet yetkisiz, hiç ölçülmedi.** Günlük adları: `KocumInk A giris->vsync`, `KocumInk B giris->vsync`, `KocumInk B giris->raster`. Karşılaştırma için A ile B'nin `giris->vsync` değerlerine bak; A'da ön tampon çizimi ölçülmüyor (Ink doğrudan ekrana yazar, gerçek algı A lehine daha iyi olabilir).
+- Seçim: ölçüm olmadığı için şimdilik **Android'de A, diğer platformlarda B** (görev dosyasının kuralı; kanıtsız ama varsayılan).
+- Bilinen sınır: A'da parmak kaydırma/yakınlaştırma yok (dokunuşu yerel görünüm alıyor), A'da silgi devre dışı. AndroidView dokunuşu Dart üzerinden yerele sentetik iletiyor; ek gidiş-dönüş gecikmesi olabilir, bu ölçülmeli.
+
+### Ahmet elle denesin (T1)
+- Ayarlar → Araçlar → Kalem denemesi. A ve B'yi kalemle çiz: hangisi daha az geriden geliyor? Hızlı daireler/yazı dene.
+- Çizerken avucunu ekrana koy: çizgi bozulmamalı, görünüm kaymamalı.
+- Parmakla iki parmak yakınlaştır/kaydır (B'de çalışmalı).
+- `adb logcat -s KocumInk` çıktısını bana ver.
+
+## T2: Çizgi verisi (22.11.2026)
+- `ink_strokes` tablosu (şema 14→15, göç testli 13→15 ve 14→15), nokta ikilisi: delta + zigzag + varint (1000 nokta < 6 bayt/nokta), round-trip ve hata sınırı testli.
+- Değişiklik defterine bağlı. Defterin `json_object` BLOB taşıyamadığı hatası bulundu ve düzeltildi (BLOB `hex()` ile yazılıyor); eski tablolar etkilenmedi. Masaüstü birleştirici BLOB'u bayt bayta alıyor (testli).
+- Depo: ekle, sayfaya göre oku/izle, yumuşak sil/geri al.
+- Dikkat: defterde çizgi başına ~2x yer (hex). Çok çizgi birikirse defter boyutunu izle. `kocum fix` BLOB sütununu düzenleyemez.
+- Göç testi gerçek eski dosyayla değil, güncel şemadan taklitle yapıldı.

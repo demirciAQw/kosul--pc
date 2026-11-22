@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../app/palette.dart';
+import '../../../app/platform.dart';
 import '../../../app/routes.dart';
 import '../../../app/widgets/tone_icon.dart';
 import '../../ocr/data/genai_describer.dart';
@@ -74,6 +75,18 @@ class _SettingsBody extends ConsumerWidget {
             onTap: () => context.push(AppRoutes.tools),
           ),
         ),
+        // Kalem denemesi yalnızca Android'de (tablet kalem gecikmesi ölçümü).
+        if (isAndroid)
+          Card(
+            child: ListTile(
+              key: const Key('settings-ink-lab'),
+              leading: ToneIcon(Icons.edit_outlined, color: KocumColors.blue),
+              title: const Text('Kalem denemesi (tablet için)'),
+              subtitle: const Text('Kalem gecikmesini karşılaştır (A / B)'),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => context.push(AppRoutes.inkLab),
+            ),
+          ),
         _Section('Hatırlatıcılar'),
         Card(
           child: Column(

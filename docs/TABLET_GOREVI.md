@@ -38,7 +38,7 @@ Hedef: Koçum, Casper PAD H10 tablette (Android 15, Dimensity 7050, 8 GB RAM, 25
 - `tablet-testci` ile ölç. Seçimi şuna göre yap: A belirgin şekilde daha iyiyse Android'de A, diğer platformlarda B. Ahmet'in hissi son karardır: rapora "A/B elle karşılaştır" yaz, şimdilik ölçüme göre devam et.
 - Kalem çizer, parmak kaydırır ve yakınlaştırır. Avuç içi yok sayılır.
 
-### T2: Çizgi verisi
+### T2: Çizgi verisi (YAPILDI: v15 göçü, `ink_strokes`, `stroke_codec.dart`, `InkStrokeRepository`)
 - Çizgi tablosu (`ink_strokes`): her nokta x, y (sayfa ya da not koordinatı), baskı, eğim, zaman farkı (ms). Çizginin başlangıç zamanı ve süresi. Ayrıca katman, deneme no, araç, renk, kalınlık.
 - Noktalar sıkıştırılmış ikili olarak saklanır (delta + varint). Kodlayıcı ve çözücü saf Dart, round-trip testli.
 - Tablo değişiklik defterine (senkron) girsin. Şema göçü eski sürümlerden test edilsin.

@@ -11,6 +11,7 @@ abstract final class AppRoutes {
   static const sendToComputer = '/tools/computer';
   static const claudeChanges = '/tools/degisiklikler';
   static const conflicts = '/tools/cakismalar';
+  static const inkLab = '/tools/kalem';
 
   // Tam ekran sayfalar
   static const newSession = '/session/new';
