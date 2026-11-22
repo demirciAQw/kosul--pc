@@ -1,3 +1,5 @@
+import 'dart:ui' show Offset, Size;
+
 import 'package:flutter/foundation.dart';
 
 import '../../ink/domain/ink_models.dart';
@@ -8,6 +10,24 @@ import '../../pdf/presentation/pdf_ink_session.dart';
 
 /// Araç yuvasının ekranda durduğu kenar (kullanıcı değiştirir, kalıcıdır).
 enum DockPosition { top, bottom, left, right }
+
+/// Sürükleyip bırakılan nokta [p] (ekran [area] içinde) için en yakın kenar.
+/// Uzaklıklar boyuta oranlanır (uzun tablette sol/sağ haksız kazanmasın).
+DockPosition nearestDockPosition(Offset p, Size area) {
+  if (area.isEmpty) return DockPosition.bottom;
+  final w = area.width, h = area.height;
+  final d = {
+    DockPosition.top: (p.dy / h).abs(),
+    DockPosition.bottom: ((h - p.dy) / h).abs(),
+    DockPosition.left: (p.dx / w).abs(),
+    DockPosition.right: ((w - p.dx) / w).abs(),
+  };
+  var best = DockPosition.bottom;
+  for (final e in d.entries) {
+    if (e.value < d[best]!) best = e.key;
+  }
+  return best;
+}
 
 /// Defter araç durumu (kalem türü, renk, kalınlık, sertlik, silgi). Sayfa değişince
 /// kaybolmaması için ekran tutar; her sayfa oturumuna [apply] ile uygulanır.
@@ -25,7 +45,9 @@ class NoteToolSettings extends ChangeNotifier {
 
   /// Kement kopyası (sayfalar arası yapıştırma için ekran tutar).
   List<InkObject> clipboard = const [];
-  EraseMode _eraseMode = EraseMode.stroke;
+
+  /// Varsayılan: kısmi silgi (kalınlık); çizginin tamamını silmek ayrı moddur.
+  EraseMode _eraseMode = EraseMode.area;
   double _hardness = 0.5;
   final Map<PenKind, int> _color = {
     PenKind.ballpoint: penPalette.first,
@@ -71,8 +93,10 @@ class NoteToolSettings extends ChangeNotifier {
   double get hardness => _hardness;
   int get color => _color[_kind]!;
   double get width => _width[_kind]!;
-  List<int> get palette => _kind == PenKind.highlighter ? highlighterPalette : penPalette;
-  List<double> get widthLevels => _kind == PenKind.highlighter ? highlighterWidthLevels : penWidthLevels;
+  List<int> get palette =>
+      _kind == PenKind.highlighter ? highlighterPalette : penPalette;
+  List<double> get widthLevels =>
+      _kind == PenKind.highlighter ? highlighterWidthLevels : penWidthLevels;
 
   /// Silgi yarıçapı (görünüm pikseli; [eraserRadiusMin]..[eraserRadiusMax]).
   double get eraserRadius => _eraserRadius;
@@ -81,12 +105,17 @@ class NoteToolSettings extends ChangeNotifier {
   ShapeTool? get shapeTool => _shapeTool;
 
   /// Fırça kalınlığı olarak silgi: oturum yarıçapı `max(8, kalınlık * 2)` hesaplar.
-  static double eraserBrushWidth(double radius) => clampEraserRadius(radius) / 2;
+  static double eraserBrushWidth(double radius) =>
+      clampEraserRadius(radius) / 2;
 
   /// Geçerli aracın boyutu: silgide yarıçap, kalemde kalınlık.
   double get size => _eraser ? _eraserRadius : width;
-  double get sizeMin => _eraser ? eraserRadiusMin : (_kind == PenKind.highlighter ? highlighterWidthMin : penWidthMin);
-  double get sizeMax => _eraser ? eraserRadiusMax : (_kind == PenKind.highlighter ? highlighterWidthMax : penWidthMax);
+  double get sizeMin => _eraser
+      ? eraserRadiusMin
+      : (_kind == PenKind.highlighter ? highlighterWidthMin : penWidthMin);
+  double get sizeMax => _eraser
+      ? eraserRadiusMax
+      : (_kind == PenKind.highlighter ? highlighterWidthMax : penWidthMax);
   List<double> get sizeLevels => _eraser ? eraserRadiusLevels : widthLevels;
 
   /// Geçerli aracın boyutunu sınırlar içinde ayarlar.
@@ -110,6 +139,7 @@ class NoteToolSettings extends ChangeNotifier {
   /// Kalıcı saklanacak her şey: boyutlar ve yuva konumu.
   Map<String, Object?> toPrefs() => {
     ...toSizes(),
+    'erase.mode': _eraseMode.name,
     'dock.pos': _dockPos.name,
     'dock.top': _dockPos == DockPosition.top, // eski sürümlerle uyum
   };
@@ -124,6 +154,12 @@ class NoteToolSettings extends ChangeNotifier {
       }
     } else if (top is bool) {
       _dockPos = top ? DockPosition.top : DockPosition.bottom;
+    }
+    final em = m['erase.mode'];
+    if (em is String) {
+      for (final e in EraseMode.values) {
+        if (e.name == em) _eraseMode = e;
+      }
     }
     for (final k in PenKind.values) {
       final v = m['width.${k.name}'];
@@ -206,7 +242,9 @@ class NoteToolSettings extends ChangeNotifier {
   InkBrush get brush => _eraser
       ? InkBrush(tool: InkTool.eraser, width: eraserBrushWidth(_eraserRadius))
       : InkBrush(
-          tool: _kind == PenKind.highlighter ? InkTool.highlighter : InkTool.pen,
+          tool: _kind == PenKind.highlighter
+              ? InkTool.highlighter
+              : InkTool.pen,
           color: color,
           width: width,
           kind: _kind,

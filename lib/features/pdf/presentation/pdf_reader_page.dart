@@ -7,7 +7,9 @@ import 'package:pdfrx/pdfrx.dart' as r; // pdfrx YALNIZ data/ ve bu dosyada
 
 import '../../../app/routes.dart';
 import '../../../app/tablet.dart';
-import '../../ink/domain/ink_models.dart';
+import '../../notes/data/note_tool_prefs_store.dart';
+import '../../notes/presentation/note_tool_dock.dart';
+import '../../notes/presentation/note_tool_settings.dart';
 import '../../question_bank/domain/question_card.dart';
 import '../domain/pdf_engine.dart' show PdfBox, PdfPageSize;
 import '../domain/question_box.dart';
@@ -22,7 +24,13 @@ import 'pdf_page_ink_layer.dart';
 /// PDF okuyucu: dikey kaydırma, parmakla yakınlaştırma, küçük resim şeridi,
 /// sayfa göstergesi ve her sayfanın üstünde kalem katmanı.
 class PdfReaderPage extends ConsumerWidget {
-  const PdfReaderPage({super.key, required this.documentId, this.initialPage, this.highlight, this.questionId});
+  const PdfReaderPage({
+    super.key,
+    required this.documentId,
+    this.initialPage,
+    this.highlight,
+    this.questionId,
+  });
   final String documentId;
 
   /// Vurgulanan kutunun soru kartı: varsa "Çöz" düğmesi görünür.
@@ -77,17 +85,14 @@ class PdfReaderPage extends ConsumerWidget {
   }
 }
 
-const _colors = <int>[
-  0xFF1B1B1F,
-  0xFF1565C0,
-  0xFFC62828,
-  0xFF2E7D32,
-  0xFFF9A825,
-];
-const _widths = <double>[2, 4, 8];
-
 class PdfReaderView extends ConsumerStatefulWidget {
-  const PdfReaderView({super.key, required this.info, this.initialPage, this.highlight, this.questionId});
+  const PdfReaderView({
+    super.key,
+    required this.info,
+    this.initialPage,
+    this.highlight,
+    this.questionId,
+  });
   final PdfOpenInfo info;
   final String? questionId;
   final int? initialPage;
@@ -105,14 +110,13 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
   late final AppLifecycleListener _lifecycle;
   StreamSubscription<String>? _errorSub;
   bool _thumbs = false;
-  InkTool _tool = InkTool.pen;
   bool _selecting = false;
+  final _tools = NoteToolSettings();
+  late final NoteToolPrefsBinding _prefs;
 
   /// Sayfa üstündeki kutular: bekleyen seçim (mavi) ve kart vurgusu (turuncu).
   final _marks = ValueNotifier<List<PdfBoxMark>>(const []);
   ({int page, PdfBox box})? _pending;
-  int _color = _colors.first;
-  double _width = _widths[1];
 
   @override
   void initState() {
@@ -121,12 +125,17 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
       documentId: widget.info.record.id,
       repository: ref.read(inkStrokeRepositoryProvider),
       clock: ref.read(clockProvider),
+      penKinds: true,
     );
-    _applyBrush();
+    _tools.apply(_session);
+    _tools.addListener(_applyTools);
+    // Kalem boyutu ve yuva konumu defterle AYNI kalıcı ayardır.
+    _prefs = NoteToolPrefsBinding(ref.read(noteToolPrefsStoreProvider), _tools);
     _session.onSelectBox = _onBox;
     _page.value = (widget.initialPage ?? 0) + 1;
     final hl = widget.highlight, hp = widget.initialPage;
-    if (hl != null && hp != null) _marks.value = [PdfBoxMark(hp, hl, _highlightColor)];
+    if (hl != null && hp != null)
+      _marks.value = [PdfBoxMark(hp, hl, _highlightColor)];
     // Görünüm ve küçük resim şeridi AYNI belgeyi paylaşır (ref anahtarı aynı:
     // PDFium belgesi bir kez açılır).
     _docRef = r.PdfDocumentRefFile(
@@ -151,6 +160,9 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
 
   @override
   void dispose() {
+    _tools.removeListener(_applyTools);
+    _prefs.dispose();
+    _tools.dispose();
     _lifecycle.dispose();
     _errorSub?.cancel();
     _page.dispose();
@@ -160,10 +172,7 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
     super.dispose();
   }
 
-  void _applyBrush() {
-    final w = _tool == InkTool.highlighter ? _width * 4 : _width;
-    _session.setBrush(InkBrush(tool: _tool, color: _color, width: w));
-  }
+  void _applyTools() => _tools.apply(_session);
 
   static const _selectColor = Color(0xFF1565C0);
   static const _highlightColor = Color(0xFFEF6C00);
@@ -178,17 +187,34 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
 
   void _clearPending() {
     _pending = null;
-    _marks.value = [for (final m in _marks.value) if (m.color != _selectColor) m];
+    _marks.value = [
+      for (final m in _marks.value)
+        if (m.color != _selectColor) m,
+    ];
   }
 
   /// Kalemle çizilen kutu bırakıldı: normalize et, çok küçükse reddet.
-  void _onBox(int page, double x1, double y1, double x2, double y2, double pw, double ph) {
+  void _onBox(
+    int page,
+    double x1,
+    double y1,
+    double x2,
+    double y2,
+    double pw,
+    double ph,
+  ) {
     if (!mounted) return;
     final box = normalizeQuestionBox(x1, y1, x2, y2, PdfPageSize(pw, ph));
     if (box == null) {
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
-        ..showSnackBar(const SnackBar(content: Text('Kutu çok küçük. Soruyu saran daha büyük bir kutu çiz.')));
+        ..showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Kutu çok küçük. Soruyu saran daha büyük bir kutu çiz.',
+            ),
+          ),
+        );
       return;
     }
     setState(() => _pending = (page: page, box: box));
@@ -206,7 +232,9 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
     final router = GoRouter.maybeOf(context);
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(savedQuestionSnackBar(router, widget.info.record.id, card.id));
+      ..showSnackBar(
+        savedQuestionSnackBar(router, widget.info.record.id, card.id),
+      );
   }
 
   List<Widget> _overlays(BuildContext context, Rect rect, r.PdfPage page) => [
@@ -246,30 +274,6 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
       ),
       body: Column(
         children: [
-          PdfInkToolbar(
-            session: _session,
-            tool: _tool,
-            selecting: _selecting,
-            onSelect: () => _setSelecting(!_selecting),
-            color: _color,
-            width: _width,
-            onTool: (t) {
-              if (_selecting) _setSelecting(false);
-              setState(() {
-                _tool = t;
-                _applyBrush();
-              });
-            },
-            onColor: (c) => setState(() {
-              _color = c;
-              _applyBrush();
-            }),
-            onWidth: (w) => setState(() {
-              _width = w;
-              _applyBrush();
-            }),
-          ),
-          const Divider(height: 1),
           Expanded(
             child: Row(
               children: [
@@ -308,204 +312,104 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
                           ),
                         ),
                       ),
-                      if (_pending != null)
-                        Positioned(
-                          bottom: 48,
-                          left: 12,
-                          right: 12,
-                          child: Center(
-                            child: ConstrainedBox(
-                              constraints: const BoxConstraints(maxWidth: 560),
-                              child: PdfQuestionPanel(
-                                key: ValueKey(_pending),
-                                info: widget.info,
-                                page: _pending!.page,
-                                box: _pending!.box,
-                                onSaved: _onSaved,
-                                onCancel: () => setState(_clearPending),
-                              ),
-                            ),
-                          ),
-                        ),
-                      if (widget.questionId != null && widget.highlight != null)
-                        Positioned(
-                          right: 16,
-                          bottom: 56,
-                          child: FloatingActionButton.extended(
-                            key: const Key('pdf-solve-button'),
-                            heroTag: null,
-                            onPressed: () =>
-                                context.push(AppRoutes.pdfSolve(widget.info.record.id, widget.questionId!)),
-                            icon: const Icon(Icons.draw_outlined),
-                            label: const Text('Çöz'),
-                          ),
-                        ),
-                      Positioned(
-                        bottom: 12,
-                        left: 0,
-                        right: 0,
-                        child: IgnorePointer(
-                          child: Center(
-                            child: ValueListenableBuilder<int>(
-                              valueListenable: _page,
-                              builder: (_, n, _) => Container(
-                                key: const Key('pdf-page-indicator'),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 4,
+                      Positioned.fill(
+                        child: ListenableBuilder(
+                          listenable: _tools,
+                          builder: (context, _) {
+                            // Alttaki yuva sayfa göstergesini, "Çöz"ü ve soru panelini örtmesin.
+                            final pos = _tools.dockPosition;
+                            final lift = pos == DockPosition.bottom
+                                ? 84.0
+                                : 0.0;
+                            final liftRight = pos == DockPosition.right
+                                ? 84.0
+                                : 0.0;
+                            return Stack(
+                              children: [
+                                if (_pending != null)
+                                  Positioned(
+                                    bottom: 48 + lift,
+                                    left: 12,
+                                    right: 12,
+                                    child: Center(
+                                      child: ConstrainedBox(
+                                        constraints: const BoxConstraints(
+                                          maxWidth: 560,
+                                        ),
+                                        child: PdfQuestionPanel(
+                                          key: ValueKey(_pending),
+                                          info: widget.info,
+                                          page: _pending!.page,
+                                          box: _pending!.box,
+                                          onSaved: _onSaved,
+                                          onCancel: () =>
+                                              setState(_clearPending),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                if (widget.questionId != null &&
+                                    widget.highlight != null)
+                                  Positioned(
+                                    right: 16 + liftRight,
+                                    bottom: 56 + lift,
+                                    child: FloatingActionButton.extended(
+                                      key: const Key('pdf-solve-button'),
+                                      heroTag: null,
+                                      onPressed: () => context.push(
+                                        AppRoutes.pdfSolve(
+                                          widget.info.record.id,
+                                          widget.questionId!,
+                                        ),
+                                      ),
+                                      icon: const Icon(Icons.draw_outlined),
+                                      label: const Text('Çöz'),
+                                    ),
+                                  ),
+                                Positioned(
+                                  bottom: 12 + lift,
+                                  left: 0,
+                                  right: 0,
+                                  child: IgnorePointer(
+                                    child: Center(
+                                      child: ValueListenableBuilder<int>(
+                                        valueListenable: _page,
+                                        builder: (_, n, _) => Container(
+                                          key: const Key('pdf-page-indicator'),
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 12,
+                                            vertical: 4,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: Colors.black54,
+                                            borderRadius: BorderRadius.circular(
+                                              14,
+                                            ),
+                                          ),
+                                          child: Text(
+                                            '$n / ${rec.pageCount}',
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
                                 ),
-                                decoration: BoxDecoration(
-                                  color: Colors.black54,
-                                  borderRadius: BorderRadius.circular(14),
-                                ),
-                                child: Text(
-                                  '$n / ${rec.pageCount}',
-                                  style: const TextStyle(color: Colors.white),
-                                ),
-                              ),
-                            ),
-                          ),
+                              ],
+                            );
+                          },
                         ),
+                      ),
+                      FloatingToolDock(
+                        tools: _tools,
+                        session: _session,
+                        selecting: _selecting,
+                        onSelect: () => _setSelecting(!_selecting),
                       ),
                     ],
                   ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Kalem araç çubuğu (okuyucu ve çözüm ekranı ortak). [onSelect] null ise
-/// "Soru seç" düğmesi gösterilmez.
-class PdfInkToolbar extends StatelessWidget {
-  const PdfInkToolbar({
-    super.key,
-    required this.session,
-    required this.tool,
-    this.selecting = false,
-    this.onSelect,
-    required this.color,
-    required this.width,
-    required this.onTool,
-    required this.onColor,
-    required this.onWidth,
-  });
-
-  final PdfInkSession session;
-  final InkTool tool;
-  final bool selecting;
-  final VoidCallback? onSelect;
-  final int color;
-  final double width;
-  final ValueChanged<InkTool> onTool;
-  final ValueChanged<int> onColor;
-  final ValueChanged<double> onWidth;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    Widget toolBtn(InkTool t, IconData icon, String tip) => IconButton(
-      key: Key('pdf-tool-${t.name}'),
-      tooltip: tip,
-      isSelected: !selecting && tool == t,
-      icon: Icon(icon),
-      onPressed: () => onTool(t),
-    );
-    // Dar tablette (dikey) kalınlık seçimi "…" menüsüne iner; telefonda ve
-    // geniş tablette olduğu gibi (taşarsa yatay kayar).
-    final compact = isTabletContext(context) && MediaQuery.sizeOf(context).width < kToolbarCompactWidth;
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: [
-          const SizedBox(width: 8),
-          toolBtn(InkTool.pen, Icons.edit_outlined, 'Kalem'),
-          toolBtn(InkTool.highlighter, Icons.border_color_outlined, 'Fosforlu'),
-          toolBtn(InkTool.eraser, Icons.auto_fix_normal_outlined, 'Silgi'),
-          if (onSelect != null)
-          IconButton(
-            key: const Key('pdf-tool-select'),
-            tooltip: 'Soru seç',
-            isSelected: selecting,
-            icon: const Icon(Icons.crop_free),
-            onPressed: onSelect,
-          ),
-          const SizedBox(width: 8),
-          for (final c in _colors)
-            InkWell(
-              key: Key('pdf-color-${c.toRadixString(16)}'),
-              customBorder: const CircleBorder(),
-              onTap: () => onColor(c),
-              child: Padding(
-                padding: const EdgeInsets.all(6),
-                child: CircleAvatar(
-                  radius: 11,
-                  backgroundColor: Color(c),
-                  child: color == c
-                      ? const Icon(Icons.check, size: 14, color: Colors.white)
-                      : null,
-                ),
-              ),
-            ),
-          const SizedBox(width: 8),
-          if (compact)
-            PopupMenuButton<double>(
-              key: const Key('pdf-more'),
-              tooltip: 'Kalınlık',
-              icon: const Icon(Icons.more_horiz),
-              onSelected: onWidth,
-              itemBuilder: (_) => [
-                for (final w in _widths)
-                  CheckedPopupMenuItem(
-                    key: Key('pdf-width-${w.toInt()}'),
-                    value: w,
-                    checked: width == w,
-                    child: Text('Kalınlık ${w.toInt()}'),
-                  ),
-              ],
-            )
-          else
-          for (final w in _widths)
-            InkWell(
-              key: Key('pdf-width-${w.toInt()}'),
-              customBorder: const CircleBorder(),
-              onTap: () => onWidth(w),
-              child: Padding(
-                padding: const EdgeInsets.all(8),
-                child: Container(
-                  width: 8 + w * 2,
-                  height: 8 + w * 2,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: width == w ? cs.primary : cs.outline,
-                  ),
-                ),
-              ),
-            ),
-          const SizedBox(width: 8),
-          ListenableBuilder(
-            listenable: session,
-            builder: (_, _) => Row(
-              children: [
-                IconButton(
-                  key: const Key('pdf-undo'),
-                  tooltip: 'Geri al',
-                  icon: const Icon(Icons.undo_rounded),
-                  onPressed: session.canUndo && !session.erasing
-                      ? session.undo
-                      : null,
-                ),
-                IconButton(
-                  key: const Key('pdf-redo'),
-                  tooltip: 'Yinele',
-                  icon: const Icon(Icons.redo_rounded),
-                  onPressed: session.canRedo && !session.erasing
-                      ? session.redo
-                      : null,
                 ),
               ],
             ),
@@ -583,10 +487,14 @@ class _ThumbStrip extends StatelessWidget {
 /// "Soru kaydedildi" ileti çubuğu; "Çöz" eylemi önceden alınmış [router] ile
 /// çalışır (sayfadan çıkılmış olsa da `context` kullanılmaz).
 @visibleForTesting
-SnackBar savedQuestionSnackBar(GoRouter? router, String documentId, String cardId) => SnackBar(
-      content: const Text('Soru kaydedildi.'),
-      action: SnackBarAction(
-        label: 'Çöz',
-        onPressed: () => router?.push(AppRoutes.pdfSolve(documentId, cardId)),
-      ),
-    );
+SnackBar savedQuestionSnackBar(
+  GoRouter? router,
+  String documentId,
+  String cardId,
+) => SnackBar(
+  content: const Text('Soru kaydedildi.'),
+  action: SnackBarAction(
+    label: 'Çöz',
+    onPressed: () => router?.push(AppRoutes.pdfSolve(documentId, cardId)),
+  ),
+);

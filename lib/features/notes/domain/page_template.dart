@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 /// Defter sayfası şablonları ve çizgi konumları (saf Dart, T6).
 ///
 /// Koordinatlar not koordinatındadır (sayfa genişliği/yüksekliği ile aynı birim).
@@ -77,4 +79,32 @@ List<double> _centered(double length, double step) {
     if (v > 1e-9 && v < length - 1e-9) out.add(v);
   }
   return out;
+}
+
+/// SONSUZ sayfa için şablon çizgileri: yalnız [fromY]..[toY] aralığındaki (not
+/// koordinatı) yatay çizgiler, dikeyler sayfa genişliğine göre. Yatay konumlar
+/// sayfa yüksekliğinden BAĞIMSIZ üstten sayılır (kareli/noktalı: `k*step`,
+/// çizgili: `(k+2)*step`); böylece sayfa uzayınca çizgiler yerinden oynamaz.
+/// Sayfa yüksekliği [height] yalnız alt sınırı belirler.
+TemplateLines infiniteTemplateLines(
+  PageTemplate template,
+  double width,
+  double height,
+  double step,
+  double fromY,
+  double toY,
+) {
+  if (template == PageTemplate.plain) return const TemplateLines();
+  if (!(step > 0)) throw ArgumentError.value(step, 'step', 'Aralık pozitif olmalı');
+  final first = template == PageTemplate.ruled ? step * 2 : step;
+  final last = math.min(toY, height - step * 0.5);
+  final ys = <double>[];
+  final k0 = math.max(0, ((fromY - first) / step).floor());
+  for (var y = first + k0 * step; y <= last; y += step) {
+    if (y >= fromY) ys.add(y);
+  }
+  final xs = template == PageTemplate.ruled
+      ? const <double>[]
+      : templateLines(template, width, width, spacing: step).vertical;
+  return TemplateLines(horizontal: ys, vertical: xs);
 }

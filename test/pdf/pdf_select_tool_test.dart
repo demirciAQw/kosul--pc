@@ -387,7 +387,7 @@ void main() {
     await open(t);
     await t.tap(find.byKey(const Key('pdf-tool-select')));
     await t.pump();
-    await t.tap(find.byKey(const Key('pdf-tool-pen')));
+    await t.tap(find.byKey(const Key('note-pen')));
     await t.pump();
     final pen = await t.startGesture(const Offset(450, 500), kind: PointerDeviceKind.stylus);
     for (var i = 0; i < 6; i++) {

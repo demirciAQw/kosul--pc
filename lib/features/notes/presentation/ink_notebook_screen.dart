@@ -347,6 +347,7 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
                 ? () => setState(() => _pageId = pages[i + 1].id)
                 : () => _add(pages, afterCurrent: false),
             isLast: i == pages.length - 1,
+            infinite: current != null && isInfinitePage(current.height),
             onAdd: current == null ? null : () => _add(pages, afterCurrent: true),
           ),
           const FocusModeButton(),
@@ -465,6 +466,7 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
                         page: current!,
                         tools: _tools,
                         stylusOnlyOverride: widget.stylusOnlyOverride,
+                        onGrow: (h) => _repo.setPageSize(current!.id, current.width, h),
                         spacing: _spacing,
                         onSpacing: (f) => setState(() => _spacing = f),
                         onBackground: (c) =>
@@ -530,7 +532,11 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
     );
     await _guard(() async {
       await _editorKey.currentState?.flush();
-      await _repo.setPageSize(p.id, d.width, d.height);
+      // Sonsuza çevirirken mevcut yükseklik küçültülmez (çizgi kaybı yok).
+      final h = kind == PageSizeKind.infinite && p.height > d.height
+          ? p.height
+          : d.height;
+      await _repo.setPageSize(p.id, d.width, h);
     });
   }
 }
@@ -545,7 +551,11 @@ class _PagePill extends StatelessWidget {
     required this.onNext,
     required this.isLast,
     required this.onAdd,
+    this.infinite = false,
   });
+
+  /// Geçerli sayfa sonsuz (aşağı kayan): göstergede "Sonsuz" yazar.
+  final bool infinite;
   final int index;
   final int count;
   final VoidCallback? onPrev;
@@ -566,7 +576,10 @@ class _PagePill extends StatelessWidget {
           icon: const Icon(Icons.chevron_left),
           onPressed: onPrev,
         ),
-        Text('${index + 1} / $count', key: const Key('note-page-indicator')),
+        Text(
+          '${index + 1} / $count${infinite ? ' · Sonsuz' : ''}',
+          key: const Key('note-page-indicator'),
+        ),
         IconButton(
           key: const Key('note-page-next'),
           visualDensity: dense,
@@ -586,7 +599,7 @@ class _PagePill extends StatelessWidget {
   }
 }
 
-/// Sayfa boyutu seçici (A4 dikey / ekrana tam / sınırsız).
+/// Sayfa boyutu seçici (A4 dikey / ekrana tam / sonsuz aşağı kayan).
 class PageSizeDialog extends StatefulWidget {
   const PageSizeDialog({super.key, required this.initial});
   final PageSizeKind initial;
@@ -698,7 +711,9 @@ class _PageStrip extends StatelessWidget {
                             ),
                           ),
                           child: AspectRatio(
-                            aspectRatio: p.width / p.height,
+                            // Sonsuz sayfada yalnız üst kısım (A4 oranında) görünür.
+                            aspectRatio: p.width /
+                                (isInfinitePage(p.height) ? a4PageHeight : p.height),
                             child: _PageThumb(page: p),
                           ),
                         ),
@@ -858,16 +873,21 @@ class _ThumbPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    // Sonsuz sayfada küçük resim yalnız üst A4 kadarını gösterir.
+    final inf = isInfinitePage(page.height);
+    final shownH = inf ? a4PageHeight : page.height;
     PageTemplatePainter(
       template: page.template,
       background: page.background,
       pageWidth: page.width,
-      pageHeight: page.height,
+      pageHeight: shownH,
+      infinite: inf,
     ).paint(canvas, size);
     final pic = strokes;
     if (pic == null) return;
     canvas.save();
-    canvas.scale(size.width / page.width, size.height / page.height);
+    canvas.clipRect(Offset.zero & size);
+    canvas.scale(size.width / page.width, size.height / shownH);
     canvas.drawPicture(pic);
     canvas.restore();
   }

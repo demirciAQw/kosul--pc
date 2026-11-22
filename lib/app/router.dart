@@ -48,74 +48,205 @@ final routerProvider = Provider<GoRouter>((ref) {
       StatefulShellRoute.indexedStack(
         builder: (context, state, shell) => AppShell(shell: shell),
         branches: [
-          StatefulShellBranch(routes: [
-            GoRoute(path: AppRoutes.home, builder: (context, state) => const HomeScreen()),
-          ]),
-          StatefulShellBranch(routes: [
-            GoRoute(path: AppRoutes.anlikTab, builder: (context, state) => const AnlikScreen()),
-          ]),
-          StatefulShellBranch(routes: [
-            GoRoute(path: AppRoutes.books, builder: (context, state) => const BooksScreen()),
-          ]),
-          StatefulShellBranch(routes: [
-            GoRoute(path: AppRoutes.notebook, builder: (context, state) => const NotebookScreen()),
-          ]),
-          StatefulShellBranch(routes: [
-            GoRoute(path: AppRoutes.mockExams, builder: (context, state) => const MockExamsScreen()),
-          ]),
-          StatefulShellBranch(routes: [
-            GoRoute(path: AppRoutes.insights, builder: (context, state) => const DashboardScreen()),
-          ]),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: AppRoutes.home,
+                builder: (context, state) => const HomeScreen(),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: AppRoutes.anlikTab,
+                builder: (context, state) => const AnlikScreen(),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: AppRoutes.books,
+                builder: (context, state) => const BooksScreen(),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: AppRoutes.notebook,
+                builder: (context, state) => const NotebookScreen(),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: AppRoutes.mockExams,
+                builder: (context, state) => const MockExamsScreen(),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: AppRoutes.insights,
+                builder: (context, state) => const DashboardScreen(),
+              ),
+            ],
+          ),
         ],
       ),
       // Tam ekran sayfalar: alt çubuğun üstünde açılır. Sabit yollar (new,
       // incomplete) parametreli yollardan ÖNCE gelmeli.
-      GoRoute(path: AppRoutes.newSession, builder: (context, state) => const SessionSetupScreen()),
-      GoRoute(path: AppRoutes.activeSession, builder: (context, state) => const ActiveSessionScreen()),
+      GoRoute(
+        path: AppRoutes.newSession,
+        builder: (context, state) => const TabletFrame(
+          selected: RailItem.daha,
+          child: SessionSetupScreen(),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.activeSession,
+        builder: (context, state) => const ActiveSessionScreen(),
+      ),
       GoRoute(
         path: '/session/:id/results',
-        builder: (context, state) => SessionResultsScreen(sessionId: state.pathParameters['id']!),
+        builder: (context, state) => TabletFrame(
+          selected: RailItem.daha,
+          child: SessionResultsScreen(sessionId: state.pathParameters['id']!),
+        ),
       ),
       GoRoute(
         path: AppRoutes.newQuestion,
-        builder: (context, state) => AddQuestionScreen(prefill: state.extra as QuestionPrefill?),
+        builder: (context, state) => TabletFrame(
+          selected: RailItem.daha,
+          child: AddQuestionScreen(prefill: state.extra as QuestionPrefill?),
+        ),
       ),
       GoRoute(
         path: AppRoutes.incompleteQuestions,
-        builder: (context, state) => const IncompleteQuestionsScreen(),
+        builder: (context, state) => TabletFrame(
+          selected: RailItem.daha,
+          child: const IncompleteQuestionsScreen(),
+        ),
       ),
       GoRoute(
         path: '/questions/:id/edit',
-        builder: (context, state) => AddQuestionScreen(editCardId: state.pathParameters['id']!),
+        builder: (context, state) => TabletFrame(
+          selected: RailItem.daha,
+          child: AddQuestionScreen(editCardId: state.pathParameters['id']!),
+        ),
       ),
       GoRoute(
         path: '/questions/:id',
-        builder: (context, state) => QuestionDetailScreen(cardId: state.pathParameters['id']!),
+        builder: (context, state) => TabletFrame(
+          selected: RailItem.daha,
+          child: QuestionDetailScreen(cardId: state.pathParameters['id']!),
+        ),
       ),
-      GoRoute(path: AppRoutes.newAnlik, builder: (context, state) => const AnlikEditorScreen()),
+      GoRoute(
+        path: AppRoutes.newAnlik,
+        builder: (context, state) => const TabletFrame(
+          selected: RailItem.notlar,
+          child: AnlikEditorScreen(),
+        ),
+      ),
       GoRoute(
         path: '/anlik/not/:id',
-        builder: (context, state) => AnlikEditorScreen(noteId: state.pathParameters['id']!),
+        builder: (context, state) => TabletFrame(
+          selected: RailItem.notlar,
+          child: AnlikEditorScreen(noteId: state.pathParameters['id']!),
+        ),
       ),
-      GoRoute(path: AppRoutes.people, builder: (context, state) => const PeopleScreen()),
+      GoRoute(
+        path: AppRoutes.people,
+        builder: (context, state) =>
+            const TabletFrame(selected: RailItem.notlar, child: PeopleScreen()),
+      ),
       GoRoute(
         path: '/kisiler/:id',
-        builder: (context, state) => PersonNotesScreen(personId: state.pathParameters['id']!),
+        builder: (context, state) => TabletFrame(
+          selected: RailItem.notlar,
+          child: PersonNotesScreen(personId: state.pathParameters['id']!),
+        ),
       ),
-      GoRoute(path: AppRoutes.tags, builder: (context, state) => const TagsScreen()),
-      GoRoute(path: AppRoutes.plan, builder: (context, state) => const PlanScreen()),
-      GoRoute(path: AppRoutes.newPlan, builder: (context, state) => const CreatePlanScreen()),
-      GoRoute(path: AppRoutes.sessions, builder: (context, state) => const SessionHistoryScreen()),
-      GoRoute(path: AppRoutes.settings, builder: (context, state) => const SettingsScreen()),
-      GoRoute(path: AppRoutes.tools, builder: (context, state) => const ToolsScreen()),
-      GoRoute(path: AppRoutes.practiceTest, builder: (context, state) => const PracticeTestScreen()),
-      GoRoute(path: AppRoutes.claudeChanges, builder: (context, state) => const ClaudeChangesScreen()),
-      GoRoute(path: AppRoutes.conflicts, builder: (context, state) => const ConflictsScreen()),
-      GoRoute(path: AppRoutes.inkLab, builder: (context, state) => const InkLabPage()),
-      GoRoute(path: AppRoutes.pdfLibrary, builder: (context, state) =>
-          const TabletFrame(selected: RailItem.kitaplik, child: PdfLibraryPage())),
-      GoRoute(path: AppRoutes.notebooks, builder: (context, state) =>
-          const TabletFrame(selected: RailItem.defterler, child: NotebooksScreen())),
+      GoRoute(
+        path: AppRoutes.tags,
+        builder: (context, state) =>
+            const TabletFrame(selected: RailItem.notlar, child: TagsScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.plan,
+        builder: (context, state) =>
+            const TabletFrame(selected: RailItem.daha, child: PlanScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.newPlan,
+        builder: (context, state) => const TabletFrame(
+          selected: RailItem.daha,
+          child: CreatePlanScreen(),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.sessions,
+        builder: (context, state) => const TabletFrame(
+          selected: RailItem.daha,
+          child: SessionHistoryScreen(),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.settings,
+        builder: (context, state) => const TabletFrame(
+          selected: RailItem.ayarlar,
+          child: SettingsScreen(),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.tools,
+        builder: (context, state) =>
+            const TabletFrame(selected: RailItem.daha, child: ToolsScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.practiceTest,
+        builder: (context, state) => const TabletFrame(
+          selected: RailItem.daha,
+          child: PracticeTestScreen(),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.claudeChanges,
+        builder: (context, state) => const TabletFrame(
+          selected: RailItem.daha,
+          child: ClaudeChangesScreen(),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.conflicts,
+        builder: (context, state) => const TabletFrame(
+          selected: RailItem.daha,
+          child: ConflictsScreen(),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.inkLab,
+        builder: (context, state) => const InkLabPage(),
+      ),
+      GoRoute(
+        path: AppRoutes.pdfLibrary,
+        builder: (context, state) => const TabletFrame(
+          selected: RailItem.kitaplik,
+          child: PdfLibraryPage(),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.notebooks,
+        builder: (context, state) => const TabletFrame(
+          selected: RailItem.defterler,
+          child: NotebooksScreen(),
+        ),
+      ),
       GoRoute(
         path: '/defter/:id',
         builder: (context, state) => TabletFrame(
@@ -127,8 +258,12 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/pdf/:id',
         builder: (context, state) {
           final page = int.tryParse(state.uri.queryParameters['page'] ?? '');
-          final parts = (state.uri.queryParameters['box'] ?? '').split(',').map(double.tryParse).toList();
-          final ok = page != null &&
+          final parts = (state.uri.queryParameters['box'] ?? '')
+              .split(',')
+              .map(double.tryParse)
+              .toList();
+          final ok =
+              page != null &&
               page >= 0 &&
               parts.length == 4 &&
               parts.every((v) => v != null && v.isFinite) &&
@@ -139,7 +274,9 @@ final routerProvider = Provider<GoRouter>((ref) {
             child: PdfReaderPage(
               documentId: state.pathParameters['id']!,
               initialPage: ok ? page : null,
-              highlight: ok ? PdfBox(parts[0]!, parts[1]!, parts[2]!, parts[3]!) : null,
+              highlight: ok
+                  ? PdfBox(parts[0]!, parts[1]!, parts[2]!, parts[3]!)
+                  : null,
               questionId: ok ? state.uri.queryParameters['q'] : null,
             ),
           );
@@ -156,41 +293,78 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/soru/:questionId/coz',
-        builder: (context, state) => QuestionSolvePage(questionId: state.pathParameters['questionId']!),
+        builder: (context, state) =>
+            QuestionSolvePage(questionId: state.pathParameters['questionId']!),
       ),
-      GoRoute(path: AppRoutes.sendToComputer, builder: (context, state) => const SendToComputerScreen()),
+      GoRoute(
+        path: AppRoutes.sendToComputer,
+        builder: (context, state) => const TabletFrame(
+          selected: RailItem.daha,
+          child: SendToComputerScreen(),
+        ),
+      ),
       GoRoute(
         path: AppRoutes.newNote,
-        builder: (context, state) => NoteEditorScreen(initialSubject: state.extra as String?),
+        builder: (context, state) => TabletFrame(
+          selected: RailItem.daha,
+          child: NoteEditorScreen(initialSubject: state.extra as String?),
+        ),
       ),
       GoRoute(
         path: '/notes/:id',
-        builder: (context, state) => NoteEditorScreen(noteId: state.pathParameters['id']!),
+        builder: (context, state) => TabletFrame(
+          selected: RailItem.daha,
+          child: NoteEditorScreen(noteId: state.pathParameters['id']!),
+        ),
       ),
       GoRoute(
         path: '/books/:id/tests/:nodeId',
-        builder: (context, state) => TestDetailScreen(
-          bookId: state.pathParameters['id']!,
-          nodeId: state.pathParameters['nodeId']!,
+        builder: (context, state) => TabletFrame(
+          selected: RailItem.daha,
+          child: TestDetailScreen(
+            bookId: state.pathParameters['id']!,
+            nodeId: state.pathParameters['nodeId']!,
+          ),
         ),
       ),
       GoRoute(
         path: '/books/:id',
-        builder: (context, state) => BookDetailScreen(bookId: state.pathParameters['id']!),
+        builder: (context, state) => TabletFrame(
+          selected: RailItem.daha,
+          child: BookDetailScreen(bookId: state.pathParameters['id']!),
+        ),
       ),
-      GoRoute(path: AppRoutes.review, builder: (context, state) => const ReviewScreen()),
-      GoRoute(path: AppRoutes.newMockExam, builder: (context, state) => const EditMockExamScreen()),
+      GoRoute(
+        path: AppRoutes.review,
+        builder: (context, state) => const ReviewScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.newMockExam,
+        builder: (context, state) => const TabletFrame(
+          selected: RailItem.daha,
+          child: EditMockExamScreen(),
+        ),
+      ),
       GoRoute(
         path: AppRoutes.karneImport,
-        builder: (context, state) => KarneImportScreen(plan: state.extra! as KarneImportPlan),
+        builder: (context, state) => TabletFrame(
+          selected: RailItem.daha,
+          child: KarneImportScreen(plan: state.extra! as KarneImportPlan),
+        ),
       ),
       GoRoute(
         path: '/mock/:id/edit',
-        builder: (context, state) => EditMockExamScreen(examId: state.pathParameters['id']!),
+        builder: (context, state) => TabletFrame(
+          selected: RailItem.daha,
+          child: EditMockExamScreen(examId: state.pathParameters['id']!),
+        ),
       ),
       GoRoute(
         path: '/mock/:id',
-        builder: (context, state) => MockExamDetailScreen(examId: state.pathParameters['id']!),
+        builder: (context, state) => TabletFrame(
+          selected: RailItem.daha,
+          child: MockExamDetailScreen(examId: state.pathParameters['id']!),
+        ),
       ),
     ],
   );

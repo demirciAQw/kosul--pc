@@ -32,7 +32,7 @@ class AppShell extends ConsumerWidget {
       return Scaffold(
         body: Row(
           children: [
-            TabletRail(selected: selected, due: due),
+            TabletRail(selected: selected, due: due, onShell: true),
             const VerticalDivider(width: 1),
             Expanded(child: shell),
           ],

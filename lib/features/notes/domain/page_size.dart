@@ -1,10 +1,13 @@
 /// Defter sayfa boyutu seçenekleri (saf Dart).
 ///
 /// Not koordinatında genişlik SABİT [notePageWidth]; yalnızca yükseklik seçilir.
-/// "Sınırsız" gerçek sonsuz tuval DEĞİLDİR (veri modeli sayfa boyutludur):
-/// genişliğin 10 katı yüksekliğinde ([freePageHeight]) çok uzun bir sayfadır;
-/// zum ve kaydırmayla gezilir. Sayfa boyutu `ink_note_pages.width/height`
-/// sütunlarında tutulur (şema değişmez).
+/// "Sonsuz (aşağı kayan)" sayfa: ayrı bayrak YOK (şema değişmez); yüksekliği
+/// [infiniteMinHeight] ve üstü olan her sayfa sonsuz sayılır (eski 1404x14040
+/// "Sınırsız" sayfalar da). Çizim alt kenara [infiniteTriggerMargin] kadar
+/// yaklaşınca yükseklik [infiniteGrowStep] artar ([infiniteGrownHeight]);
+/// üst sınır [infiniteMaxHeight]. "Ekrana tam" en çok genişliğin 3 katı
+/// (4212) olduğundan eşik onun üstünde seçildi. Sayfa boyutu
+/// `ink_note_pages.width/height` sütunlarında tutulur.
 library;
 
 import 'dart:math' as math;
@@ -15,13 +18,25 @@ const notePageWidth = 1404.0;
 /// A4 dikey yüksekliği (genişlik 1404).
 const a4PageHeight = 1984.0;
 
-/// "Sınırsız (serbest tuval)" yüksekliği: genişliğin 10 katı (1404 x 14040).
-const freePageHeight = 14040.0;
+/// Bu yükseklik ve üstü "sonsuz" sayılır ("ekrana tam" en çok 4212).
+const infiniteMinHeight = 4300.0;
+
+/// Yeni sonsuz sayfanın başlangıç yüksekliği.
+const infiniteStartHeight = 4400.0;
+
+/// Her uzamada eklenen yükseklik.
+const infiniteGrowStep = 2000.0;
+
+/// Çizim alt kenara bu kadar yaklaşınca sayfa uzar.
+const infiniteTriggerMargin = 600.0;
+
+/// Sonsuz sayfanın üst sınırı (dolunca kullanıcı uyarılır).
+const infiniteMaxHeight = 200000.0;
 
 enum PageSizeKind {
   a4('a4', 'A4 dikey'),
   screen('screen', 'Ekrana tam (cihaz oranı)'),
-  free('free', 'Sınırsız (serbest tuval)');
+  infinite('infinite', 'Sonsuz (aşağı kayan)');
 
   const PageSizeKind(this.key, this.label);
   final String key;
@@ -49,14 +64,35 @@ double screenAspect(double width, double height) {
         width: notePageWidth,
         height: (notePageWidth * a).roundToDouble(),
       );
-    case PageSizeKind.free:
-      return (width: notePageWidth, height: freePageHeight);
+    case PageSizeKind.infinite:
+      return (width: notePageWidth, height: infiniteStartHeight);
   }
 }
 
 /// Kayıtlı boyuttan tür tahmini (diyalogta ilk seçim için).
 PageSizeKind pageSizeKindOf(double width, double height) {
-  if (height >= freePageHeight) return PageSizeKind.free;
+  if (isInfinitePage(height)) return PageSizeKind.infinite;
   if ((height - a4PageHeight).abs() < 1) return PageSizeKind.a4;
   return PageSizeKind.screen;
 }
+
+/// Yüksekliğe göre sayfa sonsuz mu (bayrak yok; bkz. dosya başı).
+bool isInfinitePage(double height) => height >= infiniteMinHeight;
+
+/// Çizgilerin en alt noktası [maxStrokeY] için gereken yeni yükseklik. Sonsuz
+/// olmayan sayfada ya da uzama gerekmiyorsa [height] aynen döner. Üst sınırı
+/// aşmaz ([infiniteMaxHeight]); sınırda kalındıysa [height] döner.
+double infiniteGrownHeight(double height, double maxStrokeY) {
+  if (!isInfinitePage(height) || !maxStrokeY.isFinite) return height;
+  var h = height;
+  while (maxStrokeY > h - infiniteTriggerMargin && h < infiniteMaxHeight) {
+    h = math.min(h + infiniteGrowStep, infiniteMaxHeight);
+  }
+  return h;
+}
+
+/// Sonsuz sayfa üst sınıra yaklaştı/vardı mı (uyarı için).
+bool infiniteAtLimit(double height, double maxStrokeY) =>
+    isInfinitePage(height) &&
+    height >= infiniteMaxHeight &&
+    maxStrokeY > height - infiniteTriggerMargin;

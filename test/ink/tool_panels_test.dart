@@ -289,7 +289,7 @@ void main() {
       await t.pump();
       expect(await _saved(t, s, repo), hasLength(1));
 
-      final tools = NoteToolSettings()..setEraser(true);
+      final tools = NoteToolSettings()..setEraseMode(EraseMode.stroke);
       tools.setSize(10); // yarıçap 10 (en az 8)
       tools.apply(s);
       final g1 = await t.startGesture(const Offset(200, 130), kind: PointerDeviceKind.stylus);

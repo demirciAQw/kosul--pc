@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../features/question_bank/question_bank_providers.dart';
 import 'platform.dart';
 import 'routes.dart';
+import 'tablet_more_menu.dart';
 
 /// Tablet eşiği (dp): kısa kenar bu değer ya da üstündeyse tablet düzeni.
 /// Katlanabilirin açık iç ekranı (~670 dp) tablet sayılır, kapalı dış ekranı
@@ -76,14 +77,22 @@ class FocusModeButton extends StatelessWidget {
 enum RailItem { kitaplik, defterler, notlar, soruDefteri, daha, ayarlar }
 
 /// Dar sol gezinme rayı: Kitaplık, Defterler, Notlar, Soru defteri, Daha fazla
-/// (Bugün, Kitaplar, Deneme, Analiz) ve en altta Ayarlar.
-class TabletRail extends StatelessWidget {
-  const TabletRail({super.key, required this.selected, required this.due});
+/// (tüm hedeflerin gruplu menüsü, `tablet_more_menu.dart`) ve en altta Ayarlar.
+/// Düşük ekranda üst kısım kayar, Ayarlar sabit kalır. [onShell]: ray ana
+/// kabukta mı (menü sayfaları `push` ile açılır).
+class TabletRail extends ConsumerWidget {
+  const TabletRail({
+    super.key,
+    required this.selected,
+    required this.due,
+    this.onShell = false,
+  });
   final RailItem? selected;
   final int due;
+  final bool onShell;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final cs = Theme.of(context).colorScheme;
     Widget item(
       RailItem id,
@@ -92,6 +101,7 @@ class TabletRail extends StatelessWidget {
       String label,
       VoidCallback onTap, {
       int badge = 0,
+      Key? key,
     }) {
       final sel = selected == id;
       return Semantics(
@@ -99,11 +109,11 @@ class TabletRail extends StatelessWidget {
         button: true,
         label: label,
         child: InkWell(
-          key: Key('rail-${id.name}'),
+          key: key ?? Key('rail-${id.name}'),
           borderRadius: BorderRadius.circular(14),
           onTap: onTap,
           child: SizedBox(
-            width: 72,
+            width: 88,
             height: 60,
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -127,7 +137,8 @@ class TabletRail extends StatelessWidget {
                 Text(
                   label,
                   maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                  softWrap: false,
+                  overflow: TextOverflow.fade,
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
                     color: sel ? cs.onSurface : cs.onSurfaceVariant,
                     fontWeight: sel ? FontWeight.w600 : null,
@@ -140,91 +151,76 @@ class TabletRail extends StatelessWidget {
       );
     }
 
-    final more = PopupMenuButton<String>(
-      key: const Key('rail-daha-menu'),
-      tooltip: '',
-      position: PopupMenuPosition.over,
-      onSelected: (path) => context.go(path),
-      itemBuilder: (_) => const [
-        PopupMenuItem(
-          key: Key('rail-more-home'),
-          value: AppRoutes.home,
-          child: Text('Bugün'),
-        ),
-        PopupMenuItem(
-          key: Key('rail-more-books'),
-          value: AppRoutes.books,
-          child: Text('Kitaplar'),
-        ),
-        PopupMenuItem(
-          key: Key('rail-more-mock'),
-          value: AppRoutes.mockExams,
-          child: Text('Deneme'),
-        ),
-        PopupMenuItem(
-          key: Key('rail-more-insights'),
-          value: AppRoutes.insights,
-          child: Text('Analiz'),
-        ),
-      ],
-      child: IgnorePointer(
-        child: item(
-          RailItem.daha,
-          Icons.more_horiz,
-          Icons.more_horiz,
-          'Daha fazla',
-          () {},
-        ),
-      ),
-    );
-
     return Material(
       color: cs.surfaceContainerLow,
       child: SizedBox(
         key: const Key('tablet-rail'),
-        width: 80,
+        width: 96,
         child: SafeArea(
           right: false,
           child: Column(
             children: [
-              const SizedBox(height: 8),
-              item(
-                RailItem.kitaplik,
-                Icons.picture_as_pdf_outlined,
-                Icons.picture_as_pdf,
-                'Kitaplık',
-                () => context.go(AppRoutes.pdfLibrary),
+              Expanded(
+                child: SingleChildScrollView(
+                  key: const Key('rail-scroll'),
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Column(
+                    children: [
+                      item(
+                        RailItem.kitaplik,
+                        Icons.picture_as_pdf_outlined,
+                        Icons.picture_as_pdf,
+                        'Kitaplık',
+                        () => context.go(AppRoutes.pdfLibrary),
+                      ),
+                      item(
+                        RailItem.defterler,
+                        Icons.edit_note_outlined,
+                        Icons.edit_note,
+                        'Defterler',
+                        () => context.go(AppRoutes.notebooks),
+                      ),
+                      item(
+                        RailItem.notlar,
+                        Icons.bolt_outlined,
+                        Icons.bolt_rounded,
+                        'Notlar',
+                        () => context.go(AppRoutes.anlikTab),
+                      ),
+                      item(
+                        RailItem.soruDefteri,
+                        Icons.collections_bookmark_outlined,
+                        Icons.collections_bookmark_rounded,
+                        'Soru defteri',
+                        () => context.go(AppRoutes.notebook),
+                        badge: due,
+                      ),
+                      item(
+                        RailItem.daha,
+                        Icons.more_horiz,
+                        Icons.more_horiz,
+                        'Daha fazla',
+                        () =>
+                            showTabletMoreMenu(context, ref, onShell: onShell),
+                        key: const Key('rail-daha-menu'),
+                      ),
+                    ],
+                  ),
+                ),
               ),
-              item(
-                RailItem.defterler,
-                Icons.edit_note_outlined,
-                Icons.edit_note,
-                'Defterler',
-                () => context.go(AppRoutes.notebooks),
-              ),
-              item(
-                RailItem.notlar,
-                Icons.bolt_outlined,
-                Icons.bolt_rounded,
-                'Notlar',
-                () => context.go(AppRoutes.anlikTab),
-              ),
-              item(
-                RailItem.soruDefteri,
-                Icons.collections_bookmark_outlined,
-                Icons.collections_bookmark_rounded,
-                'Soru defteri',
-                () => context.go(AppRoutes.notebook),
-                badge: due,
-              ),
-              more,
-              const Spacer(),
               item(
                 RailItem.ayarlar,
                 Icons.settings_outlined,
                 Icons.settings,
                 'Ayarlar',
-                () => context.push(AppRoutes.settings),
+                () {
+                  if (selected == RailItem.ayarlar) return;
+                  if (onShell) {
+                    context.push(AppRoutes.settings);
+                  } else {
+                    context.pushReplacement(AppRoutes.settings);
+                  }
+                },
               ),
               const SizedBox(height: 8),
             ],

@@ -276,8 +276,14 @@ void main() {
       await _wait(t, 2);
     }
 
-    // Çizgi modu.
+    // Çizgi modu (varsayılan artık kısmi silgi: karttan çizgi silgisi seçilir).
     await t.tap(find.byKey(const Key('note-eraser')));
+    await t.pumpAndSettle();
+    await t.tap(find.byKey(const Key('note-eraser'))); // seçili silgiye yeniden dokun: ayar penceresi
+    await t.pumpAndSettle();
+    await t.tap(find.byKey(const Key('note-erase-mode-stroke')));
+    await t.pumpAndSettle();
+    await t.tapAt(const Offset(2, 2));
     await t.pumpAndSettle();
     await _drag(t, c + const Offset(0, -30), c + const Offset(0, 30), PointerDeviceKind.stylus);
     await _flush(t);
@@ -291,7 +297,7 @@ void main() {
     // Alan modu.
     await t.tap(find.byKey(const Key('note-eraser'))); // seçili silgiye yeniden dokun: ayar penceresi
     await t.pumpAndSettle();
-    await t.tap(find.text('Alan'));
+    await t.tap(find.byKey(const Key('note-erase-mode-area')));
     await t.pumpAndSettle();
     await t.tapAt(const Offset(2, 2));
     await t.pumpAndSettle();

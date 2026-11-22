@@ -278,7 +278,7 @@ void main() {
     var rows = await allRows(t);
     expect(rows.map((r) => r.attemptNo).toList()..sort(), [1, 2]);
     expect(rows.every((r) => r.questionId == 'q1' && r.pdfDocumentId == null), isTrue);
-    await t.tap(find.byKey(const Key('pdf-undo')));
+    await t.tap(find.byKey(const Key('note-undo')));
     await settle(t, 400);
     rows = (await allRows(t)).where((r) => !r.deleted).toList();
     expect(rows.map((r) => r.attemptNo), [1]);

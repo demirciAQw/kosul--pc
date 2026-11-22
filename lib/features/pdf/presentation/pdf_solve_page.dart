@@ -6,7 +6,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/di/core_providers.dart';
-import '../../ink/domain/ink_models.dart';
+import '../../notes/data/note_tool_prefs_store.dart';
+import '../../notes/presentation/note_tool_dock.dart';
+import '../../notes/presentation/note_tool_settings.dart';
 import '../../question_bank/question_bank_providers.dart';
 import '../domain/pdf_engine.dart';
 import '../domain/solve.dart';
@@ -14,31 +16,47 @@ import '../pdf_providers.dart';
 import 'pdf_ink_input.dart';
 import 'pdf_ink_session.dart';
 import 'pdf_page_ink_layer.dart';
-import 'pdf_reader_page.dart' show PdfInkToolbar;
 import 'solve_background.dart';
 
 /// Çözüm ekranı (`/pdf/:id/soru/:questionId`): sorunun PDF kutusu çevresiyle
 /// açılır; her çözüm denemesi ayrı katmandır. PDF bu cihazda yoksa kartın
 /// önizlemesiyle açılır ([QuestionSolvePage]).
 class PdfSolvePage extends ConsumerWidget {
-  const PdfSolvePage({super.key, required this.documentId, required this.questionId});
+  const PdfSolvePage({
+    super.key,
+    required this.documentId,
+    required this.questionId,
+  });
   final String documentId;
   final String questionId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    Widget msg(String t) => Scaffold(appBar: AppBar(title: const Text('Soru çözümü')), body: Center(child: Text(t)));
+    Widget msg(String t) => Scaffold(
+      appBar: AppBar(title: const Text('Soru çözümü')),
+      body: Center(child: Text(t)),
+    );
     final card = ref.watch(questionByIdProvider(questionId));
     final info = ref.watch(pdfOpenInfoProvider(documentId));
     if (card.isLoading || info.isLoading) {
-      return Scaffold(appBar: AppBar(), body: const Center(child: CircularProgressIndicator()));
+      return Scaffold(
+        appBar: AppBar(),
+        body: const Center(child: CircularProgressIndicator()),
+      );
     }
     final c = card.value;
     final i = info.value;
     if (c == null) return msg('Soru bulunamadı.');
-    if (!c.hasPdfAnchor || c.pdfDocumentId != documentId) return msg('Bu soru bu PDF\'e bağlı değil.');
-    if (i == null || i.path == null) return QuestionSolvePage(questionId: questionId);
-    return PdfSolveView(info: i, questionId: questionId, page: c.pdfPage!, box: c.pdfBox!);
+    if (!c.hasPdfAnchor || c.pdfDocumentId != documentId)
+      return msg('Bu soru bu PDF\'e bağlı değil.');
+    if (i == null || i.path == null)
+      return QuestionSolvePage(questionId: questionId);
+    return PdfSolveView(
+      info: i,
+      questionId: questionId,
+      page: c.pdfPage!,
+      box: c.pdfBox!,
+    );
   }
 }
 
@@ -52,21 +70,40 @@ class QuestionSolvePage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    Widget msg(String t) => Scaffold(appBar: AppBar(title: const Text('Soru çözümü')), body: Center(child: Text(t)));
+    Widget msg(String t) => Scaffold(
+      appBar: AppBar(title: const Text('Soru çözümü')),
+      body: Center(child: Text(t)),
+    );
     final card = ref.watch(questionByIdProvider(questionId));
     final c = card.value;
-    if (card.isLoading) return Scaffold(appBar: AppBar(), body: const Center(child: CircularProgressIndicator()));
+    if (card.isLoading)
+      return Scaffold(
+        appBar: AppBar(),
+        body: const Center(child: CircularProgressIndicator()),
+      );
     if (c == null) return msg('Soru bulunamadı.');
     if (c.hasPdfAnchor) {
       final info = ref.watch(pdfOpenInfoProvider(c.pdfDocumentId!));
-      if (info.isLoading) return Scaffold(appBar: AppBar(), body: const Center(child: CircularProgressIndicator()));
+      if (info.isLoading)
+        return Scaffold(
+          appBar: AppBar(),
+          body: const Center(child: CircularProgressIndicator()),
+        );
       final i = info.value;
       if (i != null && i.path != null) {
-        return PdfSolveView(info: i, questionId: questionId, page: c.pdfPage!, box: c.pdfBox!);
+        return PdfSolveView(
+          info: i,
+          questionId: questionId,
+          page: c.pdfPage!,
+          box: c.pdfBox!,
+        );
       }
     }
     final image = c.questionImage;
-    switch (solveSpaceOf(hasPdfAnchor: c.hasPdfAnchor, hasImage: image != null)) {
+    switch (solveSpaceOf(
+      hasPdfAnchor: c.hasPdfAnchor,
+      hasImage: image != null,
+    )) {
       case SolveSpace.none:
         return msg('Bu sorunun görüntüsü yok; çizim için önce fotoğraf ekle.');
       case SolveSpace.pdf:
@@ -81,13 +118,21 @@ class QuestionSolvePage extends ConsumerWidget {
           ),
         );
       case SolveSpace.photo:
-        return SolveView(questionId: questionId, loadBackground: (ref) => loadPhotoBackground(ref, questionId, image!));
+        return SolveView(
+          questionId: questionId,
+          loadBackground: (ref) => loadPhotoBackground(ref, questionId, image!),
+        );
     }
   }
 }
 
 /// PDF sayfasını çizer; arka plan olarak döner.
-Future<SolveBackground> loadPdfBackground(WidgetRef ref, PdfOpenInfo info, int pageNo, PdfBox box) async {
+Future<SolveBackground> loadPdfBackground(
+  WidgetRef ref,
+  PdfOpenInfo info,
+  int pageNo,
+  PdfBox box,
+) async {
   final engine = ref.read(pdfEngineProvider);
   final doc = await engine.openFile(info.path!);
   try {
@@ -109,7 +154,9 @@ Future<SolveBackground> loadPdfBackground(WidgetRef ref, PdfOpenInfo info, int p
       img.bytes,
       img.width,
       img.height,
-      img.format == PdfPixelFormat.bgra ? ui.PixelFormat.bgra8888 : ui.PixelFormat.rgba8888,
+      img.format == PdfPixelFormat.bgra
+          ? ui.PixelFormat.bgra8888
+          : ui.PixelFormat.rgba8888,
       c.complete,
     );
     final decoded = await c.future;
@@ -128,10 +175,19 @@ Future<SolveBackground> loadPdfBackground(WidgetRef ref, PdfOpenInfo info, int p
 }
 
 /// Fotoğraflı kart: görüntü tam genişlikte, altında yazı payı.
-Future<SolveBackground> loadPhotoBackground(WidgetRef ref, String questionId, String mediaPath) async {
+Future<SolveBackground> loadPhotoBackground(
+  WidgetRef ref,
+  String questionId,
+  String mediaPath,
+) async {
   final file = ref.read(mediaStorageProvider).resolve(mediaPath);
   final d = await decodeSolveImage(file);
-  final bg = ImageBackground.photo(questionId: questionId, image: d.image, pixelWidth: d.width, pixelHeight: d.height);
+  final bg = ImageBackground.photo(
+    questionId: questionId,
+    image: d.image,
+    pixelWidth: d.width,
+    pixelHeight: d.height,
+  );
   if (bg == null) {
     d.image.dispose();
     throw StateError('Görüntü boyutu geçersiz');
@@ -149,7 +205,12 @@ Future<SolveBackground> loadPreviewBackground(
 }) async {
   final file = ref.read(mediaStorageProvider).resolve(image);
   final d = await decodeSolveImage(file);
-  final bg = ImageBackground.pdfPreview(documentId: documentId, page: page, box: box, image: d.image);
+  final bg = ImageBackground.pdfPreview(
+    documentId: documentId,
+    page: page,
+    box: box,
+    image: d.image,
+  );
   if (bg == null) {
     d.image.dispose();
     throw StateError('Soru kutusu geçersiz');
@@ -159,7 +220,13 @@ Future<SolveBackground> loadPreviewBackground(
 
 /// PDF bu cihazdayken çözüm ekranı (PDF sayfası arka plan).
 class PdfSolveView extends StatelessWidget {
-  const PdfSolveView({super.key, required this.info, required this.questionId, required this.page, required this.box});
+  const PdfSolveView({
+    super.key,
+    required this.info,
+    required this.questionId,
+    required this.page,
+    required this.box,
+  });
   final PdfOpenInfo info;
   final String questionId;
 
@@ -177,7 +244,11 @@ class PdfSolveView extends StatelessWidget {
 /// Ortak çözüm ekranı: arka planı [loadBackground] verir (PDF sayfası ya da
 /// görüntü); denemeler, eski çözüm, süre, kayıt hepsi için aynıdır.
 class SolveView extends ConsumerStatefulWidget {
-  const SolveView({super.key, required this.questionId, required this.loadBackground});
+  const SolveView({
+    super.key,
+    required this.questionId,
+    required this.loadBackground,
+  });
   final String questionId;
   final Future<SolveBackground> Function(WidgetRef ref) loadBackground;
 
@@ -197,9 +268,8 @@ class _SolveViewState extends ConsumerState<SolveView> {
   bool _compare = false;
   (int, int)? _cmp;
 
-  InkTool _tool = InkTool.pen;
-  int _color = 0xFF1B1B1F;
-  double _width = 4;
+  final _tools = NoteToolSettings();
+  late final NoteToolPrefsBinding _prefs;
 
   // Arka plan (PDF sayfası ya da görüntü).
   SolveBackground? _bg;
@@ -209,7 +279,14 @@ class _SolveViewState extends ConsumerState<SolveView> {
   @override
   void initState() {
     super.initState();
-    _lifecycle = AppLifecycleListener(onInactive: _flush, onHide: _flush, onPause: _flush);
+    _lifecycle = AppLifecycleListener(
+      onInactive: _flush,
+      onHide: _flush,
+      onPause: _flush,
+    );
+    _tools.addListener(_applyBrush);
+    // Kalem boyutu ve yuva konumu defter ve okuyucuyla AYNI kalıcı ayardır.
+    _prefs = NoteToolPrefsBinding(ref.read(noteToolPrefsStoreProvider), _tools);
     unawaited(_loadBackground());
   }
 
@@ -227,13 +304,16 @@ class _SolveViewState extends ConsumerState<SolveView> {
       clock: ref.read(clockProvider),
       attemptNo: attempt,
       questionId: widget.questionId,
+      penKinds: true,
     );
-    _errorSubs.add(s.errors.listen((m) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(content: Text(m)));
-    }));
+    _errorSubs.add(
+      s.errors.listen((m) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(content: Text(m)));
+      }),
+    );
     return s;
   });
 
@@ -253,6 +333,9 @@ class _SolveViewState extends ConsumerState<SolveView> {
   @override
   void dispose() {
     _disposed = true;
+    _tools.removeListener(_applyBrush);
+    _prefs.dispose();
+    _tools.dispose();
     _lifecycle.dispose();
     for (final s in _errorSubs) {
       s.cancel();
@@ -268,8 +351,11 @@ class _SolveViewState extends ConsumerState<SolveView> {
   void _applyBrush() {
     final cur = _current;
     if (cur == null || _bg == null) return;
-    final w = (_tool == InkTool.highlighter ? _width * 4 : _width) * (_bg?.brushScale ?? 1);
-    _sessionFor(cur).setBrush(InkBrush(tool: _tool, color: _color, width: w));
+    final s = _sessionFor(cur);
+    _tools.apply(s);
+    // Fotoğraf uzayında kalınlık/silgi yarıçapı arka plana göre ölçeklenir.
+    final scale = _bg?.brushScale ?? 1;
+    if (scale != 1) s.setBrush(s.brush.copyWith(width: s.brush.width * scale));
   }
 
   Future<void> _resolve(List<int> nos) async {
@@ -303,46 +389,52 @@ class _SolveViewState extends ConsumerState<SolveView> {
       _applyBrush();
     }
     final cur = _current;
-    Duration durOf(int n) => list.where((a) => a.no == n).firstOrNull?.duration ?? Duration.zero;
+    Duration durOf(int n) =>
+        list.where((a) => a.no == n).firstOrNull?.duration ?? Duration.zero;
 
     return Scaffold(
-      appBar: AppBar(title: Text('Soru çözümü', overflow: TextOverflow.ellipsis)),
+      appBar: AppBar(
+        title: Text('Soru çözümü', overflow: TextOverflow.ellipsis),
+      ),
       body: _loadError != null
-          ? Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(_loadError!)))
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text(_loadError!),
+              ),
+            )
           : cur == null
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
-                PdfInkToolbar(
-                  session: _sessionFor(cur),
-                  tool: _tool,
-                  color: _color,
-                  width: _width,
-                  onTool: (t) => setState(() {
-                    _tool = t;
-                    _applyBrush();
-                  }),
-                  onColor: (c) => setState(() {
-                    _color = c;
-                    _applyBrush();
-                  }),
-                  onWidth: (w) => setState(() {
-                    _width = w;
-                    _applyBrush();
-                  }),
-                ),
                 _controls(nos, cur, durOf),
                 const Divider(height: 1),
-                Expanded(child: _canvas(nos, cur)),
+                Expanded(
+                  child: Stack(
+                    children: [
+                      _canvas(nos, cur),
+                      FloatingToolDock(
+                        tools: _tools,
+                        session: _sessionFor(cur),
+                      ),
+                    ],
+                  ),
+                ),
               ],
             ),
     );
   }
 
   Widget _controls(List<int> nos, int cur, Duration Function(int) durOf) {
-    final others = [for (final n in nos) if (n != cur) n];
-    final oldSel = _oldPick != null && others.contains(_oldPick) ? _oldPick : defaultOldAttempt(nos, cur);
-    final cmp = _cmp ?? (nos.length >= 2 ? (nos[nos.length - 2], nos.last) : null);
+    final others = [
+      for (final n in nos)
+        if (n != cur) n,
+    ];
+    final oldSel = _oldPick != null && others.contains(_oldPick)
+        ? _oldPick
+        : defaultOldAttempt(nos, cur);
+    final cmp =
+        _cmp ?? (nos.length >= 2 ? (nos[nos.length - 2], nos.last) : null);
     String lbl(int n) => '$n. deneme · ${formatSolveDuration(durOf(n))}';
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -366,7 +458,9 @@ class _SolveViewState extends ConsumerState<SolveView> {
             key: const Key('solve-show-old'),
             label: const Text('Eski çözümü göster'),
             selected: _showOld && !_compare,
-            onSelected: others.isEmpty || _compare ? null : (v) => setState(() => _showOld = v),
+            onSelected: others.isEmpty || _compare
+                ? null
+                : (v) => setState(() => _showOld = v),
           ),
           if (_showOld && !_compare && others.isNotEmpty) ...[
             for (final n in others)
@@ -399,15 +493,33 @@ class _SolveViewState extends ConsumerState<SolveView> {
                   }),
           ),
           if (_compare && cmp != null) ...[
-            _cmpPicker('solve-cmp-a', cmp.$1, nos, compareTintA, (n) => setState(() => _cmp = (n, cmp.$2))),
-            _cmpPicker('solve-cmp-b', cmp.$2, nos, compareTintB, (n) => setState(() => _cmp = (cmp.$1, n))),
+            _cmpPicker(
+              'solve-cmp-a',
+              cmp.$1,
+              nos,
+              compareTintA,
+              (n) => setState(() => _cmp = (n, cmp.$2)),
+            ),
+            _cmpPicker(
+              'solve-cmp-b',
+              cmp.$2,
+              nos,
+              compareTintB,
+              (n) => setState(() => _cmp = (cmp.$1, n)),
+            ),
           ],
         ],
       ),
     );
   }
 
-  Widget _cmpPicker(String key, int value, List<int> nos, int tint, ValueChanged<int> on) => Row(
+  Widget _cmpPicker(
+    String key,
+    int value,
+    List<int> nos,
+    int tint,
+    ValueChanged<int> on,
+  ) => Row(
     mainAxisSize: MainAxisSize.min,
     children: [
       Icon(Icons.circle, size: 12, color: Color(tint)),
@@ -415,7 +527,10 @@ class _SolveViewState extends ConsumerState<SolveView> {
       DropdownButton<int>(
         key: Key(key),
         value: nos.contains(value) ? value : null,
-        items: [for (final n in nos) DropdownMenuItem(value: n, child: Text('$n. deneme'))],
+        items: [
+          for (final n in nos)
+            DropdownMenuItem(value: n, child: Text('$n. deneme')),
+        ],
         onChanged: (n) {
           if (n != null) on(n);
         },
@@ -433,7 +548,9 @@ class _SolveViewState extends ConsumerState<SolveView> {
       showOld: _showOld,
       old: _oldPick ?? defaultOldAttempt(nos, cur),
       oldOpacity: _opacity,
-      compare: _compare ? (_cmp ?? (nos.length >= 2 ? (nos[nos.length - 2], nos.last) : null)) : null,
+      compare: _compare
+          ? (_cmp ?? (nos.length >= 2 ? (nos[nos.length - 2], nos.last) : null))
+          : null,
     );
     final editSession = _sessionFor(cur);
     Widget layer(SolveLayerSpec spec) {
@@ -447,10 +564,16 @@ class _SolveViewState extends ConsumerState<SolveView> {
         originY: region.top,
       );
       if (spec.tint != null) {
-        w = ColorFiltered(colorFilter: ColorFilter.mode(Color(spec.tint!), BlendMode.srcIn), child: w);
+        w = ColorFiltered(
+          colorFilter: ColorFilter.mode(Color(spec.tint!), BlendMode.srcIn),
+          child: w,
+        );
       }
       if (spec.opacity < 1) w = Opacity(opacity: spec.opacity, child: w);
-      return KeyedSubtree(key: ValueKey('solve-layer-${spec.attemptNo}'), child: w);
+      return KeyedSubtree(
+        key: ValueKey('solve-layer-${spec.attemptNo}'),
+        child: w,
+      );
     }
 
     return LayoutBuilder(
@@ -488,7 +611,9 @@ class _SolveViewState extends ConsumerState<SolveView> {
           ),
         );
         // Üst üste bindirme salt okunurdur: kalem girişi yok (görünüm yine kayar/yakınlaşır).
-        return _compare ? viewer : PdfInkInput(session: editSession, child: viewer);
+        return _compare
+            ? viewer
+            : PdfInkInput(session: editSession, child: viewer);
       },
     );
   }

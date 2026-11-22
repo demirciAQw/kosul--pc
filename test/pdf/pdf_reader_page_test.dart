@@ -11,6 +11,7 @@ import 'package:kocum/core/di/core_providers.dart';
 import 'package:kocum/features/ink/domain/ink_stroke_record.dart';
 import 'package:kocum/features/pdf/domain/pdf_document_record.dart';
 import 'package:kocum/features/pdf/domain/pdf_engine.dart' show PdfBox;
+import 'package:kocum/features/notes/data/note_tool_prefs_store.dart';
 import 'package:kocum/features/pdf/pdf_providers.dart';
 import 'package:kocum/features/pdf/presentation/pdf_reader_page.dart';
 import 'package:pdfrx/pdfrx.dart' show pdfrxInitialize;
@@ -91,11 +92,11 @@ void main() {
       expect(find.byKey(const Key('pdf-page-indicator')), findsOneWidget);
       expect(find.text('1 / 3'), findsOneWidget);
       for (final k in [
-        'pdf-tool-pen',
-        'pdf-tool-highlighter',
-        'pdf-tool-eraser',
-        'pdf-undo',
-        'pdf-redo',
+        'note-pen',
+        'note-pen-highlighter',
+        'note-eraser',
+        'note-undo',
+        'note-redo',
       ]) {
         expect(find.byKey(Key(k)), findsOneWidget);
       }
@@ -108,6 +109,37 @@ void main() {
       expect(find.byKey(const Key('pdf-thumb-strip')), findsNothing);
     },
   );
+
+  testWidgets('okuyucuda ortak yuva: tüm araçlar, soru seç, sayfa şablonu yok; konum ve silgi modu kalıcı', (t) async {
+    await open(t);
+    await settle(t, 500); // kayıtlı ayar okunur
+    for (final k in ['note-pen', 'note-pen-highlighter', 'note-eraser', 'note-lasso', 'note-shape', 'note-undo', 'note-redo', 'pdf-tool-select', 'note-dock-move']) {
+      expect(find.byKey(Key(k)), findsOneWidget, reason: k);
+    }
+    expect(find.byKey(const Key('note-template')), findsNothing);
+    // Alttayken sayfa göstergesi yuvanın üstünde kalır.
+    expect(
+      t.getRect(find.byKey(const Key('pdf-page-indicator'))).bottom,
+      lessThan(t.getRect(find.byKey(const Key('note-dock'))).top + 1),
+    );
+    // Sol kenara al, silgiyi seç: kalıcı ayara yazılır (defterle aynı anahtar).
+    await t.tap(find.byKey(const Key('note-dock-move')));
+    await t.pumpAndSettle();
+    await t.tap(find.byKey(const Key('note-dock-pos-left')));
+    await t.pumpAndSettle();
+    expect(t.getRect(find.byKey(const Key('note-dock'))).left, lessThan(20));
+    await t.tap(find.byKey(const Key('note-eraser')));
+    await t.pump();
+    await t.pump(const Duration(seconds: 1)); // gecikmeli kayıt tetiklenir
+    await settle(t, 500);
+    late String? saved;
+    await t.runAsync(() async {
+      final row = await (db.select(db.appMeta)..where((m) => m.metaKey.equals(NoteToolPrefsStore.desktopKey))).getSingleOrNull();
+      saved = row?.metaValue;
+    });
+    expect(saved, contains('"dock.pos":"left"'));
+    expect(saved, contains('"erase.mode":"area"'));
+  });
 
   testWidgets(
     'kalem sayfaya çizer ve kaydeder; parmak sayfayı kaydırır (göstergesi değişir)',
@@ -160,6 +192,7 @@ void main() {
     'kalem çizerken parmak/avuç görünümü kaydırmaz; kalem kalkınca parmak yine kaydırır',
     (t) async {
       await open(t);
+      final top0 = t.getRect(find.byType(PdfPageInkLayer).first).top;
       final pen = await t.startGesture(
         const Offset(450, 500),
         kind: PointerDeviceKind.stylus,
@@ -178,7 +211,7 @@ void main() {
       expect(find.text('1 / 3'), findsOneWidget);
       expect(
         t.getRect(find.byType(PdfPageInkLayer).first).top,
-        closeTo(116.5, 1),
+        closeTo(top0, 1),
       );
 
       final f = await t.startGesture(

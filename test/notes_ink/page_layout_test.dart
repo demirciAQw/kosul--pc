@@ -63,7 +63,7 @@ void main() {
   group('sayfa boyutu (saf)', () {
     test('A4, ekrana tam ve sınırsız boyutları; genişlik hep 1404', () {
       expect(pageDimensions(PageSizeKind.a4), (width: 1404.0, height: 1984.0));
-      expect(pageDimensions(PageSizeKind.free), (width: 1404.0, height: 14040.0));
+      expect(pageDimensions(PageSizeKind.infinite), (width: 1404.0, height: infiniteStartHeight));
       // 1600x2560 tablet: oran 1.6.
       expect(screenAspect(1600, 2560), 1.6);
       expect(screenAspect(2560, 1600), 1.6); // yatay da dikey sayılır
@@ -76,7 +76,8 @@ void main() {
     test('kayıtlı boyuttan tür tahmini', () {
       expect(pageSizeKindOf(1404, 1984), PageSizeKind.a4);
       expect(pageSizeKindOf(1404, 2246), PageSizeKind.screen);
-      expect(pageSizeKindOf(1404, 14040), PageSizeKind.free);
+      expect(pageSizeKindOf(1404, 14040), PageSizeKind.infinite); // eski "Sınırsız" sayfa
+      expect(pageSizeKindOf(1404, 4212), PageSizeKind.screen); // en uzun ekrana-tam
     });
 
     test('noktalı şablon: kareli ile aynı konumlar; anahtar çevirisi', () {
@@ -90,7 +91,7 @@ void main() {
     });
 
     test('sınırsız tuvalde çizgi sayısı makul', () {
-      final l = templateLines(PageTemplate.ruled, 1404, freePageHeight);
+      final l = templateLines(PageTemplate.ruled, 1404, 14040.0);
       expect(l.horizontal.length, lessThan(400));
     });
   });
@@ -109,14 +110,14 @@ void main() {
         final nb = await repo.createNotebook(
           defaultTemplate: PageTemplate.dots,
           pageWidth: 1404,
-          pageHeight: freePageHeight,
+          pageHeight: 14040.0,
         );
         await repo.addPage(nb);
         final pages = await repo.pages(nb);
         sizes = [for (final p in pages) p.height];
         tpl = pages.last.template;
       });
-      expect(sizes, [freePageHeight, freePageHeight]);
+      expect(sizes, [14040.0, 14040.0]);
       expect(tpl, PageTemplate.dots);
     });
 
@@ -146,11 +147,11 @@ void main() {
         return err;
       }
 
-      expect(await run(1404, freePageHeight), isNull);
-      expect((await t.runAsync(() => repo.findPage(pageId)))!.height, freePageHeight);
+      expect(await run(1404, 14040.0), isNull);
+      expect((await t.runAsync(() => repo.findPage(pageId)))!.height, 14040.0);
       // Çizgi y=1500'de: 1400'e küçültme engellenir, boyut aynı kalır.
       expect(await run(1404, 1400), isA<StateError>());
-      expect((await t.runAsync(() => repo.findPage(pageId)))!.height, freePageHeight);
+      expect((await t.runAsync(() => repo.findPage(pageId)))!.height, 14040.0);
       // Çizgiyi saran küçültme serbest.
       expect(await run(1404, 1984), isNull);
       expect((await t.runAsync(() => repo.findPage(pageId)))!.height, 1984);
@@ -338,14 +339,14 @@ void main() {
       }
 
       Future<double> height() async => (await t.runAsync(() async => (await repo.pages(nb)).single.height))!;
-      await choose('page-size-free');
-      expect(await height(), freePageHeight);
+      await choose('page-size-infinite');
+      expect(await height(), infiniteStartHeight);
       // Ekran oranı 1.2 (1200x1000): ekrana tam = 1685 yüksek; çizgi y=1800'de, engellenir.
       t.view.physicalSize = const Size(1200, 1000);
       await t.pumpAndSettle();
       await choose('page-size-screen');
       expect(find.textContaining('küçültülemez'), findsOneWidget);
-      expect(await height(), freePageHeight);
+      expect(await height(), infiniteStartHeight);
       await choose('page-size-a4');
       expect(await height(), 1984);
     });
@@ -380,6 +381,8 @@ void main() {
         }
         // Yuvayı üste al: taşma yok, yuva üst çubuğun altında.
         await t.tap(find.byKey(const Key('note-dock-move')));
+        await t.pumpAndSettle();
+        await t.tap(find.byKey(const Key('note-dock-pos-top')));
         await t.pumpAndSettle();
         expect(t.takeException(), isNull);
         expect(t.getRect(find.byKey(const Key('note-dock'))).top, lessThan(view.top + 40));
@@ -446,7 +449,7 @@ void main() {
       await t.pump();
       await t.tap(find.byKey(const Key('note-eraser')));
       await t.pumpAndSettle();
-      expect(find.byKey(const Key('note-erase-mode')), findsOneWidget);
+      expect(find.byKey(const Key('note-erase-mode-stroke')), findsOneWidget);
       expect(t.takeException(), isNull);
     });
 
@@ -464,6 +467,8 @@ void main() {
       await t.tapAt(const Offset(2, 2));
       await t.pumpAndSettle();
       await t.tap(find.byKey(const Key('note-dock-move')));
+      await t.pumpAndSettle();
+      await t.tap(find.byKey(const Key('note-dock-pos-top')));
       await _wait(t); // gecikmeli kayıt
       await t.pumpWidget(const SizedBox());
       await _wait(t, 3);

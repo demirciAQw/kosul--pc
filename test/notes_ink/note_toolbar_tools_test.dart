@@ -94,7 +94,7 @@ void main() {
     await t.tap(find.byKey(const Key('note-eraser')));
     await t.pumpAndSettle();
     expect(_name(t), 'Silgi');
-    expect(find.byKey(const Key('note-erase-mode')), findsOneWidget);
+    expect(find.byKey(const Key('note-erase-mode-area')), findsOneWidget);
     await t.tapAt(const Offset(2, 2));
     await t.pumpAndSettle();
 
@@ -157,7 +157,11 @@ void main() {
     expect(tools.eraserRadius, 44);
     expect(tools.brush.width * 2, 44);
     expect(tools.width, penWidth);
-    await t.tap(find.text('Alan'));
+    expect(tools.eraseMode, EraseMode.area); // varsayılan: kısmi silgi
+    await t.tap(find.byKey(const Key('note-erase-mode-stroke')));
+    await t.pumpAndSettle();
+    expect(tools.eraseMode, EraseMode.stroke);
+    await t.tap(find.byKey(const Key('note-erase-mode-area')));
     await t.pumpAndSettle();
     expect(tools.eraseMode, EraseMode.area);
   });
@@ -203,19 +207,103 @@ void main() {
     expect(t.takeException(), isNull);
   });
 
-  testWidgets('yuva alta/üste taşınır (⇅) ve konum araç ayarında tutulur', (t) async {
+  testWidgets('Konum menüsü: dört yön seçilir ve araç ayarında tutulur', (t) async {
     final tools = await _open(t, narrow);
-    expect(tools.dockAtTop, isFalse);
+    expect(tools.dockPosition, DockPosition.bottom);
     await t.tap(find.byKey(const Key('note-dock-move')));
-    await t.pump();
+    await t.pumpAndSettle();
+    for (final k in const ['top', 'bottom', 'left', 'right']) {
+      expect(find.byKey(Key('note-dock-pos-$k')), findsOneWidget);
+    }
+    await t.tap(find.byKey(const Key('note-dock-pos-top')));
+    await t.pumpAndSettle();
     expect(tools.dockAtTop, isTrue);
     expect(tools.toPrefs()['dock.top'], true);
+    await t.tap(find.byKey(const Key('note-dock-move')));
+    await t.pumpAndSettle();
+    await t.tap(find.byKey(const Key('note-dock-pos-right')));
+    await t.pumpAndSettle();
+    expect(tools.dockPosition, DockPosition.right);
+    expect(tools.toPrefs()['dock.pos'], 'right');
+    final back = NoteToolSettings()..restoreSizes(tools.toPrefs());
+    addTearDown(back.dispose);
+    expect(back.dockPosition, DockPosition.right);
+  });
+
+  testWidgets('Konum düğmesini basılı tutup sürükleyince en yakın kenara taşınır', (t) async {
+    final tools = await _open(t, narrow);
+    for (final (to, pos) in [
+      (const Offset(4, 600), DockPosition.left),
+      (const Offset(796, 600), DockPosition.right),
+      (const Offset(400, 3), DockPosition.top),
+      (const Offset(400, 1277), DockPosition.bottom),
+    ]) {
+      final g = await t.startGesture(t.getCenter(find.byKey(const Key('note-dock-move'))));
+      await t.pump(const Duration(milliseconds: 700)); // basılı tut
+      await g.moveTo(to);
+      await t.pump();
+      await g.up();
+      await t.pumpAndSettle();
+      expect(tools.dockPosition, pos);
+      // Yön değişti: düğme yerinde değil, sonraki turda yeniden bulunur.
+      await t.tap(find.byKey(const Key('note-dock-move')));
+      await t.pumpAndSettle();
+      await t.tap(find.byKey(Key('note-dock-pos-${pos.name}')));
+      await t.pumpAndSettle();
+    }
+  });
+
+  test('nearestDockPosition: boyuta oranlı en yakın kenar', () {
+    const s = Size(1250, 2000);
+    expect(nearestDockPosition(const Offset(600, 10), s), DockPosition.top);
+    expect(nearestDockPosition(const Offset(600, 1990), s), DockPosition.bottom);
+    expect(nearestDockPosition(const Offset(10, 1000), s), DockPosition.left);
+    expect(nearestDockPosition(const Offset(1240, 1000), s), DockPosition.right);
+    expect(nearestDockPosition(Offset.zero, Size.zero), DockPosition.bottom);
+  });
+
+  test('silgi varsayılanı kısmi (alan); mod kalıcı, bozuk değer yok sayılır', () {
+    final a = NoteToolSettings();
+    addTearDown(a.dispose);
+    expect(a.eraseMode, EraseMode.area);
+    a.setEraseMode(EraseMode.stroke);
+    final b = NoteToolSettings()..restoreSizes(a.toPrefs());
+    addTearDown(b.dispose);
+    expect(b.eraseMode, EraseMode.stroke);
+    final c = NoteToolSettings()..restoreSizes({'erase.mode': 'bozuk'});
+    addTearDown(c.dispose);
+    expect(c.eraseMode, EraseMode.area);
+    final d = NoteToolSettings()..restoreSizes(const {}); // eski kayıt: mod yok -> alan
+    addTearDown(d.dispose);
+    expect(d.eraseMode, EraseMode.area);
+  });
+
+  testWidgets('silgi penceresi: iki mod kartı, kalınlık sürgüsü ve önizleme hep görünür', (t) async {
+    final tools = await _open(t, narrow);
+    await t.tap(find.byKey(const Key('note-eraser')));
+    await t.pump();
+    await t.tap(find.byKey(const Key('note-eraser')));
+    await t.pumpAndSettle();
+    expect(find.text('Kısmi silgi (kalınlık)'), findsOneWidget);
+    expect(find.text('Çizgi silgisi (tamamını sil)'), findsOneWidget);
+    for (final m in [EraseMode.stroke, EraseMode.area]) {
+      await t.tap(find.byKey(Key('note-erase-mode-${m.name}')));
+      await t.pumpAndSettle();
+      expect(find.byKey(const Key('note-size-slider')), findsOneWidget);
+      expect(find.byKey(const Key('note-size-preview')), findsOneWidget);
+      expect(tools.eraseMode, m);
+    }
+    await t.drag(find.byKey(const Key('note-size-slider')), const Offset(200, 0));
+    await t.pump();
+    expect(tools.eraserRadius, greaterThan(eraserRadiusDefault));
   });
 
   testWidgets('odak modunda yuva küçülür: Sayfa ve ⇅ gizli, araçlar durur', (t) async {
     await _open(t, narrow, small: true);
     expect(find.byKey(const Key('note-template')), findsNothing);
     expect(find.byKey(const Key('note-dock-move')), findsNothing);
+    expect(find.byKey(const Key('note-undo')), findsOneWidget);
+    expect(find.byKey(const Key('note-redo')), findsOneWidget);
     expect(find.byKey(const Key('note-pen')), findsOneWidget);
     expect(t.getSize(find.byKey(const Key('note-eraser'))).shortestSide, 44);
   });

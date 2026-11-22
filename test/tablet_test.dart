@@ -11,12 +11,10 @@ import 'package:kocum/core/di/core_providers.dart';
 import 'package:kocum/app/tablet.dart';
 import 'package:kocum/core/database/app_database.dart';
 import 'package:kocum/features/ink/data/ink_stroke_repository.dart';
-import 'package:kocum/features/ink/domain/ink_models.dart';
 import 'package:kocum/features/notes/domain/page_template.dart';
 import 'package:kocum/features/notes/presentation/note_tool_dock.dart';
 import 'package:kocum/features/notes/presentation/note_tool_settings.dart';
 import 'package:kocum/features/pdf/presentation/pdf_ink_session.dart';
-import 'package:kocum/features/pdf/presentation/pdf_reader_page.dart';
 import 'package:kocum/features/question_bank/question_bank_providers.dart';
 
 PageStyleControl _styleCtl() => PageStyleControl(
@@ -145,6 +143,16 @@ void main() {
       expect(find.text('sayfa-/notebook'), findsOneWidget);
       await t.tap(find.byKey(const Key('rail-daha-menu')));
       await t.pumpAndSettle();
+      await t.scrollUntilVisible(
+        find.byKey(const Key('rail-more-insights')),
+        120,
+        scrollable: find.descendant(
+          of: find.byKey(const Key('rail-more-panel')),
+          matching: find.byType(Scrollable),
+        ),
+      );
+      await t.ensureVisible(find.byKey(const Key('rail-more-insights')));
+      await t.pumpAndSettle();
       await t.tap(find.byKey(const Key('rail-more-insights')));
       await t.pumpAndSettle();
       expect(find.text('sayfa-/insights'), findsOneWidget);
@@ -239,7 +247,7 @@ void main() {
         expect(t.getSize(find.byKey(const Key('note-eraser'))).shortestSide, greaterThanOrEqualTo(48));
       });
 
-      testWidgets('PdfInkToolbar ${size.width.toInt()}', (t) async {
+      testWidgets('PDF yuvası (soru seç, sayfasız) ${size.width.toInt()}', (t) async {
         late AppDatabase db;
         late PdfInkSession session;
         await t.runAsync(() async {
@@ -252,33 +260,26 @@ void main() {
         });
         addTearDown(() => t.runAsync(db.close));
         addTearDown(session.dispose);
+        final tools = NoteToolSettings();
+        addTearDown(tools.dispose);
         await _pump(
           t,
           MaterialApp(
             home: Scaffold(
-              body: PdfInkToolbar(
-                session: session,
-                tool: InkTool.pen,
-                onSelect: () {},
-                color: 0xFF000000,
-                width: 4,
-                onTool: (_) {},
-                onColor: (_) {},
-                onWidth: (_) {},
+              body: Column(
+                children: [
+                  NoteToolDock(tools: tools, session: session, onSelect: () {}),
+                ],
               ),
             ),
           ),
           size,
         );
         expect(t.takeException(), isNull);
-        expect(t.getSize(find.byType(PdfInkToolbar)).height, lessThan(64));
-        final wide = size.width >= kToolbarCompactWidth;
-        expect(
-          find.byKey(const Key('pdf-more')),
-          wide ? findsNothing : findsOneWidget,
-        );
-        expect(find.byKey(const Key('pdf-undo')), findsOneWidget);
+        expect(t.getSize(find.byKey(const Key('note-dock'))).height, lessThan(72));
+        expect(find.byKey(const Key('note-undo')), findsOneWidget);
         expect(find.byKey(const Key('pdf-tool-select')), findsOneWidget);
+        expect(find.byKey(const Key('note-template')), findsNothing); // PDF'te sayfa şablonu yok
       });
     }
 

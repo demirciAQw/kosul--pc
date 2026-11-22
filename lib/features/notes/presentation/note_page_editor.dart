@@ -11,6 +11,7 @@ import '../../pdf/presentation/pdf_ink_input.dart';
 import '../../pdf/presentation/pdf_ink_session.dart';
 import '../../pdf/presentation/pdf_page_ink_layer.dart';
 import '../domain/ink_notebook.dart';
+import '../domain/page_size.dart';
 import '../domain/page_template.dart';
 import '../../../app/tablet.dart';
 import 'note_tool_dock.dart';
@@ -34,7 +35,13 @@ class NotePageEditor extends ConsumerStatefulWidget {
     this.spacing = 1,
     required this.onSpacing,
     this.stylusOnlyOverride,
+    this.onGrow,
   });
+
+  /// Sonsuz sayfa alt kenara yaklaşınca yeni yükseklikle çağrılır (depo
+  /// `setPageSize`). Yalnız kalem havadayken (görünüm kilidi açıkken) çağrılır:
+  /// çizgi yarıda kalmaz. Hata atarsa bir sonraki denemede yeniden istenir.
+  final Future<void> Function(double newHeight)? onGrow;
 
   /// Zum aralığı (1 = sayfa genişliğe sığmış): 0.1 sayfayı küçük görmek, 30 ayrıntı için.
   static const minZoom = 0.1;
@@ -77,8 +84,11 @@ class NotePageEditorState extends ConsumerState<NotePageEditor> {
       penKinds: true,
     );
     widget.tools.apply(session);
-    _dockTopSeen = widget.tools.dockAtTop;
+    _dockSeen = widget.tools.dockPosition;
     widget.tools.addListener(_applyTools);
+    _pen = session.penFor(0)..addListener(_maybeGrow);
+    session.viewerLocked.addListener(_maybeGrow);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeGrow());
     _errorSub = session.errors.listen((m) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
@@ -93,13 +103,48 @@ class NotePageEditorState extends ConsumerState<NotePageEditor> {
     );
   }
 
-  bool _dockTopSeen = false;
+  late DockPosition _dockSeen;
+  late final PagePen _pen;
+
+  /// Büyütme istendi ama sayfa kaydı henüz güncellenmedi (çift istek olmasın).
+  double _requestedHeight = 0;
+  bool _limitWarned = false;
 
   void _applyTools() {
     widget.tools.apply(session);
-    // Yuva alta/üste geçince yerleşim yenilenir (diğer ayar değişimlerinde gerekmez).
-    if (_dockTopSeen != widget.tools.dockAtTop && mounted) {
-      setState(() => _dockTopSeen = widget.tools.dockAtTop);
+    // Yuva konumu değişince yerleşim yenilenir (diğer ayar değişimlerinde gerekmez).
+    if (_dockSeen != widget.tools.dockPosition && mounted) {
+      setState(() => _dockSeen = widget.tools.dockPosition);
+    }
+  }
+
+  /// Sonsuz sayfa: çizgiler alt kenara yaklaştıysa sayfayı uzatır. Kalem basılıyken
+  /// ya da havada (görünüm kilidi) ASLA: çizgi koordinatı/katmanı değişmesin.
+  void _maybeGrow() {
+    final grow = widget.onGrow;
+    final page = widget.page;
+    if (grow == null || !mounted || !isInfinitePage(page.height)) return;
+    if (session.viewerLocked.value) return;
+    var maxY = 0.0;
+    for (final s in _pen.strokes) {
+      if (s.points.isEmpty) continue;
+      final b = s.bounds.bottom;
+      if (b > maxY) maxY = b;
+    }
+    final target = infiniteGrownHeight(page.height, maxY);
+    if (target > page.height) {
+      if (target <= _requestedHeight) return;
+      _requestedHeight = target;
+      grow(target).catchError((_) => _requestedHeight = 0);
+    } else if (infiniteAtLimit(page.height, maxY) && !_limitWarned) {
+      _limitWarned = true;
+      ScaffoldMessenger.maybeOf(context)
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('Sayfa en uzun boyuna ulaştı; yeni sayfa ekle.'),
+          ),
+        );
     }
   }
 
@@ -114,11 +159,17 @@ class NotePageEditorState extends ConsumerState<NotePageEditor> {
       widget.tools.addListener(_applyTools);
       _applyTools();
     }
+    if (oldWidget.page.height != widget.page.height) {
+      _requestedHeight = 0;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _maybeGrow());
+    }
   }
 
   @override
   void dispose() {
     widget.tools.removeListener(_applyTools);
+    _pen.removeListener(_maybeGrow);
+    session.viewerLocked.removeListener(_maybeGrow);
     _lifecycle.dispose();
     _errorSub?.cancel();
     _transform.dispose();
@@ -154,8 +205,10 @@ class NotePageEditorState extends ConsumerState<NotePageEditor> {
     final page = widget.page;
     final cs = Theme.of(context).colorScheme;
     final focus = TabletFocus.maybeOf(context)?.value ?? false;
-    final dockTop = widget.tools.dockAtTop;
-    _dockTopSeen = dockTop;
+    final pos = widget.tools.dockPosition;
+    _dockSeen = pos;
+    final pad = MediaQuery.paddingOf(context);
+    final vertical = pos == DockPosition.left || pos == DockPosition.right;
     final viewer = ColoredBox(
       color: cs.surfaceContainerHighest,
       child: LayoutBuilder(
@@ -214,6 +267,8 @@ class NotePageEditorState extends ConsumerState<NotePageEditor> {
                                     pageWidth: page.width,
                                     pageHeight: page.height,
                                     spacingFactor: widget.spacing,
+                                    viewTransform: _transform,
+                                    viewSize: Size(box.maxWidth, box.maxHeight),
                                   ),
                                 ),
                               ),
@@ -235,9 +290,12 @@ class NotePageEditorState extends ConsumerState<NotePageEditor> {
               // Yuva sayfanın üstünde yüzer (sayfa alanı küçülmez); boş yerlerinde
               // dokunuşlar sayfaya geçer. Zum göstergesi yuvanın karşı kenarında.
               Positioned(
-                right: 8,
-                top: dockTop ? null : 8,
-                bottom: dockTop ? 8 + MediaQuery.paddingOf(context).bottom : null,
+                // Zum göstergesi yuvanın çakışmayacağı köşede: üst yuva -> sağ alt,
+                // sağ yuva -> sol üst, diğerleri -> sağ üst.
+                right: pos == DockPosition.right ? null : 8 + pad.right,
+                left: pos == DockPosition.right ? 8 + pad.left : null,
+                top: pos == DockPosition.top ? null : 8,
+                bottom: pos == DockPosition.top ? 8 + pad.bottom : null,
                 child: Material(
                   color: cs.surface.withValues(alpha: 0.9),
                   elevation: 2,
@@ -265,17 +323,23 @@ class NotePageEditorState extends ConsumerState<NotePageEditor> {
               ),
               Positioned.fill(
                 child: Align(
-                  alignment: dockTop ? Alignment.topCenter : Alignment.bottomCenter,
+                  alignment: switch (pos) {
+                    DockPosition.top => Alignment.topCenter,
+                    DockPosition.bottom => Alignment.bottomCenter,
+                    DockPosition.left => Alignment.centerLeft,
+                    DockPosition.right => Alignment.centerRight,
+                  },
                   child: Padding(
-                    // Telefonda (tablet çerçevesi yokken) yuva alttaki sistem
-                    // çubuğunun/jest alanının altında kalmasın.
+                    // Yuva sistem çubuklarının/jest alanının altında kalmasın;
+                    // sol/sağda sayfa tam genişlikte kalır, yuva üstünde yüzer.
                     padding: EdgeInsets.fromLTRB(
+                      10 + (pos == DockPosition.right ? 0 : pad.left),
                       10,
-                      10,
-                      10,
-                      10 + (dockTop ? 0 : MediaQuery.paddingOf(context).bottom),
+                      10 + (pos == DockPosition.left ? 0 : pad.right),
+                      10 + (pos == DockPosition.top ? 0 : pad.bottom),
                     ),
                     child: NoteToolDock(
+                      axis: vertical ? Axis.vertical : Axis.horizontal,
                       tools: widget.tools,
                       session: session,
                       small: focus,

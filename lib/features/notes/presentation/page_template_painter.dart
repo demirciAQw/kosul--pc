@@ -1,7 +1,9 @@
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 
+import '../domain/page_size.dart';
 import '../domain/page_template.dart';
 
 /// Sayfa arka planı ve şablon çizgileri. Koordinatlar not koordinatındadır;
@@ -13,7 +15,20 @@ class PageTemplatePainter extends CustomPainter {
     required this.pageWidth,
     required this.pageHeight,
     this.spacingFactor = 1,
-  });
+    bool? infinite,
+    this.viewTransform,
+    this.viewSize,
+  }) : infinite = infinite ?? isInfinitePage(pageHeight),
+       super(repaint: viewTransform);
+
+  /// Sonsuz (aşağı kayan) sayfa: yalnız görünen yatay aralık çizilir ve
+  /// çizgiler üstten sayılır (sayfa uzayınca yerinden oynamaz).
+  final bool infinite;
+
+  /// Sonsuz sayfada görünür aralığı bulmak için: kaydırma/zum matrisi (ekran)
+  /// ve görünüm boyutu. Verilmezse (küçük resim) sayfanın tamamı çizilir.
+  final ValueListenable<Matrix4>? viewTransform;
+  final Size? viewSize;
 
   final PageTemplate template;
   final int background;
@@ -27,14 +42,33 @@ class PageTemplatePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     canvas.drawRect(Offset.zero & size, Paint()..color = Color(background));
-    final lines = templateLines(
-      template,
-      pageWidth,
-      pageHeight,
-      spacing: defaultTemplateSpacing(pageWidth) * spacingFactor,
-    );
-    if (lines.isEmpty) return;
+    final step = defaultTemplateSpacing(pageWidth) * spacingFactor;
     final sx = size.width / pageWidth, sy = size.height / pageHeight;
+    final TemplateLines lines;
+    if (infinite) {
+      var from = 0.0, to = pageHeight;
+      final m = viewTransform?.value, vs = viewSize;
+      if (m != null && vs != null && vs.height > 0) {
+        final z = m.getMaxScaleOnAxis();
+        if (z > 0) {
+          // Görünür aralık (yerel px) + bir ekran payı, sonra not birimine.
+          final top = -m.getTranslation().y / z, bot = top + vs.height / z;
+          from = (top - vs.height / z * 0.5) / sy;
+          to = (bot + vs.height / z * 0.5) / sy;
+        }
+      }
+      lines = infiniteTemplateLines(
+        template,
+        pageWidth,
+        pageHeight,
+        step,
+        from,
+        to,
+      );
+    } else {
+      lines = templateLines(template, pageWidth, pageHeight, spacing: step);
+    }
+    if (lines.isEmpty) return;
     final paint = Paint()
       ..color = const Color(0xFF90A4AE).withValues(alpha: 0.55)
       ..strokeWidth = (sx * 1.2).clamp(0.5, 3.0);
@@ -66,6 +100,9 @@ class PageTemplatePainter extends CustomPainter {
       old.background != background ||
       old.pageWidth != pageWidth ||
       old.pageHeight != pageHeight ||
+      old.infinite != infinite ||
+      old.viewSize != viewSize ||
+      old.viewTransform != viewTransform ||
       old.spacingFactor != spacingFactor;
 }
 

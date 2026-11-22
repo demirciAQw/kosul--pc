@@ -186,3 +186,15 @@ Ahmet: "parmakla büyütme/küçültme yok, PDF'te el ile hareket yok, silinen d
 - Çizim arayüzü: ince üst çubuk, alta yüzen araç yuvası (≥52 dp), seçili araca tekrar dokununca ayar penceresi (boyut, renk, şekil, kalem türü, sertlik, silgi modu), ⇅ ile alta/üste, "Sayfa" penceresi (Düz/Çizgili/Kareli/Noktalı, arka plan, çizgi aralığı [yalnız oturumda]), sayfa şeridi varsayılan kapalı, kalem/silgi boyutları kalıcı (`defter.arac_ayari`).
 - Soru defterinde çizim: her kart için çözüm ekranı (`/soru/:id/coz`): fotoğraflı kartta görüntü tam genişlikte, altında yazı payı; koordinat görüntü genişliği 1000 birim; deneme katmanları, eski çözüm, süre. Kartta "✎ 2 · 1 dk" işareti. Soru nasıl saklanır: `docs/TABLET_PDF.md`.
 - 829 test. Açık: yuva kalemle sürüklenmiyor (yalnız ⇅); koyu arka planda varsayılan siyah kalem görünmez; ayar penceresi açıkken sayfaya çizilemez; fotoğraf başka oranlı resimle değiştirilirse eski çizgiler kayar.
+
+## v9.13: sonsuz defter, 4 kenar yuva, silgi, PDF araçları, tam sol menü (22.11.2026)
+Ahmet'in isteği: "sonsuz aşağı kayan defter; kalem menüsü yana/üste/alta kayabilsin; geri al/ileri al; silgi kalınlık modu; PDF'te aynı araçlar; tablette her şey, sol menüde hepsi, Daha fazla'nın altında".
+- **Sonsuz (aşağı kayan) sayfa:** genişlik 1404, yükseklik 4300+ ise sonsuz sayılır (şema değişmedi; eski 1404×14040 sayfalar da); kalem/çizgi alta 600 birim yaklaşınca +2000 uzar (üst sınır 200000), kalem basılıyken uzamaz, çizgi koordinatı değişmez, şablon yalnız görünen aralığa çizilir. Yeni sonsuz sayfa 1404×4400 başlar.
+- **Yuva:** üst/alt/sol/sağ; "Konum" düğmesi (4 yönlü menü) ya da basılı tutup sürükleyerek en yakın kenara; dikey düzen; kalıcı. Defter, PDF okuyucu ve çözüm ekranı aynı `NoteToolDock`/`FloatingToolDock`u kullanır; ayarlar ortak (`defter.arac_ayari`).
+- **Geri al/yinele:** yuvada hep görünür, büyük; basılı tutunca hızlı tekrar.
+- **Silgi:** varsayılan "Kısmi silgi (kalınlık)" = alan silgisi, kalınlık sürgüsü ve önizleme her zaman görünür; "Çizgi silgisi (tamamını sil)" ayrı mod, kalıcı.
+- **PDF okuyucu/çözüm:** eski araç çubuğu kalktı; tüm kalem türleri, fosforlu, silgi modları, kement, şekil, boyut, soru seç aynı yuvada.
+- **Sol menü:** "Daha fazla" tıklanır, 340 dp sağ panelde 38 hedef gruplu (Çalışma, Sorular, Kitaplar ve denemeler, Notlar, Analiz, Tablet, Araçlar, Ayarlar); ray 96 dp, kayar, Ayarlar sabit; üst düzey ekranlar da tablette rayla sarılı (aktif oturum, tekrar, soru çözümü, PDF çözümü, kalem denemesi hariç).
+- **Rotası olmayan, menüde ayrı satırı olmayanlar:** Optik, Hazır kitap ekle/JSON şablon (Kitaplar içinde), Silme önerileri, Claude raporu/dışa aktarma (`/tools` içinde).
+- Açık: çok uzun düz tek çizgide çizim sırasında takılma riski (dış hat üretimi, ölçülmedi); sürüklerken kenar önizlemesi yok; alt yuvayı SnackBar kısa süre örter; "Soru defteri" etiketi gerçek fontta sığıyor mu bakılmadı. 903 test.
+- **Soru nasıl saklanır:** PDF koordinatı (pdfDocumentId, pdfPage, pdfBox) kaynak gerçek; `questionImage` ~480 px önizleme PDF'siz cihazlar için.

@@ -142,7 +142,27 @@ void main() {
     final e = expectedPage(t, t.getCenter(find.byKey(const Key('solve-canvas'))));
     expect(r.single.points.first.x, closeTo(e.dx, 1));
     expect(r.single.points.first.y, closeTo(e.dy, 1));
-    expect(find.byKey(const Key('pdf-undo')), findsOneWidget);
+    expect(find.byKey(const Key('note-undo')), findsOneWidget);
+  });
+
+  testWidgets('çözüm ekranında ortak araç yuvası: kalem türleri, silgi, kement, şekil, konum', (t) async {
+    await open(t);
+    for (final k in ['note-pen', 'note-pen-highlighter', 'note-eraser', 'note-lasso', 'note-shape', 'note-undo', 'note-redo', 'note-dock-move']) {
+      expect(find.byKey(Key(k)), findsOneWidget, reason: k);
+    }
+    expect(find.byKey(const Key('note-template')), findsNothing); // sayfa şablonu yok
+    expect(find.byKey(const Key('pdf-tool-select')), findsNothing); // soru seç yalnız okuyucuda
+    // Konum: sağ kenara al -> dikey sütun.
+    await t.tap(find.byKey(const Key('note-dock-move')));
+    await t.pumpAndSettle();
+    await t.tap(find.byKey(const Key('note-dock-pos-right')));
+    await t.pumpAndSettle();
+    final dock = t.getRect(find.byKey(const Key('note-dock')));
+    expect(dock.right, greaterThan(t.view.physicalSize.width - 20));
+    expect(dock.width, lessThan(90));
+    // Silgi: varsayılan kısmi.
+    await t.tap(find.byKey(const Key('note-eraser')));
+    await t.pump();
   });
 
   testWidgets('yakınlaştırılmış görünümde de çizgi doğru SAYFA koordinatına düşer', (t) async {
@@ -190,7 +210,9 @@ void main() {
     expect(await rows(t, attempt: 1), hasLength(1));
     expect(await rows(t, attempt: 2), hasLength(1));
     // Katmanlar karışmadı: 2. denemeyi geri alınca yalnız o gider.
-    await t.tap(find.byKey(const Key('pdf-undo')));
+    await t.pump(const Duration(seconds: 6)); // alttaki ileti çubuğu yuvayı örtmesin
+    await t.pump(const Duration(seconds: 1));
+    await t.tap(find.byKey(const Key('note-undo')));
     await settle(t, 400);
     expect(await rows(t, attempt: 1), hasLength(1));
     expect(await rows(t, attempt: 2), isEmpty);
