@@ -3,7 +3,7 @@
 //
 //  - Bildirim izni (oturum kronometresi için)
 //  - Ağ izni (yalnızca yerel ağdaki bilgisayara kablosuz aktarım için)
-//  - Uygulama adı: Koçum
+//  - Uygulama adı: Koçum (debug derlemede "Koçum (deneme)", kimliği ".gece" sonlu)
 //  - flutter_local_notifications için core library desugaring
 //  - Sabit imza: android/key.properties varsa release APK onunla imzalanır
 //    (yoksa eskisi gibi hata ayıklama anahtarı kullanılır)
@@ -13,6 +13,7 @@
 import 'dart:io';
 
 import 'camera_patch.dart';
+import 'gece_patch.dart';
 import 'genai_patch.dart';
 import 'network_patch.dart';
 import 'r8_patch.dart';
@@ -43,7 +44,22 @@ void main() {
   _copyLauncherIcons();
   _patchGenAi(kts, groovy);
   _patchR8(kts, groovy);
+  _patchGece(kts, groovy);
   stdout.writeln('Android ayarları tamam.');
+}
+
+/// Deneme (debug) sürümü: ".gece" kimliği ve "Koçum (deneme)" adı; release aynı.
+void _patchGece(File kts, File groovy) {
+  try {
+    if (kts.existsSync()) {
+      kts.writeAsStringSync(patchGeceKts(kts.readAsStringSync()));
+    } else if (groovy.existsSync()) {
+      groovy.writeAsStringSync(patchGeceGroovy(groovy.readAsStringSync()));
+    }
+  } on GeceYamaHatasi catch (e) {
+    stderr.writeln('Deneme sürümü yaması yapılamadı: $e');
+    exit(1);
+  }
 }
 
 /// R8: ML Kit'in kullanılmayan dil okuyucuları için uyarılar kapatılır.
@@ -132,7 +148,8 @@ void _patchManifest(File file) {
     RegExp(r'\s*<activity\s+android:name="com\.yalantis\.ucrop\.UCropActivity"[^>]*/>'),
     '',
   );
-  s = s.replaceFirst(RegExp(r'android:label="[^"]*"'), 'android:label="Koçum"');
+  // Ad yer tutucudur: release "Koçum", debug "Koçum (deneme)" (tool/gece_patch.dart).
+  s = patchGeceManifest(s);
   // Kamera eklentisinin eklediği mikrofon izni (ses kaydı yok).
   s = removeAudioPermission(s);
   // Kablosuz aktarım: yalnızca yerel ağdaki eşleşmiş bilgisayara.
