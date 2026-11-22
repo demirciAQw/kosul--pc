@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:drift/native.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -34,8 +36,13 @@ Future<(PdfInkSession, InkStrokeRepository, ScrollController)> _host(
       home: Scaffold(
         body: PdfInkInput(
           session: session,
-          child: ListView(
+          stylusOnlyOverride: true,
+          // pdfrx'in panEnabled'ı gibi: kilitliyken görünüm kaymaz.
+          child: ValueListenableBuilder<bool>(
+            valueListenable: session.viewerLocked,
+            builder: (_, locked, _) => ListView(
             controller: sc,
+            physics: locked ? const NeverScrollableScrollPhysics() : null,
             children: [
               Align(
                 alignment: Alignment.topLeft,
@@ -52,6 +59,7 @@ Future<(PdfInkSession, InkStrokeRepository, ScrollController)> _host(
               ),
               const SizedBox(height: 2000),
             ],
+          ),
           ),
         ),
       ),
@@ -151,6 +159,118 @@ void main() {
       expect(sc.offset, greaterThan(50));
     },
   );
+
+  testWidgets(
+    'önce avuç sonra kalem: avuç kalem inince kaydırmayı bırakır, çizgi bozulmaz',
+    (t) async {
+      final (s, repo, sc) = await _host(t);
+      // Avuç kalemden ÖNCE değer ve görünüm onu izlemeye başlar.
+      final palm = await t.startGesture(
+        const Offset(300, 450),
+        kind: PointerDeviceKind.touch,
+      );
+      await palm.moveBy(const Offset(0, -20));
+      await t.pump();
+      final before = sc.offset;
+      final pen = await t.startGesture(
+        const Offset(100, 300),
+        kind: PointerDeviceKind.stylus,
+      );
+      expect(s.viewerLocked.value, isTrue);
+      for (var i = 0; i < 6; i++) {
+        await palm.moveBy(const Offset(0, -30));
+        await pen.moveBy(const Offset(8, 0));
+      }
+      await palm.up();
+      await pen.up();
+      await t.pumpAndSettle();
+      expect(sc.offset, before); // sayfa kalemle birlikte kaymadı
+      expect((await _saved(t, s, repo)), hasLength(1));
+      expect(s.viewerLocked.value, isFalse);
+    },
+  );
+
+  testWidgets('kalem havada sayfaya yaklaşınca önceki avuç da kilitlenir', (t) async {
+    final (s, _, sc) = await _host(t);
+    final palm = await t.startGesture(
+      const Offset(300, 450),
+      kind: PointerDeviceKind.touch,
+    );
+    await palm.moveBy(const Offset(0, -20));
+    await t.pump();
+    final before = sc.offset;
+    final hover = await t.createGesture(kind: PointerDeviceKind.stylus);
+    await hover.addPointer(location: const Offset(100, 300));
+    await hover.moveTo(const Offset(110, 300));
+    expect(s.viewerLocked.value, isTrue);
+    await t.pump(); // kilit bir sonraki karede görünüme ulaşır
+    await palm.moveBy(const Offset(0, -60));
+    await palm.up();
+    await t.pumpAndSettle();
+    expect(sc.offset, before);
+    await hover.removePointer();
+    await t.pump(const Duration(seconds: 1)); // havada tutma süresi dolar
+    expect(s.viewerLocked.value, isFalse);
+  });
+
+  testWidgets('büyük temas (avuç) baştan yutulur, görünümü kaydırmaz', (t) async {
+    final (_, _, sc) = await _host(t);
+    final p = TestPointer(77, PointerDeviceKind.touch);
+    final b = GestureBinding.instance;
+    b.handlePointerEvent(PointerDownEvent(
+      pointer: 77, position: const Offset(300, 450), radiusMajor: 60,
+    ));
+    for (var i = 1; i <= 6; i++) {
+      b.handlePointerEvent(PointerMoveEvent(
+        pointer: 77, position: Offset(300, 450 - i * 20.0),
+        delta: const Offset(0, -20), radiusMajor: 60,
+      ));
+    }
+    b.handlePointerEvent(PointerUpEvent(pointer: 77, position: const Offset(300, 330)));
+    expect(p.pointer, 77);
+    await t.pumpAndSettle();
+    expect(sc.offset, 0);
+  });
+
+  testWidgets('kalem sayfa dışındayken (boşluk) kilit yok, çizmez', (t) async {
+    final (s, repo, _) = await _host(t);
+    // Katman 400x600; (500, 300) sayfa dışı.
+    final hover = await t.createGesture(kind: PointerDeviceKind.stylus);
+    await hover.addPointer(location: const Offset(500, 300));
+    await hover.moveTo(const Offset(510, 300));
+    expect(s.viewerLocked.value, isFalse);
+    await _drag(t, const Offset(500, 300), PointerDeviceKind.stylus);
+    expect(await _saved(t, s, repo), isEmpty);
+    await hover.removePointer();
+  });
+
+  testWidgets('silgi sürerken geri al/yinele kapalı', (t) async {
+    final (s, repo, _) = await _host(t);
+    await _drag(t, const Offset(100, 300), PointerDeviceKind.stylus,
+        by: const Offset(120, 0));
+    await _saved(t, s, repo);
+    expect(s.canUndo, isTrue);
+    s.setBrush(const InkBrush(tool: InkTool.eraser, width: 6));
+    final g = await t.startGesture(const Offset(160, 300),
+        kind: PointerDeviceKind.stylus);
+    await g.moveBy(const Offset(0, 5));
+    expect(s.erasing, isTrue);
+    unawaited(s.undo()); // yutulur
+    await t.runAsync(() => Future.delayed(const Duration(milliseconds: 150)));
+    expect(s.canRedo, isFalse); // geri alma çalışsaydı yinele dolardı
+    expect(s.canUndo, isTrue);
+    await g.up();
+    await t.pump();
+    expect(s.erasing, isFalse);
+    await _saved(t, s, repo);
+  });
+
+  testWidgets('sayfa katmanı kalkınca önbellek boşalır', (t) async {
+    final (s, _, _) = await _host(t);
+    expect(s.cachedPages, 1);
+    await t.pumpWidget(const MaterialApp(home: SizedBox()));
+    expect(s.cachedPages, 0);
+  });
 
   testWidgets('silgi aracı çizgiyi siler ve kayıtta yumuşak siler', (t) async {
     final (s, repo, _) = await _host(t);

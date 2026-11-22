@@ -63,7 +63,7 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.session != widget.session || oldWidget.page != widget.page) {
       oldWidget.session.removeListener(_syncBrush);
-      oldWidget.session.unregisterLayer(this);
+      oldWidget.session.unregisterLayer(this, page: oldWidget.page);
       widget.session.addListener(_syncBrush);
       widget.session.registerLayer(this);
       _pen = widget.session.penFor(widget.page);
@@ -73,8 +73,12 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
 
   @override
   void dispose() {
+    if (_erasing) {
+      _commitErase();
+      widget.session.setErasing(false);
+    }
     widget.session.removeListener(_syncBrush);
-    widget.session.unregisterLayer(this);
+    widget.session.unregisterLayer(this, page: widget.page);
     _sub?.cancel();
     _ctl.dispose();
     super.dispose();
@@ -169,6 +173,7 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
       case InkStrokeStart():
         _erasing = _ctl.liveBrush?.tool == InkTool.eraser;
         _erased.clear();
+        widget.session.setErasing(_erasing);
         if (_erasing) _eraseAt(e.point);
       case InkStrokePoint():
         if (_erasing) _eraseAt(e.point);
@@ -176,6 +181,7 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
         if (_erasing) {
           _commitErase();
           _erasing = false;
+          widget.session.setErasing(false);
           return;
         }
         final idx = _ctl.finished.indexWhere((f) => f.id == e.strokeId);
@@ -187,6 +193,7 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
         if (_erasing) {
           _commitErase();
           _erasing = false;
+          widget.session.setErasing(false);
         }
     }
   }

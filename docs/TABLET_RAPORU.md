@@ -68,3 +68,12 @@ Dal: `tablet-1`. Her adım: saat, sonuç, ölçüm, "Ahmet elle denesin".
 - Ayarlar → PDF'ler → bir YKS PDF'i içe aktar; aç, kalemle yaz, parmakla kaydır/yakınlaştır. Avucunu koyarak yaz.
 - 300+ sayfalık bir PDF aç: kaydırma akıcı mı, uygulama belleği? (`adb shell dumpsys meminfo com.kocum.kocum.gece`)
 - Uygulamayı kapat-aç: çizgiler yerinde mi (zum farklıyken de)?
+
+### T3b inceleme düzeltmeleri (v9.4.1)
+- Avuç: `radiusMajor >= 24` temas baştan yutulur; kalem havada sayfaya yaklaşınca ya da çizerken viewer pan/zoom kilitlenir ("önce avuç sonra kalem" testli).
+- Kayıt hatası: yeniden deneme (300 ms/1 s/3 s), kalıcı hatada çizgi ekranda kalır ve SnackBar çıkar; geri al/yinele hatada yığına döner.
+- Uygulama arka plana gidince/kapanırken kuyruk boşaltılır (`AppLifecycleListener`).
+- Sayfa önbelleği sayfa kapanınca boşalır; küçük resim şeridi görünümün belgesini paylaşır.
+- Masaüstünde fare de çizer (telefon/tabletde yalnız kalem). Silgi sürerken geri al/yinele kapalı.
+- Kalem sayfalar arası boşluktayken çizmez, kalem/parmak görünümü kaydırır.
+- **Elle bakılacak:** kalem değdiği anda `panEnabled` değişimi görüntüyü zıplatıyor mu? Cihaz `radiusMajor` bildirmiyorsa avuç önce + kalem havada algılanmadan inerse kayma olabilir.

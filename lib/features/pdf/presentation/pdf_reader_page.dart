@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pdfrx/pdfrx.dart' as r; // pdfrx YALNIZ data/ ve bu dosyada
@@ -74,6 +76,9 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
   late final PdfInkSession _session;
   final _viewer = r.PdfViewerController();
   final _page = ValueNotifier<int>(1);
+  late final r.PdfDocumentRef _docRef;
+  late final AppLifecycleListener _lifecycle;
+  StreamSubscription<String>? _errorSub;
   bool _thumbs = false;
   InkTool _tool = InkTool.pen;
   int _color = _colors.first;
@@ -88,12 +93,35 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
       clock: ref.read(clockProvider),
     );
     _applyBrush();
+    // Görünüm ve küçük resim şeridi AYNI belgeyi paylaşır (ref anahtarı aynı:
+    // PDFium belgesi bir kez açılır).
+    _docRef = r.PdfDocumentRefFile(
+      widget.info.path!,
+      useProgressiveLoading: false,
+    );
+    _errorSub = _session.errors.listen((m) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(m)));
+    });
+    // Uygulama arka plana giderken (süreç öldürülebilir) bekleyen kayıtları bitir.
+    _lifecycle = AppLifecycleListener(
+      onInactive: _flush,
+      onHide: _flush,
+      onPause: _flush,
+    );
   }
+
+  void _flush() => unawaited(_session.flush());
 
   @override
   void dispose() {
-    _session.dispose();
+    _lifecycle.dispose();
+    _errorSub?.cancel();
     _page.dispose();
+    // Kuyruk bitmeden oturum kapanmasın: kayıtlar tamamlanınca kapat.
+    unawaited(_session.flush().whenComplete(_session.dispose));
     super.dispose();
   }
 
@@ -115,7 +143,6 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
   @override
   Widget build(BuildContext context) {
     final rec = widget.info.record;
-    final path = widget.info.path!;
     return Scaffold(
       appBar: AppBar(
         title: Text(rec.title, overflow: TextOverflow.ellipsis),
@@ -156,7 +183,7 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
               children: [
                 if (_thumbs)
                   _ThumbStrip(
-                    path: path,
+                    docRef: _docRef,
                     current: _page,
                     onTap: (n) => _viewer.goToPage(pageNumber: n),
                   ),
@@ -165,19 +192,26 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
                     children: [
                       PdfInkInput(
                         session: _session,
-                        child: r.PdfViewer.file(
-                          path,
-                          controller: _viewer,
-                          // Sayfa boyutu kalem koordinatının tabanı: tahmin değil, kesin olmalı.
-                          useProgressiveLoading: false,
-                          params: r.PdfViewerParams(
-                            backgroundColor: Theme.of(context)
-                                .colorScheme
-                                .surfaceContainerHighest,
-                            pageOverlaysBuilder: _overlays,
-                            onPageChanged: (n) {
-                              if (n != null) _page.value = n;
-                            },
+                        // Kalem çizerken/havada sayfa üstündeyken görünüm kaymaz
+                        // ve yakınlaşmaz (avuç kalemden önce değse bile).
+                        // Yalnız değer değişince yeniden kurulur; belge yeniden
+                        // açılmaz (yalnız yerleşim bayrağı).
+                        child: ValueListenableBuilder<bool>(
+                          valueListenable: _session.viewerLocked,
+                          builder: (context, locked, _) => r.PdfViewer(
+                            _docRef,
+                            controller: _viewer,
+                            params: r.PdfViewerParams(
+                              panEnabled: !locked,
+                              scaleEnabled: !locked,
+                              backgroundColor: Theme.of(context)
+                                  .colorScheme
+                                  .surfaceContainerHighest,
+                              pageOverlaysBuilder: _overlays,
+                              onPageChanged: (n) {
+                                if (n != null) _page.value = n;
+                              },
+                            ),
                           ),
                         ),
                       ),
@@ -301,13 +335,17 @@ class _Toolbar extends StatelessWidget {
                   key: const Key('pdf-undo'),
                   tooltip: 'Geri al',
                   icon: const Icon(Icons.undo_rounded),
-                  onPressed: session.canUndo ? session.undo : null,
+                  onPressed: session.canUndo && !session.erasing
+                      ? session.undo
+                      : null,
                 ),
                 IconButton(
                   key: const Key('pdf-redo'),
                   tooltip: 'Yinele',
                   icon: const Icon(Icons.redo_rounded),
-                  onPressed: session.canRedo ? session.redo : null,
+                  onPressed: session.canRedo && !session.erasing
+                      ? session.redo
+                      : null,
                 ),
               ],
             ),
@@ -320,11 +358,11 @@ class _Toolbar extends StatelessWidget {
 
 class _ThumbStrip extends StatelessWidget {
   const _ThumbStrip({
-    required this.path,
+    required this.docRef,
     required this.current,
     required this.onTap,
   });
-  final String path;
+  final r.PdfDocumentRef docRef;
   final ValueNotifier<int> current;
   final ValueChanged<int> onTap;
 
@@ -334,8 +372,8 @@ class _ThumbStrip extends StatelessWidget {
     return SizedBox(
       key: const Key('pdf-thumb-strip'),
       width: 108,
-      child: r.PdfDocumentViewBuilder.file(
-        path,
+      child: r.PdfDocumentViewBuilder(
+        documentRef: docRef,
         builder: (context, doc) {
           if (doc == null) return const SizedBox.shrink();
           return ValueListenableBuilder<int>(

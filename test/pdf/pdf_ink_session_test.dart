@@ -6,6 +6,7 @@ import 'package:kocum/core/database/app_database.dart';
 import 'package:kocum/features/ink/data/ink_stroke_repository.dart';
 import 'package:kocum/features/ink/domain/ink_models.dart';
 import 'package:kocum/features/ink/domain/ink_stroke_record.dart';
+import 'package:kocum/features/ink/domain/stroke_codec.dart';
 import 'package:kocum/features/pdf/domain/page_coords.dart';
 import 'package:kocum/features/pdf/presentation/pdf_ink_session.dart';
 
@@ -29,6 +30,54 @@ PageCoords _coords(double zoom) => PageCoords.tryCreate(
   viewWidth: 306 * zoom,
   viewHeight: 396 * zoom,
 )!;
+
+/// Hata atabilen sahte depo (gerçek deponun üstünde).
+class _FlakyRepo extends InkStrokeRepository {
+  _FlakyRepo(super.db);
+  int addFailures = 0;
+  int deleteFailures = 0;
+  int addCalls = 0;
+  @override
+  Future<String> add({
+    required StrokeOwner owner,
+    required List<StrokePoint> points,
+    required int startedAtMs,
+    int layer = 0,
+    int attemptNo = 0,
+    String tool = 'pen',
+    int color = 0xFF000000,
+    double width = 1.0,
+    int? durationMs,
+  }) {
+    addCalls++;
+    if (addFailures > 0) {
+      addFailures--;
+      throw StateError('disk dolu');
+    }
+    return super.add(
+      owner: owner,
+      points: points,
+      startedAtMs: startedAtMs,
+      layer: layer,
+      attemptNo: attemptNo,
+      tool: tool,
+      color: color,
+      width: width,
+      durationMs: durationMs,
+    );
+  }
+
+  @override
+  Future<int> softDeleteMany(Iterable<String> ids) {
+    if (deleteFailures > 0) {
+      deleteFailures--;
+      throw StateError('disk dolu');
+    }
+    return super.softDeleteMany(ids);
+  }
+}
+
+const _fast = [Duration.zero, Duration.zero];
 
 void main() {
   test(
@@ -176,4 +225,116 @@ void main() {
       rec.endRecording().dispose();
     },
   );
+
+  test('kayıt hatası: çizgi ekranda kalır, yeniden dener, sonunda kaydolur', () async {
+    final db = AppDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    await db.customSelect('SELECT 1').get();
+    final repo = _FlakyRepo(db)..addFailures = 2; // 3. denemede başarır
+    final s = PdfInkSession(documentId: _doc, repository: repo, retryDelays: _fast);
+    addTearDown(s.dispose);
+    final pen = s.penFor(0);
+    s.addStroke(0, const InkBrush(width: 3), _line(100, 100), _coords(2));
+    await s.flush();
+    expect(repo.addCalls, 3);
+    expect(pen.strokes.single.id, isNotNull);
+    expect(await repo.forPage(PdfPageOwner(_doc, 0)), hasLength(1));
+  });
+
+  test('kalıcı kayıt hatası: ikaz gelir, çizgi kalır, sonraki flush kaydeder', () async {
+    final db = AppDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    await db.customSelect('SELECT 1').get();
+    final repo = _FlakyRepo(db)..addFailures = 100;
+    final s = PdfInkSession(documentId: _doc, repository: repo, retryDelays: _fast);
+    addTearDown(s.dispose);
+    final msgs = <String>[];
+    s.errors.listen(msgs.add);
+    final pen = s.penFor(0);
+    s.addStroke(0, const InkBrush(width: 3), _line(100, 100), _coords(2));
+    await s.flush();
+    await Future<void>.delayed(Duration.zero);
+    expect(msgs, hasLength(1));
+    expect(pen.strokes, hasLength(1));
+    expect(pen.strokes.single.failed, isTrue);
+    expect(pen.strokes.single.id, isNull);
+    repo.addFailures = 0; // disk düzeldi
+    await s.flush();
+    expect(pen.strokes.single.failed, isFalse);
+    expect(await repo.forPage(PdfPageOwner(_doc, 0)), hasLength(1));
+    expect(s.canUndo, isTrue);
+    expect(msgs, hasLength(1)); // yeniden ikaz yok
+  });
+
+  test('silme kaydı kalıcı başarısız: çizgi ekrana geri konur', () async {
+    final db = AppDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    await db.customSelect('SELECT 1').get();
+    final repo = _FlakyRepo(db);
+    final s = PdfInkSession(documentId: _doc, repository: repo, retryDelays: _fast);
+    addTearDown(s.dispose);
+    final msgs = <String>[];
+    s.errors.listen(msgs.add);
+    final pen = s.penFor(0);
+    s.addStroke(0, const InkBrush(width: 3), _line(100, 100), _coords(2));
+    await s.flush();
+    repo.deleteFailures = 100;
+    final hit = s.eraseAt(0, 120, 104, 10);
+    expect(pen.strokes, isEmpty);
+    s.commitErase(0, hit);
+    await s.flush();
+    await Future<void>.delayed(Duration.zero);
+    expect(pen.strokes, hasLength(1));
+    expect(msgs, isNotEmpty);
+    expect(await repo.forPage(PdfPageOwner(_doc, 0)), hasLength(1));
+  });
+
+  test('geri al hatası: eylem yığına geri döner, sonra yeniden alınabilir', () async {
+    final db = AppDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    await db.customSelect('SELECT 1').get();
+    final repo = _FlakyRepo(db);
+    final s = PdfInkSession(documentId: _doc, repository: repo, retryDelays: _fast);
+    addTearDown(s.dispose);
+    final pen = s.penFor(0);
+    s.addStroke(0, const InkBrush(width: 3), _line(100, 100), _coords(2));
+    await s.flush();
+    repo.deleteFailures = 100;
+    await s.undo();
+    expect(s.canUndo, isTrue);
+    expect(s.canRedo, isFalse);
+    expect(pen.strokes, hasLength(1));
+    repo.deleteFailures = 0;
+    await s.undo();
+    expect(s.canUndo, isFalse);
+    expect(pen.strokes, isEmpty);
+  });
+
+  test('kaydı bitmemiş çizgi silinirse kayıt bitince yumuşak silinir; yükleme silinmekte olanı almaz', () async {
+    final (_, repo) = await _open();
+    final s = PdfInkSession(documentId: _doc, repository: repo);
+    addTearDown(s.dispose);
+    final pen = s.penFor(0);
+    await s.flush();
+    s.addStroke(0, const InkBrush(width: 3), _line(100, 100), _coords(2));
+    final hit = s.eraseAt(0, 120, 104, 10); // henüz kaydı yok (id null)
+    expect(hit, hasLength(1));
+    s.commitErase(0, hit);
+    await s.flush();
+    expect(pen.strokes, isEmpty);
+    expect(await repo.forPage(PdfPageOwner(_doc, 0)), isEmpty);
+    expect(s.canUndo, isFalse);
+  });
+
+  test('flush sonrası kuyruk boş: sonraki flush anında biter', () async {
+    final (_, repo) = await _open();
+    final s = PdfInkSession(documentId: _doc, repository: repo);
+    addTearDown(s.dispose);
+    for (var i = 0; i < 4; i++) {
+      s.addStroke(0, const InkBrush(width: 3), _line(10, 10.0 + i * 40), _coords(2));
+    }
+    await s.flush();
+    expect(await repo.forPage(PdfPageOwner(_doc, 0)), hasLength(4));
+    await s.flush();
+  });
 }

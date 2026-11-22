@@ -2,18 +2,44 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../../ink/data/ink_surface_b.dart' show inkPointerDraws;
+import '../../../app/platform.dart';
 import 'pdf_ink_session.dart';
 import 'pdf_page_ink_layer.dart';
+
+/// Bu yarıçaptan (mantıksal piksel) büyük dokunuş avuçtur: görünüme gitmez,
+/// yutulur. Parmak ucu ~8-14, avuç 25+ (cihaz bildirmezse 0 gelir: eşik işlemez,
+/// "kalem yaklaşınca kilit" yedeği devreye girer).
+const double palmRadiusMajor = 24;
 
 /// Görünümü (PDF kaydırıcıyı) saran kalem girişi.
 ///
 /// Sayfa katmanları dokunuş almaz; kalem olaylarını burası ilgili sayfaya
-/// yollar. Kalem hareket arenasını hemen kazanır (görünüm kalemle kaymaz),
-/// kalem çizerken ikinci temas (avuç) yutulur; kalem yokken parmak görünüme gider.
+/// yollar. Kalem bir sayfanın üstündeyken hareket arenasını hemen kazanır
+/// (görünüm kalemle kaymaz), kalem çizerken ikinci temas (avuç) yutulur;
+/// kalem yokken parmak görünüme gider.
+///
+/// Avuç kalemden ÖNCE değerse görünüm onu zaten izliyordur: bunu iki katman
+/// önler. (1) Büyük temas (`radiusMajor`) baştan yutulur. (2) Kalem bir sayfanın
+/// üstüne yaklaşınca (havada) ya da çizerken [PdfInkSession.viewerLocked]
+/// açılır; okuyucu görünümün kaydırma/yakınlaştırmasını kapatır.
+///
+/// Kalem sayfalar ARASI boşluktayken (sayfa dışı) bilinçli olarak arenayı
+/// ALMAZ ve çizmez: kalem/parmak görünümü kaydırır; kilit de açıktır.
+///
+/// [stylusOnly]: telefon/tablette yalnızca kalem çizer; masaüstünde (fare)
+/// fare de çizer. Varsayılan `!isDesktop`.
 class PdfInkInput extends StatefulWidget {
-  const PdfInkInput({super.key, required this.session, required this.child});
+  const PdfInkInput({
+    super.key,
+    required this.session,
+    required this.child,
+    this.stylusOnlyOverride,
+  });
   final PdfInkSession session;
   final Widget child;
+  final bool? stylusOnlyOverride;
+
+  bool get stylusOnly => stylusOnlyOverride ?? !isDesktop;
 
   @override
   State<PdfInkInput> createState() => _PdfInkInputState();
@@ -25,11 +51,21 @@ class _PdfInkInputState extends State<PdfInkInput> {
   final Map<int, PdfPageInkLayerState> _routes = {};
 
   void _down(PointerDownEvent e) {
-    if (!inkPointerDraws(e.kind, stylusOnly: true)) return;
+    if (!inkPointerDraws(e.kind, stylusOnly: widget.stylusOnly)) return;
     final layer = widget.session.layerAt(e.position);
     if (layer == null) return;
     _routes[e.pointer] = layer;
     layer.pointerDown(e);
+  }
+
+  void _hover(PointerHoverEvent e) {
+    if (e.kind != PointerDeviceKind.stylus &&
+        e.kind != PointerDeviceKind.invertedStylus) {
+      return;
+    }
+    widget.session.penHover(
+      overPage: widget.session.layerAt(e.position) != null,
+    );
   }
 
   void _move(PointerMoveEvent e) => _routes[e.pointer]?.pointerMove(e);
@@ -45,13 +81,17 @@ class _PdfInkInputState extends State<PdfInkInput> {
       behavior: HitTestBehavior.translucent,
       gestures: {
         InkPointerClaim: GestureRecognizerFactoryWithHandlers<InkPointerClaim>(
-          () => InkPointerClaim(widget.session),
-          (r) => r.session = widget.session,
+          () => InkPointerClaim(widget.session, stylusOnly: widget.stylusOnly),
+          (r) {
+            r.session = widget.session;
+            r.stylusOnly = widget.stylusOnly;
+          },
         ),
       },
       child: Listener(
         behavior: HitTestBehavior.translucent,
         onPointerDown: _down,
+        onPointerHover: _hover,
         onPointerMove: _move,
         onPointerUp: _up,
         onPointerCancel: _cancel,
@@ -65,9 +105,10 @@ class _PdfInkInputState extends State<PdfInkInput> {
 /// (hareket arenasında hemen kazanır). Kalem çizerken gelen parmak/avuç
 /// teması da burada yutulur. Parmak (kalem yokken) alınmaz: görünüme gider.
 class InkPointerClaim extends OneSequenceGestureRecognizer {
-  InkPointerClaim(this.session);
+  InkPointerClaim(this.session, {this.stylusOnly = true});
 
   PdfInkSession session;
+  bool stylusOnly;
   final Set<int> _mine = {};
 
   @override
@@ -82,11 +123,13 @@ class InkPointerClaim extends OneSequenceGestureRecognizer {
 
   @override
   bool isPointerAllowed(PointerDownEvent event) {
-    final stylus =
-        event.kind == PointerDeviceKind.stylus ||
-        event.kind == PointerDeviceKind.invertedStylus;
-    final palm = session.penActive && event.kind == PointerDeviceKind.touch;
-    return stylus || palm;
+    if (event.kind == PointerDeviceKind.touch) {
+      // Avuç: kalem çiziyorsa ya da temas büyükse yut.
+      return session.penActive || event.radiusMajor >= palmRadiusMajor;
+    }
+    if (!inkPointerDraws(event.kind, stylusOnly: stylusOnly)) return false;
+    // Sayfa dışında (sayfalar arası boşluk) arenayı alma: görünüm kayabilsin.
+    return session.layerAt(event.position) != null;
   }
 
   @override

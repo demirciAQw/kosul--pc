@@ -23,6 +23,15 @@ class PenStroke {
   final List<InkPoint> points;
   ui.Picture? _picture;
 
+  /// Kayıt başlangıcı (epoch ms); kayıt yeniden denenirken aynı kalır.
+  int startedAtMs = 0;
+
+  /// Kayıt tüm denemelere rağmen başarısız oldu (çizgi ekranda, sonra yeniden denenir).
+  bool failed = false;
+
+  /// Silgiyle ekrandan kaldırıldı; kaydı bitmemişse bitince hemen yumuşak silinir.
+  bool erased = false;
+
   /// Çizgi resmi bir kez kaydedilir (sayfa biriminde); yakınlaştırma ölçekle çizer.
   ui.Picture get picture => _picture ??= () {
     final rec = ui.PictureRecorder();
@@ -65,6 +74,8 @@ class PagePen extends ChangeNotifier {
   }
 
   /// Kayıttan gelenler + henüz kaydı bitmemiş (id'siz) bellek çizgileri.
+  bool get isDisposed => _disposed;
+
   void _replaceLoaded(List<PenStroke> loaded) {
     final pending = _strokes.where((s) => s.id == null).toList();
     final old = _strokes.where((s) => s.id != null).toList();
@@ -112,6 +123,12 @@ class PdfInkSession extends ChangeNotifier {
     DateTime Function()? clock,
     this.attemptNo = 1,
     this.layer = 0,
+    this.retryDelays = const [
+      Duration(milliseconds: 300),
+      Duration(seconds: 1),
+      Duration(seconds: 3),
+    ],
+    this.hoverHold = const Duration(milliseconds: 800),
   }) : _clock = clock ?? DateTime.now;
 
   final String documentId;
@@ -120,7 +137,18 @@ class PdfInkSession extends ChangeNotifier {
   final int attemptNo;
   final int layer;
 
+  /// Kayıt hatasında bekleme süreleri (sınırlı yeniden deneme; sonra kullanıcıya ikaz).
+  final List<Duration> retryDelays;
+
+  /// Kalem havada yaklaştıktan sonra görünümün kilitli kaldığı süre.
+  final Duration hoverHold;
+
   final Map<int, PagePen> _pens = {};
+  final Set<String> _pendingErase = {};
+  final List<PenStroke> _failed = [];
+  final Map<PenStroke, int> _failedPage = {};
+  final _errors = StreamController<String>.broadcast();
+  bool _erasing = false;
   final InkHistory _history = InkHistory();
   final Set<int> _activePens = {};
   bool _disposed = false;
@@ -134,8 +162,35 @@ class PdfInkSession extends ChangeNotifier {
     return run;
   }
 
-  /// Tüm kayıt işlerinin bitmesini bekler (test ve kapanış için).
-  Future<void> flush() => _queue;
+  /// Kaydı bekleyen/başarısız çizgileri bir kez daha dener ve tüm kayıt
+  /// işlerinin bitmesini bekler (kapanış, uygulama arka plana giderken, test).
+  Future<void> flush() {
+    // Başarısız çizgi yoksa yalnızca kuyruğu bekle; varsa kuyruğa yeniden deneme ekle.
+    if (_failed.isEmpty) return _queue;
+    return _enqueue(_retryFailed);
+  }
+
+  /// Kalıcı kayıt hatalarında kullanıcıya gösterilecek iletiler.
+  Stream<String> get errors => _errors.stream;
+
+  void _report(String msg) {
+    if (!_errors.isClosed) _errors.add(msg);
+  }
+
+  /// [op]'u gecikmeli sınırlı yeniden deneme ile çalıştırır; başarı döner.
+  /// Hata asla dışarı sızmaz (işlenmemiş zone hatası yok).
+  Future<bool> _try(Future<void> Function() op) async {
+    for (var i = 0; ; i++) {
+      try {
+        await op();
+        return true;
+      } catch (e) {
+        debugPrint('PdfInkSession kayıt hatası (deneme ${i + 1}): $e');
+        if (i >= retryDelays.length) return false;
+        await Future<void>.delayed(retryDelays[i]);
+      }
+    }
+  }
 
   // --- araç durumu ---
   InkBrush _brush = const InkBrush();
@@ -150,8 +205,48 @@ class PdfInkSession extends ChangeNotifier {
 
   // --- kalem teması: kalem çizerken ikinci temas görünümü oynatmaz ---
   bool get penActive => _activePens.isNotEmpty;
-  void penDown(int pointer) => _activePens.add(pointer);
-  void penUp(int pointer) => _activePens.remove(pointer);
+  void penDown(int pointer) {
+    _activePens.add(pointer);
+    _updateLock();
+  }
+
+  void penUp(int pointer) {
+    _activePens.remove(pointer);
+    _updateLock();
+  }
+
+  /// Görünümün kaydırma/yakınlaştırması kapalı mı: kalem çiziyor ya da bir
+  /// sayfanın üstünde havada (avuç kalemden önce değse bile sayfa kaymaz).
+  final ValueNotifier<bool> viewerLocked = ValueNotifier(false);
+  bool _near = false;
+  Timer? _nearTimer;
+
+  void _updateLock() {
+    if (_disposed) return;
+    viewerLocked.value = penActive || _near;
+  }
+
+  /// Kalem havada: [overPage] sayfanın üstündeyse görünüm [hoverHold] boyunca
+  /// kilitli kalır (olay geldikçe uzar). Sayfa dışında kilit açılır.
+  void penHover({required bool overPage}) {
+    _nearTimer?.cancel();
+    _near = overPage;
+    _updateLock();
+    if (overPage) {
+      _nearTimer = Timer(hoverHold, () {
+        _near = false;
+        _updateLock();
+      });
+    }
+  }
+
+  /// Silgi hareketi sürüyor: geri al / yinele kapalı (yarış olmasın).
+  bool get erasing => _erasing;
+  void setErasing(bool v) {
+    if (_erasing == v) return;
+    _erasing = v;
+    _ping();
+  }
 
   // --- sayfa katmanları (kalem olaylarını yönlendirmek için) ---
   final List<PdfPageInkLayerState> _layers = [];
@@ -159,7 +254,19 @@ class PdfInkSession extends ChangeNotifier {
     if (!_layers.contains(l)) _layers.add(l);
   }
 
-  void unregisterLayer(PdfPageInkLayerState l) => _layers.remove(l);
+  /// [page]: katmanın bıraktığı sayfa (katman sayfa değiştirirken eskisi).
+  /// Sayfanın başka katmanı ve kaydı bitmemiş çizgisi yoksa bellekten atılır.
+  void unregisterLayer(PdfPageInkLayerState l, {required int page}) {
+    _layers.remove(l);
+    final pen = _pens[page];
+    if (pen == null || _layers.any((x) => x.page == page)) return;
+    if (pen._strokes.any((s) => s.id == null)) return;
+    _pens.remove(page);
+    pen.dispose();
+  }
+
+  @visibleForTesting
+  int get cachedPages => _pens.length;
 
   /// [global] noktasındaki sayfa katmanı (yoksa null).
   PdfPageInkLayerState? layerAt(ui.Offset global) {
@@ -174,21 +281,31 @@ class PdfInkSession extends ChangeNotifier {
     final existing = _pens[page];
     if (existing != null) return existing;
     final pen = _pens[page] = PagePen(page);
-    unawaited(_enqueue(() => _load(pen)));
+    unawaited(
+      _enqueue(() async {
+        if (!await _try(() => _load(pen))) {
+          _report('Çizgiler yüklenemedi. Sayfayı kapatıp yeniden aç.');
+        }
+      }),
+    );
     return pen;
   }
 
   PdfPageOwner _owner(int page) => PdfPageOwner(documentId, page);
 
   Future<void> _load(PagePen pen) async {
-    if (_disposed) return;
+    if (_disposed || pen._disposed) return;
     final rows = await repository.forPage(
       _owner(pen.page),
       attemptNo: attemptNo,
       layer: layer,
     );
-    if (_disposed) return;
-    pen._replaceLoaded([for (final r in rows) _fromRecord(r)]);
+    if (_disposed || pen._disposed) return;
+    pen._replaceLoaded([
+      for (final r in rows)
+        // Silgiyle kaldırılıp kaydı bekleyen çizgi geri gelmesin.
+        if (!_pendingErase.contains(r.id)) _fromRecord(r),
+    ]);
   }
 
   PenStroke _fromRecord(InkStroke r) => PenStroke(
@@ -237,35 +354,68 @@ class PdfInkSession extends ChangeNotifier {
     final stroke = PenStroke(
       viewBrush.copyWith(width: viewBrush.width * coords.pageUnitsPerViewPx),
       pts,
-    );
+    )..startedAtMs = _clock().millisecondsSinceEpoch;
     penFor(page)._add(stroke);
-    final startedAt = _clock().millisecondsSinceEpoch;
-    unawaited(
-      _enqueue(() async {
-        final id = await repository.add(
-          owner: _owner(page),
-          points: [
-            for (final p in pts)
-              StrokePoint(
-                p.x,
-                p.y,
-                pressure: p.pressure,
-                tilt: p.tilt,
-                t: math.max<int>(0, p.tMs.round()),
-              ),
-          ],
-          startedAtMs: startedAt,
-          layer: layer,
-          attemptNo: attemptNo,
-          tool: stroke.brush.tool.name,
-          color: stroke.brush.color,
-          width: stroke.brush.width,
-        );
-        stroke.id = id;
-        _history.push(InkAction(InkActionKind.added, page, [id]));
-        _ping();
-      }),
-    );
+    unawaited(_enqueue(() => _save(page, stroke)));
+  }
+
+  /// Çizgiyi kaydeder (gecikmeli yeniden deneme). Başarısızsa çizgi ekranda
+  /// kalır, [_failed]'e girer ve sonraki [flush]'ta yeniden denenir.
+  Future<void> _save(int page, PenStroke stroke) async {
+    if (stroke.erased) {
+      _failed.remove(stroke);
+      _failedPage.remove(stroke);
+      return; // kaydedilmeden silindi: kayıt hiç oluşmasın
+    }
+    String? id;
+    final ok = await _try(() async {
+      id = await repository.add(
+        owner: _owner(page),
+        points: [
+          for (final p in stroke.points)
+            StrokePoint(
+              p.x,
+              p.y,
+              pressure: p.pressure,
+              tilt: p.tilt,
+              t: math.max<int>(0, p.tMs.round()),
+            ),
+        ],
+        startedAtMs: stroke.startedAtMs,
+        layer: layer,
+        attemptNo: attemptNo,
+        tool: stroke.brush.tool.name,
+        color: stroke.brush.color,
+        width: stroke.brush.width,
+      );
+    });
+    if (!ok) {
+      final first = !stroke.failed;
+      stroke.failed = true;
+      if (!_failed.contains(stroke)) _failed.add(stroke);
+      _failedPage[stroke] = page;
+      if (first) {
+        _report('Çizgi kaydedilemedi; ekranda duruyor, yeniden denenecek.');
+      }
+      return;
+    }
+    stroke.failed = false;
+    _failed.remove(stroke);
+    _failedPage.remove(stroke);
+    stroke.id = id;
+    if (stroke.erased) {
+      // Kayıt sürerken silgiyle kaldırılmıştı: şimdi yumuşak sil.
+      await _try(() => repository.softDeleteMany([id!]));
+      return;
+    }
+    _history.push(InkAction(InkActionKind.added, page, [id!]));
+    _ping();
+  }
+
+  Future<void> _retryFailed() async {
+    for (final s in List.of(_failed)) {
+      await _save(_failedPage[s] ?? 0, s);
+    }
   }
 
   /// Silgi: sayfa noktasına (x, y) [radius] sayfa biriminde değen çizgileri
@@ -283,11 +433,18 @@ class PdfInkSession extends ChangeNotifier {
         ))
           s,
     ];
-    if (hit.isNotEmpty) pen._removeWhere(hit.contains);
+    if (hit.isNotEmpty) {
+      for (final s in hit) {
+        s.erased = true;
+        if (s.id != null) _pendingErase.add(s.id!);
+      }
+      pen._removeWhere(hit.contains);
+    }
     return hit;
   }
 
   /// Silgi hareketi bitti: kaldırılan çizgileri yumuşak siler (geri alınabilir).
+  /// Kayıt başarısızsa çizgiler ekrana geri konur.
   void commitErase(int page, List<PenStroke> removed) {
     if (removed.isEmpty) return;
     unawaited(
@@ -296,7 +453,19 @@ class PdfInkSession extends ChangeNotifier {
           for (final s in removed)
             if (s.id != null) s.id!,
         ];
-        await repository.softDeleteMany(ids);
+        final ok = ids.isEmpty || await _try(() async {
+          await repository.softDeleteMany(ids);
+        });
+        _pendingErase.removeAll(ids);
+        if (!ok) {
+          final pen = _pens[page];
+          for (final s in removed) {
+            s.erased = false;
+            if (pen != null && !pen._disposed) pen._add(s);
+          }
+          _report('Silme kaydedilemedi; çizgiler geri konuldu.');
+          return;
+        }
         _history.push(InkAction(InkActionKind.erased, page, ids));
         _ping();
       }),
@@ -304,22 +473,34 @@ class PdfInkSession extends ChangeNotifier {
   }
 
   Future<void> undo() => _enqueue(() async {
+    if (_erasing) return;
     final a = _history.takeUndo();
     if (a == null) return;
-    await _apply(a, forward: false);
+    if (!await _try(() => _apply(a, forward: false))) {
+      _history.returnUndo(a);
+      _report('Geri alınamadı.');
+      _ping();
+      return;
+    }
     _history.commitUndo(a);
     _ping();
   });
 
   Future<void> redo() => _enqueue(() async {
+    if (_erasing) return;
     final a = _history.takeRedo();
     if (a == null) return;
-    await _apply(a, forward: true);
+    if (!await _try(() => _apply(a, forward: true))) {
+      _history.returnRedo(a);
+      _report('Yinelenemedi.');
+      _ping();
+      return;
+    }
     _history.commitRedo(a);
     _ping();
   });
 
-  /// [forward]: eylemi (yeniden) uygula; değilse tersini.
+  /// [forward]: eylemi (yeniden) uygula; değilse tersini. Tekrarlanabilir (idempotent).
   Future<void> _apply(InkAction a, {required bool forward}) async {
     final deleteThem = (a.kind == InkActionKind.added) != forward;
     final pen = _pens[a.page];
@@ -341,6 +522,9 @@ class PdfInkSession extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _nearTimer?.cancel();
+    viewerLocked.dispose();
+    _errors.close();
     for (final p in _pens.values) {
       p.dispose();
     }

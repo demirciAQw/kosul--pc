@@ -37,6 +37,12 @@ class InkHistory {
   InkAction? takeUndo() => _undo.isEmpty ? null : _undo.removeLast();
   void commitUndo(InkAction a) => _redo.add(a);
 
+  /// [takeUndo] sonrası işlem başarısız olduysa eylemi yığına geri koyar.
+  void returnUndo(InkAction a) => _undo.add(a);
+
+  /// [takeRedo] sonrası işlem başarısız olduysa eylemi yığına geri koyar.
+  void returnRedo(InkAction a) => _redo.add(a);
+
   InkAction? takeRedo() => _redo.isEmpty ? null : _redo.removeLast();
   void commitRedo(InkAction a) => _undo.add(a);
 }
