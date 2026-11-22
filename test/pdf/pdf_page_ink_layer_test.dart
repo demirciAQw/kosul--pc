@@ -1,0 +1,230 @@
+import 'package:drift/native.dart';
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:kocum/core/database/app_database.dart';
+import 'package:kocum/features/ink/data/ink_stroke_repository.dart';
+import 'package:kocum/features/ink/domain/ink_models.dart';
+import 'package:kocum/features/ink/domain/ink_stroke_record.dart';
+import 'package:kocum/features/pdf/presentation/pdf_ink_session.dart';
+import 'package:kocum/features/pdf/presentation/pdf_ink_input.dart';
+import 'package:kocum/features/pdf/presentation/pdf_page_ink_layer.dart';
+
+final _doc = 'b' * 64;
+
+/// Dikey kaydıran bir liste (pdfrx görünümünün yerine): sayfa katmanı 400x600
+/// (sayfa 612x792 → ölçek 0,654). Kaydırma konumunu görmek için ScrollController.
+Future<(PdfInkSession, InkStrokeRepository, ScrollController)> _host(
+  WidgetTester t,
+) async {
+  late AppDatabase db;
+  late InkStrokeRepository repo;
+  await t.runAsync(() async {
+    db = AppDatabase(NativeDatabase.memory());
+    await db.customSelect('SELECT 1').get();
+    repo = InkStrokeRepository(db);
+  });
+  addTearDown(() => t.runAsync(db.close));
+  final session = PdfInkSession(documentId: _doc, repository: repo);
+  addTearDown(session.dispose);
+  final sc = ScrollController();
+  addTearDown(sc.dispose);
+  await t.pumpWidget(
+    MaterialApp(
+      home: Scaffold(
+        body: PdfInkInput(
+          session: session,
+          child: ListView(
+            controller: sc,
+            children: [
+              Align(
+                alignment: Alignment.topLeft,
+                child: SizedBox(
+                  width: 400,
+                  height: 600,
+                  child: PdfPageInkLayer(
+                    session: session,
+                    page: 0,
+                    pageWidth: 612,
+                    pageHeight: 792,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 2000),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+  return (session, repo, sc);
+}
+
+Future<void> _drag(
+  WidgetTester t,
+  Offset from,
+  PointerDeviceKind kind, {
+  Offset by = const Offset(0, -120),
+}) async {
+  final g = await t.startGesture(from, kind: kind);
+  for (var i = 0; i < 6; i++) {
+    await g.moveBy(by / 6);
+  }
+  await g.up();
+  await t.pump();
+}
+
+Future<List<InkStroke>> _saved(
+  WidgetTester t,
+  PdfInkSession s,
+  InkStrokeRepository repo,
+) async {
+  late List<InkStroke> rows;
+  await t.runAsync(() async {
+    await s.flush();
+    rows = await repo.forPage(PdfPageOwner(_doc, 0), attemptNo: 1, layer: 0);
+  });
+  return rows;
+}
+
+void main() {
+  testWidgets(
+    'kalem çizer ve kaydeder; görünüm kaymaz; sayfa koordinatına çevrilir',
+    (t) async {
+      final (s, repo, sc) = await _host(t);
+      await _drag(
+        t,
+        const Offset(100, 300),
+        PointerDeviceKind.stylus,
+        by: const Offset(0, -120),
+      );
+      expect(sc.offset, 0);
+      final rows = await _saved(t, s, repo);
+      expect(rows, hasLength(1));
+      // Görünüm (100,300)-ish → sayfa: x * 612/400. (Başlangıç noktası dokunuş yeridir.)
+      final p = rows.single.points;
+      expect(p.first.x, closeTo(100 * 612 / 400, 0.1));
+      expect(p.first.y, closeTo(300 * 792 / 600, 0.1));
+      expect(p.last.y, lessThan(p.first.y));
+      expect(rows.single.attemptNo, 1);
+      expect(rows.single.layer, 0);
+      expect(s.penActive, isFalse);
+    },
+  );
+
+  testWidgets('parmak çizmez, görünümü kaydırır', (t) async {
+    final (s, repo, sc) = await _host(t);
+    await _drag(t, const Offset(100, 300), PointerDeviceKind.touch);
+    await t.pumpAndSettle();
+    expect(sc.offset, greaterThan(50));
+    expect(await _saved(t, s, repo), isEmpty);
+  });
+
+  testWidgets(
+    'kalem çizerken ikinci temas (avuç) görünümü kaydırmaz, çizgiyi bozmaz',
+    (t) async {
+      final (s, repo, sc) = await _host(t);
+      final pen = await t.startGesture(
+        const Offset(100, 300),
+        kind: PointerDeviceKind.stylus,
+      );
+      expect(s.penActive, isTrue);
+      final palm = await t.startGesture(
+        const Offset(300, 450),
+        kind: PointerDeviceKind.touch,
+      );
+      for (var i = 0; i < 6; i++) {
+        await palm.moveBy(const Offset(0, -30));
+        await pen.moveBy(const Offset(8, 0));
+      }
+      await palm.up();
+      await pen.up();
+      await t.pumpAndSettle();
+      expect(sc.offset, 0);
+      final rows = await _saved(t, s, repo);
+      expect(rows, hasLength(1));
+      expect(rows.single.points.length, greaterThan(3));
+      expect(s.penActive, isFalse);
+      // Kalem kalktıktan sonra parmak yine kaydırır.
+      await _drag(t, const Offset(100, 300), PointerDeviceKind.touch);
+      await t.pumpAndSettle();
+      expect(sc.offset, greaterThan(50));
+    },
+  );
+
+  testWidgets('silgi aracı çizgiyi siler ve kayıtta yumuşak siler', (t) async {
+    final (s, repo, _) = await _host(t);
+    await _drag(
+      t,
+      const Offset(100, 300),
+      PointerDeviceKind.stylus,
+      by: const Offset(120, 0),
+    );
+    expect(await _saved(t, s, repo), hasLength(1));
+    s.setBrush(const InkBrush(tool: InkTool.eraser, width: 6));
+    await _drag(
+      t,
+      const Offset(160, 310),
+      PointerDeviceKind.stylus,
+      by: const Offset(0, -30),
+    );
+    expect(await _saved(t, s, repo), isEmpty);
+    expect(s.canUndo, isTrue);
+    await t.runAsync(s.undo);
+    expect(await _saved(t, s, repo), hasLength(1));
+  });
+
+  testWidgets(
+    'yakınlaştırılmış (büyük) katmanda aynı sayfa noktası aynı kalır',
+    (t) async {
+      late AppDatabase db;
+      late InkStrokeRepository repo;
+      await t.runAsync(() async {
+        db = AppDatabase(NativeDatabase.memory());
+        await db.customSelect('SELECT 1').get();
+        repo = InkStrokeRepository(db);
+      });
+      addTearDown(() => t.runAsync(db.close));
+      final s = PdfInkSession(documentId: _doc, repository: repo);
+      addTearDown(s.dispose);
+      // Zum 3: katman 1224x1584 (sayfa 612x792 → 2 piksel/birim).
+      await t.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: PdfInkInput(
+              session: s,
+              child: OverflowBox(
+                alignment: Alignment.topLeft,
+                maxWidth: 1224,
+                maxHeight: 1584,
+                child: SizedBox(
+                  width: 1224,
+                  height: 1584,
+                  child: PdfPageInkLayer(
+                    session: s,
+                    page: 0,
+                    pageWidth: 612,
+                    pageHeight: 792,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await _drag(
+        t,
+        const Offset(200, 400),
+        PointerDeviceKind.stylus,
+        by: const Offset(100, 0),
+      );
+      late List<InkStroke> rows;
+      await t.runAsync(() async {
+        await s.flush();
+        rows = await repo.forPage(PdfPageOwner(_doc, 0));
+      });
+      expect(rows.single.points.first.x, closeTo(100, 0.1));
+      expect(rows.single.points.first.y, closeTo(200, 0.1));
+    },
+  );
+}

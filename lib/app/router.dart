@@ -4,6 +4,8 @@ import 'package:go_router/go_router.dart';
 import '../features/anlik/presentation/anlik_screens.dart';
 import '../features/dashboard/presentation/dashboard_screen.dart';
 import '../features/ink/presentation/ink_lab_page.dart';
+import '../features/pdf/presentation/pdf_library_page.dart';
+import '../features/pdf/presentation/pdf_reader_page.dart';
 import '../features/ledger/presentation/ledger_screens.dart';
 import '../features/home/home_screen.dart';
 import '../features/library/presentation/book_detail_screen.dart';
@@ -104,6 +106,11 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: AppRoutes.claudeChanges, builder: (context, state) => const ClaudeChangesScreen()),
       GoRoute(path: AppRoutes.conflicts, builder: (context, state) => const ConflictsScreen()),
       GoRoute(path: AppRoutes.inkLab, builder: (context, state) => const InkLabPage()),
+      GoRoute(path: AppRoutes.pdfLibrary, builder: (context, state) => const PdfLibraryPage()),
+      GoRoute(
+        path: '/pdf/:id',
+        builder: (context, state) => PdfReaderPage(documentId: state.pathParameters['id']!),
+      ),
       GoRoute(path: AppRoutes.sendToComputer, builder: (context, state) => const SendToComputerScreen()),
       GoRoute(
         path: AppRoutes.newNote,

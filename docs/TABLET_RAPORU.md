@@ -56,3 +56,15 @@ Dal: `tablet-1`. Her adım: saat, sonuç, ölçüm, "Ahmet elle denesin".
 - Testler gerçekleşti: renkli dikdörtgen (R/B kanalı), `/Rotate 90` sayfada boyut ve kutu metni.
 - CI iş akışlarında Flutter 3.50.0 sabitlendi.
 - **Açık:** iki cihaz aynı PDF'i ayrı içe aktarırsa kitap bağı/ofset için alan alan birleştirme yok; kaybeden sürüm Çakışmalar ekranından geri alınır.
+
+## T3b: PDF okuyucu + kalem katmanı (v9.4)
+- Okuyucu `/pdf/:id`: pdfrx PdfViewer, dikey kaydırma, parmakla yakınlaştırma, küçük resim şeridi, tek satır araç çubuğu (kalem/fosforlu/silgi, renk, kalınlık, geri al/yinele). Kitaplık `/pdf` (içe aktar, liste, kitap önerisi onayı, onaylı yumuşak silme). Ayarlar → "PDF'ler (tablet için)" (yalnız Android) ve masaüstünde "PDF'ler".
+- Kalem katmanı B (saf Flutter) ile. A (yerel Ink) okuyucuya bağlanmadı: A'da parmakla kaydırma/yakınlaştırma yok. Karar T1 ölçümünden sonra değişebilir.
+- Çizgiler sayfa birimi (sol-üst, y aşağı) ile saklanır; zum ve `/Rotate 90`'da kaymaz (saf fonksiyon testli). Kalem çizer, parmak PDF'i kaydırır, kalem çizerken ikinci temas yutulur (avuç).
+- Gerçek PdfViewer + gerçek PDFium ile widget testi: parmak kaydırır, kalem kaydırmaz, çizgi doğru sayfaya düşer. 449 test; APK ve Linux debug derlendi.
+- Doğrulanmadı: kalem hissi/gecikme, gerçek avuç, uzun belge ve çok çizgi performansı, release (R8).
+
+### Ahmet elle denesin (T3)
+- Ayarlar → PDF'ler → bir YKS PDF'i içe aktar; aç, kalemle yaz, parmakla kaydır/yakınlaştır. Avucunu koyarak yaz.
+- 300+ sayfalık bir PDF aç: kaydırma akıcı mı, uygulama belleği? (`adb shell dumpsys meminfo com.kocum.kocum.gece`)
+- Uygulamayı kapat-aç: çizgiler yerinde mi (zum farklıyken de)?

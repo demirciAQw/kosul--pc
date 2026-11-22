@@ -12,6 +12,8 @@ abstract final class AppRoutes {
   static const claudeChanges = '/tools/degisiklikler';
   static const conflicts = '/tools/cakismalar';
   static const inkLab = '/tools/kalem';
+  static const pdfLibrary = '/pdf';
+  static String pdfReader(String id) => '/pdf/$id';
 
   // Tam ekran sayfalar
   static const newSession = '/session/new';

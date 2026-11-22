@@ -87,6 +87,18 @@ class _SettingsBody extends ConsumerWidget {
               onTap: () => context.push(AppRoutes.inkLab),
             ),
           ),
+        // PDF kitaplığı ve okuyucu yalnızca Android'de (tablet için).
+        if (isAndroid)
+          Card(
+            child: ListTile(
+              key: const Key('settings-pdf'),
+              leading: ToneIcon(Icons.picture_as_pdf_outlined, color: KocumColors.blue),
+              title: const Text('PDF\'ler (tablet için)'),
+              subtitle: const Text('PDF ekle, oku, kalemle yaz'),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => context.push(AppRoutes.pdfLibrary),
+            ),
+          ),
         _Section('Hatırlatıcılar'),
         Card(
           child: Column(

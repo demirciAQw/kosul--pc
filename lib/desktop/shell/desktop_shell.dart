@@ -13,6 +13,8 @@ import '../entry/exams_page.dart';
 import '../entry/optic_page.dart';
 import '../entry/plans_page.dart';
 import '../entry/sessions_page.dart';
+import '../../features/pdf/presentation/pdf_library_page.dart';
+import '../../features/pdf/presentation/pdf_reader_page.dart';
 import '../import/import_providers.dart';
 import '../import/presentation/auto_import.dart';
 import '../import/presentation/import_flow.dart';
@@ -93,6 +95,17 @@ Widget _page(DesktopSection section) => switch (section) {
       DesktopSection.tags => const DesktopTagsPage(),
       DesktopSection.changes => const DesktopPage(title: 'Claude\'un değişiklikleri', subtitle: 'Oturum oturum; geri alınabilir', child: ClaudeChangesView()),
       DesktopSection.conflicts => const DesktopPage(title: 'Çakışmalar', subtitle: 'Telefonla bilgisayarın ikisinde de değişen satırlar', child: ConflictsView()),
+      DesktopSection.pdf => DesktopPage(
+          title: 'PDF\'ler',
+          subtitle: 'İçe aktar, oku, kalemle yaz',
+          child: Builder(
+            builder: (context) => PdfLibraryPage(
+              embedded: true,
+              onOpen: (context, d) => Navigator.of(context)
+                  .push(MaterialPageRoute<void>(builder: (_) => PdfReaderPage(documentId: d.id))),
+            ),
+          ),
+        ),
       DesktopSection.settings => const DesktopSettingsPage(),
     };
 
