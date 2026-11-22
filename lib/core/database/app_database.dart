@@ -37,6 +37,12 @@ part 'app_database.g.dart';
   SilmeOnerileri,
   InkStrokes,
   PdfDocuments,
+  InkNotebooks,
+  InkNotePages,
+  InkNotebookTags,
+  InkNotebookPeople,
+  InkPageTags,
+  InkPagePeople,
 ])
 class AppDatabase extends _$AppDatabase {
   /// Testlerde: `AppDatabase(NativeDatabase.memory())`
@@ -58,8 +64,9 @@ class AppDatabase extends _$AppDatabase {
   /// v16: PDF belgeleri (pdf_documents): satır senkron olur, dosya olmaz.
   /// v17: soru kartında PDF koordinatı (pdf_document_id, pdf_page, pdf_box_*).
   /// v18: çizgi -> soru bağı (ink_strokes.question_id), çözüm katmanları.
+  /// v19: kalemli defter (ink_notebooks, ink_note_pages) ve etiket/kişi bağları.
   @override
-  int get schemaVersion => 18;
+  int get schemaVersion => 19;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -73,6 +80,7 @@ class AppDatabase extends _$AppDatabase {
           await _createV2Indexes();
           await _createLedgerTables(m);
           await _createInkIndexes();
+          await _createNotebookIndexes();
         },
         onUpgrade: (m, from, to) async {
           if (from < 2) {
@@ -177,6 +185,16 @@ class AppDatabase extends _$AppDatabase {
             if (!names.contains('question_id')) await m.addColumn(inkStrokes, inkStrokes.questionId);
             await customStatement('CREATE INDEX IF NOT EXISTS ix_ink_question ON ink_strokes(question_id, attempt_no)');
           }
+          // v19: tablolar yoksa kurulur (IF NOT EXISTS: Drift'in createTable'ı da öyle).
+          if (from < 19) {
+            await m.createTable(inkNotebooks);
+            await m.createTable(inkNotePages);
+            await m.createTable(inkNotebookTags);
+            await m.createTable(inkNotebookPeople);
+            await m.createTable(inkPageTags);
+            await m.createTable(inkPagePeople);
+            await _createNotebookIndexes();
+          }
           // Tablolar yeniden kurulmuş ya da sütun eklenmiş olabilir: tetikleyiciler baştan.
           await LedgerService(this).installTriggers(rebuild: true);
         },
@@ -199,6 +217,14 @@ class AppDatabase extends _$AppDatabase {
     await customStatement('CREATE INDEX IF NOT EXISTS ix_ink_pdf ON ink_strokes(pdf_document_id, pdf_page)');
     await customStatement('CREATE INDEX IF NOT EXISTS ix_ink_note ON ink_strokes(note_id, note_page)');
     await customStatement('CREATE INDEX IF NOT EXISTS ix_ink_question ON ink_strokes(question_id, attempt_no)');
+  }
+
+  Future<void> _createNotebookIndexes() async {
+    await customStatement('CREATE INDEX IF NOT EXISTS ix_defter_sayfa ON ink_note_pages(notebook_id, sort_order)');
+    await customStatement('CREATE INDEX IF NOT EXISTS ix_defter_etiket ON ink_notebook_tags(tag_id)');
+    await customStatement('CREATE INDEX IF NOT EXISTS ix_defter_kisi ON ink_notebook_people(person_id)');
+    await customStatement('CREATE INDEX IF NOT EXISTS ix_defter_sayfa_etiket ON ink_page_tags(tag_id)');
+    await customStatement('CREATE INDEX IF NOT EXISTS ix_defter_sayfa_kisi ON ink_page_people(person_id)');
   }
 
   Future<void> _createV2Indexes() async {

@@ -591,8 +591,10 @@ class SilmeOnerileri extends Table {
 
 /// Kalemle çizilmiş tek çizgi (T2). Sahibi ya bir PDF sayfası (`pdfDocumentId` +
 /// `pdfPage`) ya da bir not sayfasıdır (`noteId` + `notePage`); koordinatlar
-/// sayfa/not koordinatındadır. Belge ve not tabloları sonraki adımlarda
-/// gelecek: şimdilik düz metin sütunları (yabancı anahtar yok).
+/// sayfa/not koordinatındadır. Belge (`pdf_documents`) ve defter sayfası
+/// (`ink_note_pages`) bağları düz metin sütunlarıdır (yabancı anahtar yok).
+/// Not çizgilerinde `noteId` = `ink_note_pages.id` (SAYFA kimliği, defter değil),
+/// `notePage` = `ink_note_pages.pageNo` (sayfanın değişmeyen numarası).
 /// `points`: `stroke_codec.dart` ikilisi (delta + zigzag + varint).
 /// Silme yumuşaktır (`deleted`): defterle senkronda satır kalır.
 @DataClassName('InkStrokeRow')
@@ -653,4 +655,124 @@ class PdfDocuments extends Table {
   /// defter onu Çakışmalar'a (kaybeden) düşürür, eşitleme takılmaz.
   @override
   List<String> get customConstraints => ['CHECK (id = sha256)'];
+}
+
+// ───────────── Kalemli defter (v19) ─────────────
+
+/// Kalemli defter (T6). Anlık notlardan (`anlik_notes`) ve ders notlarından
+/// (`study_notes`) ayrıdır. Silme yumuşaktır (`deleted`); sayfaları ve çizgileri
+/// silinmez, defter geri gelince hepsi geri gelir.
+@DataClassName('InkNotebookRow')
+class InkNotebooks extends Table {
+  TextColumn get id => text()();
+  TextColumn get title => text().withDefault(const Constant(''))();
+  IntColumn get coverColor => integer().withDefault(const Constant(0xFF3F51B5))(); // ARGB
+
+  /// Yeni sayfaların şablonu: plain | ruled | grid.
+  TextColumn get defaultTemplate => text().withDefault(const Constant('ruled'))();
+  IntColumn get sortOrder => integer().withDefault(const Constant(0))();
+  BoolColumn get deleted => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// Defter sayfası (T6). Sayfanın çizgileri `ink_strokes` satırlarıdır:
+/// `ink_strokes.noteId = ink_note_pages.id` (defterin değil SAYFANIN kimliği) ve
+/// `ink_strokes.notePage = ink_note_pages.pageNo`.
+/// `pageNo`: sayfanın değişmeyen numarası (oluşturulurken verilir, defterde
+/// silinmiş olanlar dahil hiç yeniden kullanılmaz). Sayfa sırası `sortOrder`'dır:
+/// sayfa araya eklenince ya da taşınınca çizgi satırları yeniden yazılmaz
+/// (BLOB'lu satırlar defterde şişerdi). `width`/`height`: not koordinatı
+/// (varsayılan A4 oranı 1404x1984). İki cihaz aynı anda sayfa eklerse `pageNo`
+/// ve `sortOrder` çakışabilir; zararsızdır (çizgiler `id` ile bulunur, sıra
+/// eşitliğinde `createdAt`, sonra `id` bakılır). `notebookId` bağı için yabancı
+/// anahtar yok: sıra bozuk eşitlenirse sayfa takılmasın.
+@DataClassName('InkNotePageRow')
+class InkNotePages extends Table {
+  TextColumn get id => text()();
+  TextColumn get notebookId => text()();
+  IntColumn get pageNo => integer()();
+  IntColumn get sortOrder => integer().withDefault(const Constant(0))();
+
+  /// plain | ruled | grid
+  TextColumn get template => text().withDefault(const Constant('ruled'))();
+  RealColumn get width => real().withDefault(const Constant(1404.0))();
+  RealColumn get height => real().withDefault(const Constant(1984.0))();
+  IntColumn get background => integer().withDefault(const Constant(0xFFFFFFFF))(); // ARGB
+  BoolColumn get deleted => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// Defter ve sayfa için Anlık etiket/kişi bağları (v19). `anlik_note_tags`
+/// deseni: tek sütunlu `sahip:etiket` anahtarı. Yabancı anahtar yalnızca
+/// etiket/kişiye (silinince bağ da gider); sahip yumuşak silindiği için bağ kalır.
+@DataClassName('InkNotebookTagRow')
+class InkNotebookTags extends Table {
+  TextColumn get id => text()();
+  TextColumn get notebookId => text()();
+  TextColumn get tagId => text().customConstraint('NOT NULL REFERENCES tags(id) ON DELETE CASCADE')();
+  TextColumn get source => text().withDefault(const Constant('ben'))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  @override
+  List<Set<Column>> get uniqueKeys => [
+        {notebookId, tagId},
+      ];
+}
+
+@DataClassName('InkNotebookPersonRow')
+class InkNotebookPeople extends Table {
+  TextColumn get id => text()();
+  TextColumn get notebookId => text()();
+  TextColumn get personId => text().customConstraint('NOT NULL REFERENCES people(id) ON DELETE CASCADE')();
+  TextColumn get source => text().withDefault(const Constant('ben'))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  @override
+  List<Set<Column>> get uniqueKeys => [
+        {notebookId, personId},
+      ];
+}
+
+@DataClassName('InkPageTagRow')
+class InkPageTags extends Table {
+  TextColumn get id => text()();
+  TextColumn get pageId => text()();
+  TextColumn get tagId => text().customConstraint('NOT NULL REFERENCES tags(id) ON DELETE CASCADE')();
+  TextColumn get source => text().withDefault(const Constant('ben'))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  @override
+  List<Set<Column>> get uniqueKeys => [
+        {pageId, tagId},
+      ];
+}
+
+@DataClassName('InkPagePersonRow')
+class InkPagePeople extends Table {
+  TextColumn get id => text()();
+  TextColumn get pageId => text()();
+  TextColumn get personId => text().customConstraint('NOT NULL REFERENCES people(id) ON DELETE CASCADE')();
+  TextColumn get source => text().withDefault(const Constant('ben'))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  @override
+  List<Set<Column>> get uniqueKeys => [
+        {pageId, personId},
+      ];
 }

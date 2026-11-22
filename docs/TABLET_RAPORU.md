@@ -102,3 +102,14 @@ Dal: `tablet-1`. Her adım: saat, sonuç, ölçüm, "Ahmet elle denesin".
 ### Ahmet elle denesin (T5)
 - Bir soruda "Çöz": yaz, kapat, tekrar aç (çizim duruyor mu); "Yeniden çöz": temiz sayfa mı; eski çözümü saydam göster; iki denemeyi üst üste bindir.
 - Süre makul mu (duraksayınca sayılmıyor)?
+
+## T6 veri kısmı: Defter -> sayfa (şema 19)
+- Tablolar: `ink_notebooks`, `ink_note_pages`, `ink_notebook_tags|people`, `ink_page_tags|people` (`from < 19`, `createTable` IF NOT EXISTS + indeksler). Ledger/birleştirici/CLI otomatik kapsadı.
+- Karar: `ink_strokes.noteId` = SAYFA id'si; `notePage` = sayfanın DEĞİŞMEYEN `pageNo`'su (sıra `sortOrder`). Sözleşmedeki "notePage = sayfa sırası" böyle değişti: araya ekleme/taşıma BLOB'lu çizgileri yeniden yazıp defteri şişirmesin diye.
+- Depo `features/notes/data/ink_notebook_repository.dart`; şablon çizgileri `domain/page_template.dart` (`templateLines`). Defterin son sayfası silinemez.
+
+## T6a: Not uygulaması, geometri ve veri (v9.7; arayüz T6b'de)
+- Saf geometri (`lib/features/ink/domain`): kalem profilleri (tükenmez/dolma/kurşun/fosforlu, baskı eğrisi `p^gamma`), 10 renk, çizgi ve alan silgisi, kement seçim/taşıma/boyutlandırma/döndürme, şekil düzeltme (çizgi, daire, elips, dörtgen, üçgen; güven eşiği 0.5, kıvrımlı yazı/sekiz/spiral reddedilir), komut yığını. Testler ±%3 gürültülü, 10 tohumlu.
+- Veri (şema 19): `ink_notebooks`, `ink_note_pages`, defter/sayfa için etiket+kişi bağ tabloları; depo (defter/sayfa oluştur, sırala, çoğalt, yumuşak sil/geri al, şablon). Şablon çizgi geometrisi saf fonksiyon.
+- Sözleşme kararı: `ink_strokes.noteId` = sayfa id'si, `notePage` = sayfanın DEĞİŞMEYEN `pageNo`'su (sıra `sortOrder`'da); araya ekleme/taşıma BLOB'lu çizgi satırlarını yeniden yazmaz. Sapma: sayfa→defter ve bağ→sahip yabancı anahtarları yok (sıra bozuk eşitlenince takılmasın), etiket/kişiye var. Defterin son sayfası silinemez.
+- Eşikler rastgele gürültüyle ayarlı; gerçek tablet çiziminde yeniden ayar gerekebilir.

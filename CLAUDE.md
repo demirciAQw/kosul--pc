@@ -16,7 +16,7 @@ telefon (konu düzeyi) hem tablet (soru düzeyi) için tarif edilmiştir.
   Domain saf Dart: test edilebilir, Flutter'a bağlı değil.
 - Ortak: `lib/core/` (database, media, export, text, notifications, di).
 - Önemli yerler:
-  - `core/database/` tablolar ve göçler (`schemaVersion` şu an 17)
+  - `core/database/` tablolar ve göçler (`schemaVersion` şu an 19)
   - `core/ledger/` değişiklik defteri: HLC, SQLite tetikleyicileri, uygulama/çakışma/geri alma
     (`LedgerService`). Her senkron tablosu tetikleyiciyle deftere yazılır; ayrıntı
     `docs/KABLOSUZ_AKTARIM.md`
