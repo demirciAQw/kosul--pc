@@ -31,8 +31,8 @@ class QuestionTile extends ConsumerWidget {
     final selection = ref.watch(questionSelectionProvider);
     final selected = selection.contains(card.id);
     final selecting = selection.isNotEmpty;
-    // PDF kartı: PDF bu cihazdaysa dokunuş PDF sayfasına/kutuya gider; yoksa
-    // (telefon) yalnız önizleme, her zamanki gibi ayrıntı sayfası açılır.
+    // PDF kartı: dokunuş her zaman her zamanki gibi açar (geçmiş yazılır);
+    // PDF bu cihazdaysa köşede küçük PDF simgesi sayfaya/kutuya götürür.
     final pdfId = card.hasPdfAnchor ? card.pdfDocumentId : null;
     final hasPdf = pdfId != null && (ref.watch(pdfAvailableProvider(pdfId)).value ?? false);
     final openPdf = hasPdf
@@ -52,7 +52,7 @@ class QuestionTile extends ConsumerWidget {
         // Seçim modundayken dokunmak seçer; değilken soruyu açar. Uzun bas: seçimi başlat.
         onTap: selecting
             ? () => ref.read(questionSelectionProvider.notifier).toggle(card.id)
-            : (openPdf ?? onOpen ?? () => context.push(AppRoutes.question(card.id))),
+            : (onOpen ?? () => context.push(AppRoutes.question(card.id))),
         onLongPress: () => ref.read(questionSelectionProvider.notifier).toggle(card.id),
         child: Stack(
           fit: StackFit.expand,
@@ -112,6 +112,19 @@ class QuestionTile extends ConsumerWidget {
                 ),
               ),
             ),
+            if (openPdf != null && !selecting)
+              Positioned(
+                top: 4,
+                left: 4,
+                child: IconButton(
+                  key: const Key('tile-open-pdf'),
+                  tooltip: 'PDF\'te göster',
+                  visualDensity: VisualDensity.compact,
+                  style: IconButton.styleFrom(backgroundColor: Colors.black38),
+                  onPressed: openPdf,
+                  icon: const Icon(Icons.picture_as_pdf_outlined, color: Colors.white, size: 20),
+                ),
+              ),
             if (selecting)
               Positioned(
                 top: 6,

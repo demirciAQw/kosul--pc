@@ -23,13 +23,13 @@ Hedef: Koçum, Casper PAD H10 tablette (Android 15, Dimensity 7050, 8 GB RAM, 25
 
 ## Adımlar
 
-### T0: Ortam
+### T0: Ortam (YAPILDI: v9.0)
 - Android SDK yoksa `~/Android/Sdk` altına komut satırı araçlarını kur (sudo kullanmadan), sonra `flutter doctor --android-licenses`.
 - `tool/patch_android.dart`: debug derlemeye `applicationIdSuffix ".gece"` ekle, uygulama adı "Koçum (deneme)". Testiyle birlikte.
 - Tableti doğrula: `adb devices`, `adb shell getprop ro.build.version.sdk`, `adb shell wm size`.
 - Tablette deneme sürümü açılsın. Ekran görüntüsü al.
 
-### T1: Kalem gecikmesi prototipi (en önemli adım)
+### T1: Kalem gecikmesi prototipi (en önemli adım) (YAPILDI: v9.1)
 - Dart arayüzü: `InkSurface`. Çizgi başladı, nokta eklendi, çizgi bitti olayları; araç, renk, kalınlık ayarı.
 - **A uygulaması (Android yerel):** Jetpack Ink (`androidx.ink`), düşük gecikmeli çizim (`androidx.graphics` front buffer) ve hareket tahmini (`androidx.input` MotionEventPredictor). Flutter'a PlatformView olarak gömülür. Kod `tool/patch_android.dart` düzenine uygun eklenir.
 - **B uygulaması (saf Flutter):** `perfect_freehand` ve CustomPainter, biten çizgiler resim olarak önbellekte.
@@ -43,12 +43,12 @@ Hedef: Koçum, Casper PAD H10 tablette (Android 15, Dimensity 7050, 8 GB RAM, 25
 - Noktalar sıkıştırılmış ikili olarak saklanır (delta + varint). Kodlayıcı ve çözücü saf Dart, round-trip testli.
 - Tablo değişiklik defterine (senkron) girsin. Şema göçü eski sürümlerden test edilsin.
 
-### T3: PDF kitaplığı ve okuyucu
+### T3: PDF kitaplığı ve okuyucu (YAPILDI: v9.3 + v9.4)
 - `pdfrx` (lisansı ve API'si `arastirmaci` ile doğrulanacak). PDF içe aktarma, sha256 ile tanıma, kitaplıktaki kitapla eşleme, sayfa ofseti.
 - Okuyucu: sayfa kaydırma, yakınlaştırma, küçük resimler. Üstünde InkSurface katmanı. Koordinatlar sayfa koordinatında tutulur, yakınlaştırma ve döndürmede kaymaz (testli).
 - 300+ sayfalık PDF'te bellek ve kaydırma akıcı olsun (`tablet-testci` ölçsün).
 
-### T4: Soru = PDF koordinatı
+### T4: Soru = PDF koordinatı (YAPILDI: v9.5)
 - "Soru seç" aracı: kalemle dikdörtgen çiz, soru kutusu kaydedilir (sayfa + kutu). Yanlış, boş ya da doğru olarak işaretlenir.
 - Metin katmanı varsa kutudaki metin alınır, mevcut `page_reader` ve `auto_tags` ile ders, konu ve soru türü kendiliğinden dolar. Metin yoksa sayfa resme çizilip ML Kit ile okunur.
 - Kart: `pdfDocumentId`, `pdfPage`, `pdfBox` alanları, ayrıca küçük bir WebP önizleme. Önizleme, PDF'i olmayan cihazlar (telefon) için.

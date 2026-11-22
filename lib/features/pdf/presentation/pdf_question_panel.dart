@@ -213,7 +213,7 @@ class _PdfQuestionPanelState extends ConsumerState<PdfQuestionPanel> {
               alignment: Alignment.centerRight,
               child: FilledButton(
                 key: const Key('pdf-q-save'),
-                onPressed: _status != null && _subject != null && !_saving ? _save : null,
+                onPressed: _status != null && _subject != null && !_saving && !_analyzing ? _save : null,
                 child: Text(_saving ? 'Kaydediliyor…' : 'Kaydet'),
               ),
             ),

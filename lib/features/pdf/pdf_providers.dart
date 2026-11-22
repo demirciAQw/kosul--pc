@@ -81,9 +81,11 @@ final pdfQuestionServiceProvider = FutureProvider<PdfQuestionService>((ref) asyn
 });
 
 /// Kartın PDF'i bu cihazda var mı (dokununca PDF'e gidilir, yoksa yalnız önizleme).
-final pdfAvailableProvider = FutureProvider.family<bool, String>((ref, id) async {
+final pdfAvailableProvider = FutureProvider.autoDispose.family<bool, String>((ref, id) async {
+  // Belge eklenince/silinince yeniden hesaplansın.
+  await ref.watch(pdfDocumentsProvider.future);
   final record = await ref.watch(pdfDocumentRepositoryProvider).findBySha(id);
   if (record == null) return false;
   final svc = await ref.watch(pdfImportServiceProvider.future);
-  return svc.fileOf(record).existsSync();
+  return svc.fileOf(record).exists();
 });

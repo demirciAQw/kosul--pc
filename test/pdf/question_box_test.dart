@@ -146,4 +146,23 @@ void main() {
       expect(p.cropY + p.cropHeight, lessThanOrEqualTo(p.renderHeight));
     });
   });
+
+  group('okuyucu bağlantısı', () {
+    test('validReaderPage: sayfa sayısı dışı geçersiz', () {
+      expect(validReaderPage(0, 3), 0);
+      expect(validReaderPage(2, 3), 2);
+      expect(validReaderPage(3, 3), isNull);
+      expect(validReaderPage(-1, 3), isNull);
+      expect(validReaderPage(null, 3), isNull);
+    });
+
+    test('clipBoxToPage: sınıra kırpar, dışarıdaki ve geçersiz kutu null', () {
+      const page = PdfPageSize(612, 792);
+      final c = clipBoxToPage(const PdfBox(-10, 50, 9000, 9000), page)!;
+      expect([c.left, c.top, c.right, c.bottom], [0, 50, 612, 792]);
+      expect(clipBoxToPage(const PdfBox(700, 10, 800, 100), page), isNull);
+      expect(clipBoxToPage(const PdfBox(0, 0, double.infinity, 10), page), isNull);
+      expect(clipBoxToPage(const PdfBox(0, 0, double.nan, 10), page), isNull);
+    });
+  });
 }

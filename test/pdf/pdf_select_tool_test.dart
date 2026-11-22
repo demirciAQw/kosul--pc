@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -13,12 +14,14 @@ import 'package:kocum/core/di/core_providers.dart';
 import 'package:kocum/core/media/media_storage.dart';
 import 'package:kocum/features/ocr/data/ocr_repository_impl.dart';
 import 'package:kocum/features/ocr/domain/auto_tags.dart';
+import 'package:kocum/features/pdf/data/pdf_import_service.dart';
 import 'package:kocum/features/pdf/data/pdf_question_service.dart';
 import 'package:kocum/features/pdf/data/pdfrx_engine.dart';
 import 'package:kocum/features/pdf/domain/pdf_document_record.dart';
 import 'package:kocum/features/pdf/domain/pdf_engine.dart';
 import 'package:kocum/features/pdf/pdf_providers.dart';
 import 'package:kocum/features/pdf/presentation/pdf_page_ink_layer.dart';
+import 'package:kocum/features/pdf/presentation/pdf_question_panel.dart';
 import 'package:kocum/features/pdf/presentation/pdf_reader_page.dart';
 import 'package:kocum/features/question_bank/data/question_card_repository_impl.dart';
 import 'package:kocum/features/question_bank/domain/question_card.dart';
@@ -198,10 +201,124 @@ void main() {
     ));
     await settle(t, 200);
     expect(find.byType(Image), findsOneWidget);
-    // PDF bu cihazdaysa dokunuş sayfaya/kutuya götürür.
-    await t.tap(find.byType(QuestionTile));
+    // PDF bu cihazdaysa köşede PDF simgesi çıkar; simge sayfaya/kutuya götürür.
+    await t.tap(find.byKey(const Key('tile-open-pdf')));
     await settle(t, 200);
     expect(find.textContaining('PDF /pdf/$_id?page=0&box='), findsOneWidget);
+    // autoDispose sağlayıcının zamanlayıcısı bitsin.
+    await t.pumpWidget(const SizedBox());
+    await t.pump(const Duration(seconds: 1));
+  });
+
+  testWidgets('PDF kartı: dokunuş onOpen çağırır (geçmiş yazılır), simge PDF açar', (t) async {
+    final card = QuestionCard(
+      id: 'y',
+      status: QuestionStatus.wrong,
+      origin: QuestionOrigin.independent,
+      sourceName: 'y',
+      subject: 'TYT Matematik',
+      difficulty: 5,
+      createdAt: DateTime(2026),
+      pdfDocumentId: _id,
+      pdfPage: 0,
+      pdfBox: const PdfBox(10, 10, 100, 100),
+    );
+    var opened = 0;
+    final router = GoRouter(routes: [
+      GoRoute(
+        path: '/',
+        builder: (_, _) => Scaffold(
+          body: SizedBox(width: 200, height: 260, child: QuestionTile(card: card, onOpen: () => opened++)),
+        ),
+      ),
+      GoRoute(path: '/pdf/:id', builder: (_, s) => Scaffold(body: Text('PDF ${s.uri}'))),
+    ]);
+    addTearDown(router.dispose);
+    await t.pumpWidget(ProviderScope(
+      overrides: [pdfAvailableProvider(_id).overrideWith((ref) async => true)],
+      child: MaterialApp.router(routerConfig: router),
+    ));
+    await settle(t, 100);
+    await t.tap(find.byType(QuestionTile));
+    await settle(t, 100);
+    expect(opened, 1);
+    expect(find.textContaining('PDF /pdf/'), findsNothing);
+    await t.tap(find.byKey(const Key('tile-open-pdf')));
+    await settle(t, 100);
+    expect(opened, 1);
+    expect(find.textContaining('PDF /pdf/$_id?page=0&box='), findsOneWidget);
+  });
+
+  test('pdfAvailableProvider: PDF eklenince/silinince güncellenir', () async {
+    final dir = await Directory.systemTemp.createTemp('avail');
+    addTearDown(() => dir.delete(recursive: true));
+    final db = AppDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    final pdfs = Directory('${dir.path}/pdfs')..createSync();
+    final c = ProviderContainer(overrides: [
+      appDatabaseProvider.overrideWithValue(db),
+      pdfImportServiceProvider.overrideWith((ref) async => PdfImportService(
+            engine: const PdfrxEngine(initialize: pdfrxInitialize),
+            repository: ref.watch(pdfDocumentRepositoryProvider),
+            pdfDir: pdfs,
+          )),
+    ]);
+    addTearDown(c.dispose);
+    final seen = <bool>[];
+    c.listen(pdfAvailableProvider(_id), (_, n) {
+      if (n.hasValue && !n.isLoading) seen.add(n.value!);
+    }, fireImmediately: true);
+    final repo = c.read(pdfDocumentRepositoryProvider);
+    await Future.delayed(const Duration(milliseconds: 200));
+    File('${pdfs.path}/$_id.pdf').writeAsBytesSync([1]);
+    await repo.add(sha256: _id, title: 'x', pageCount: 1, fileName: 'a.pdf');
+    await Future.delayed(const Duration(milliseconds: 300));
+    await repo.softDelete(_id);
+    await Future.delayed(const Duration(milliseconds: 300));
+    expect(seen, [false, true, false]);
+  });
+
+  testWidgets('analiz sürerken Kaydet kapalı', (t) async {
+    final never = Completer<PdfQuestionService>();
+    final db = await t.runAsync(() async {
+      final d = AppDatabase(NativeDatabase.memory());
+      await d.customSelect('SELECT 1').get();
+      return d;
+    }) as AppDatabase;
+    addTearDown(() => t.runAsync(db.close));
+    t.view.physicalSize = const Size(900, 1200);
+    t.view.devicePixelRatio = 1;
+    addTearDown(t.view.reset);
+    await t.pumpWidget(ProviderScope(
+      overrides: [
+        appDatabaseProvider.overrideWithValue(db),
+        pdfQuestionServiceProvider.overrideWith((ref) => never.future),
+      ],
+      child: MaterialApp(
+        home: Scaffold(
+          body: PdfQuestionPanel(
+            info: PdfOpenInfo(
+              PdfDocumentRecord(id: _id, sha256: _id, title: 'x', pageCount: 1, fileName: 'a.pdf'),
+              '/yok.pdf',
+            ),
+            page: 0,
+            box: const PdfBox(0, 0, 100, 100),
+            onSaved: (_) {},
+            onCancel: () {},
+          ),
+        ),
+      ),
+    ));
+    await settle(t, 100);
+    await t.tap(find.byKey(const Key('pdf-q-status-wrong')));
+    await t.tap(find.byType(DropdownMenu<String>));
+    await t.pump();
+    await t.tap(find.text('TYT Matematik').last);
+    await t.pump();
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(t.widget<FilledButton>(find.byKey(const Key('pdf-q-save'))).onPressed, isNull);
+    await t.pumpWidget(const SizedBox());
+    await settle(t, 100);
   });
 
   testWidgets('PDF bu cihazda yoksa dokunuş ayrıntıyı açar (yalnız önizleme)', (t) async {
@@ -281,6 +398,13 @@ void main() {
     expect(find.byKey(const Key('pdf-question-panel')), findsNothing);
     final strokes = await t.runAsync(() => db.select(db.inkStrokes).get());
     expect(strokes, hasLength(1));
+  });
+
+  testWidgets('bağlantıdaki sayfa belgede yoksa başa açılır, kutu yok sayılır', (t) async {
+    await open(t, initialPage: 9, highlight: const PdfBox(50, 50, 300, 200));
+    expect(find.text('1 / 2'), findsOneWidget);
+    expect(find.byKey(const Key('pdf-box-mark-9')), findsNothing);
+    expect(find.byKey(const Key('pdf-box-mark-0')), findsNothing);
   });
 
   testWidgets('karttan açılış: sayfaya atlar ve kutuyu vurgular', (t) async {

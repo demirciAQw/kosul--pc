@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 
 import '../domain/pdf_engine.dart';
+import '../domain/question_box.dart' show clipBoxToPage;
 import 'pdf_page_ink_layer.dart' show PdfBoxPainter;
 
 /// Sayfa üstünde işaretli soru kutusu (bekleyen seçim ya da "PDF'te göster" vurgusu).
@@ -42,7 +43,12 @@ class PdfPageBoxOverlay extends StatelessWidget {
       child: ValueListenableBuilder<List<PdfBoxMark>>(
         valueListenable: marks,
         builder: (_, all, _) {
-          final mine = [for (final m in all) if (m.page == page) m];
+          final mine = <PdfBoxMark>[];
+          for (final m in all) {
+            if (m.page != page) continue;
+            final clipped = clipBoxToPage(m.box, PdfPageSize(pageWidth, pageHeight));
+            if (clipped != null) mine.add(PdfBoxMark(m.page, clipped, m.color));
+          }
           if (mine.isEmpty) return const SizedBox.shrink();
           return LayoutBuilder(
             builder: (_, c) {

@@ -58,7 +58,9 @@ class PdfReaderPage extends ConsumerWidget {
             ),
           );
         }
-        return PdfReaderView(info: i, initialPage: initialPage, highlight: highlight);
+        // Bağlantıdan gelen sayfa belgede yoksa başa açılır, kutu yok sayılır.
+        final page = validReaderPage(initialPage, i.record.pageCount);
+        return PdfReaderView(info: i, initialPage: page, highlight: page == null ? null : highlight);
       },
     );
   }

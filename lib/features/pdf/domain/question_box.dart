@@ -32,6 +32,23 @@ PdfBox? normalizeQuestionBox(double x1, double y1, double x2, double y2, PdfPage
   return box;
 }
 
+/// Okuyucuya bağlantıyla gelen sayfa geçerli mi (0'dan, [pageCount] içinde).
+/// Geçersizse null: okuyucu başa açılır, kutu da yok sayılır.
+int? validReaderPage(int? page, int pageCount) =>
+    page != null && page >= 0 && page < pageCount ? page : null;
+
+/// Vurgu kutusunu sayfa sınırına kırpar; sayfayla kesişmiyorsa ya da sayı
+/// geçersizse null (çizilmez).
+PdfBox? clipBoxToPage(PdfBox box, PdfPageSize page) {
+  for (final v in [box.left, box.top, box.right, box.bottom, page.width, page.height]) {
+    if (!v.isFinite) return null;
+  }
+  if (page.width <= 0 || page.height <= 0) return null;
+  final l = math.max<double>(0, box.left), t = math.max<double>(0, box.top);
+  final r = math.min<double>(page.width, box.right), b = math.min<double>(page.height, box.bottom);
+  return r > l && b > t ? PdfBox(l, t, r, b) : null;
+}
+
 /// Kutudaki metnin kaynağı kararı.
 enum BoxTextSource {
   /// PDF'in metin katmanı yeterli.
