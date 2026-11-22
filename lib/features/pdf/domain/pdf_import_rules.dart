@@ -11,8 +11,22 @@ String titleFromFileName(String fileName) {
   return name.isEmpty ? 'PDF' : name;
 }
 
-/// `<sha256>.pdf`: uygulama içindeki saklama adı.
-String storedFileName(String sha256) => '$sha256.pdf';
+/// Küçük harfli 64 onaltılık hane (yol çıkışı ve bozuk kimlik engeli).
+bool isValidSha256(String s) => RegExp(r'^[0-9a-f]{64}$').hasMatch(s);
+
+/// `<sha256>.pdf`: uygulama içindeki saklama adı. Geçersiz sha256'da [ArgumentError].
+String storedFileName(String sha256) {
+  if (!isValidSha256(sha256)) throw ArgumentError.value(sha256, 'sha256', 'Geçersiz sha256');
+  return '$sha256.pdf';
+}
+
+/// Başlığı kırpar ve 300 karakterle sınırlar; boşsa 'PDF'.
+String normalizePdfTitle(String title) {
+  final t = title.trim();
+  if (t.isEmpty) return 'PDF';
+  final cut = t.length > 300 ? t.substring(0, 300).trim() : t;
+  return cut.isEmpty ? 'PDF' : cut;
+}
 
 class BookCandidate {
   const BookCandidate({required this.id, required this.title, this.publisher});

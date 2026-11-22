@@ -66,13 +66,36 @@ class PdfBox {
   String toString() => 'PdfBox($left, $top, $right, $bottom)';
 }
 
-/// Çizilmiş sayfa: sıra sıra R, G, B, A bayt (dart:ui'den bağımsız).
+/// Piksel bayt sırası.
+enum PdfPixelFormat { rgba, bgra }
+
+/// Çizilmiş sayfa: piksel başına 4 bayt, [format] sırasıyla (dart:ui'den bağımsız).
+/// PDFium BGRA verir; dönüşüm çağırana kalır (kopya yok). Android/Skia için
+/// BGRA doğrudan `ui.decodeImageFromPixels(..., PixelFormat.bgra8888)` ile açılır.
 class PdfRenderedImage {
-  const PdfRenderedImage({required this.width, required this.height, required this.rgbaBytes});
+  const PdfRenderedImage({
+    required this.width,
+    required this.height,
+    required this.bytes,
+    this.format = PdfPixelFormat.rgba,
+  });
   final int width;
   final int height;
-  final Uint8List rgbaBytes;
+  final Uint8List bytes;
+  final PdfPixelFormat format;
+
+  /// Verilen pikselin (x, y) R, G, B, A değerleri (biçimden bağımsız).
+  List<int> rgbaAt(int x, int y) {
+    final i = (y * width + x) * 4;
+    return format == PdfPixelFormat.rgba
+        ? [bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3]]
+        : [bytes[i + 2], bytes[i + 1], bytes[i], bytes[i + 3]];
+  }
 }
+
+/// Bir sayfa çiziminin piksel üst sınırı (16 MP ≈ 64 MB). Aşılırsa [ArgumentError];
+/// çağıran ölçeği kendisi küçültür (sessiz küçültme yok: ink eşlemesi boyuta bağlı).
+const int maxRenderPixels = 16 * 1000 * 1000;
 
 /// PDF açılamadı (bozuk, şifreli, PDF değil).
 class PdfOpenException implements Exception {
@@ -89,6 +112,7 @@ abstract interface class PdfEngineDocument {
   Future<PdfPageSize> pageSize(int page);
 
   /// Sayfayı tam olarak [width] x [height] piksele çizer (beyaz zemin).
+  /// Boyut <= 0 ya da `width*height > maxRenderPixels` ise [ArgumentError].
   Future<PdfRenderedImage> renderPage(int page, {required int width, required int height});
 
   /// [box] içindeki metin (okuma sırasıyla, satırlar `\n`). Metin katmanı

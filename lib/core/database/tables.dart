@@ -609,8 +609,11 @@ class InkStrokes extends Table {
 
 /// PDF belgeleri (T3). Yalnızca SATIR senkron olur; PDF dosyası olmaz
 /// (`<veri klasörü>/pdfs/<sha256>.pdf`, her cihaz kendisi ekler).
-/// `id` = `sha256`: iki cihazda aynı PDF aynı satır olur (çakışma çıkmaz);
-/// `ink_strokes.pdfDocumentId` bu kimliği taşır.
+/// `id` = `sha256` (CHECK ile zorlanır): iki cihazda aynı PDF aynı satır olur.
+/// İki cihaz aynı PDF'i senkrondan ÖNCE ayrı içe aktarırsa iki "ekle" gelir ve
+/// defter satırı HLC'si yeni olan sürümle tümden yazar; kaybeden sürüm
+/// (kitap bağı, ofset) Çakışmalar'da kalır (geri alınabilir). Alan alan
+/// birleştirme yoktur. `ink_strokes.pdfDocumentId` bu kimliği taşır.
 /// Kitap sayfa no = pdf sayfa no (1'den) + `pageOffset`. Silme yumuşaktır.
 @DataClassName('PdfDocumentRow')
 class PdfDocuments extends Table {
@@ -628,8 +631,9 @@ class PdfDocuments extends Table {
   @override
   Set<Column> get primaryKey => {id};
 
+  /// `sha256` ayrı benzersiz değil: defterin `ON CONFLICT(id)` yazımıyla
+  /// uyuşmazdı. id = sha256 kuralı burada; bozuk gelen satır uygulanmaz,
+  /// defter onu Çakışmalar'a (kaybeden) düşürür, eşitleme takılmaz.
   @override
-  List<Set<Column>> get uniqueKeys => [
-        {sha256},
-      ];
+  List<String> get customConstraints => ['CHECK (id = sha256)'];
 }

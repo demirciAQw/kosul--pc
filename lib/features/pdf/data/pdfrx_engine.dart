@@ -1,4 +1,3 @@
-import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:pdfrx/pdfrx.dart' as r;
@@ -48,6 +47,9 @@ class _PdfrxDocument implements PdfEngineDocument {
 
   @override
   Future<PdfRenderedImage> renderPage(int page, {required int width, required int height}) async {
+    if (width <= 0 || height <= 0 || width * height > maxRenderPixels) {
+      throw ArgumentError('Geçersiz çizim boyutu: ${width}x$height (üst sınır $maxRenderPixels piksel)');
+    }
     final p = _page(page);
     final img = await p.render(
       width: width,
@@ -58,15 +60,9 @@ class _PdfrxDocument implements PdfEngineDocument {
     );
     if (img == null) throw StateError('Sayfa çizilemedi: $page');
     try {
-      final bgra = img.pixels;
-      final rgba = Uint8List(bgra.length);
-      for (var i = 0; i + 3 < bgra.length; i += 4) {
-        rgba[i] = bgra[i + 2];
-        rgba[i + 1] = bgra[i + 1];
-        rgba[i + 2] = bgra[i];
-        rgba[i + 3] = bgra[i + 3];
-      }
-      return PdfRenderedImage(width: img.width, height: img.height, rgbaBytes: rgba);
+      // Tamponu yerel belleğe bağlı; dispose'tan önce kopyala. Renk sırası DEĞİŞMEZ (BGRA).
+      return PdfRenderedImage(
+          width: img.width, height: img.height, bytes: Uint8List.fromList(img.pixels), format: PdfPixelFormat.bgra);
     } finally {
       img.dispose();
     }
@@ -89,18 +85,30 @@ class _PdfrxDocument implements PdfEngineDocument {
       // Parçanın yarıdan fazlası kutudaysa alınır (yan satırlar karışmasın).
       if (fb.coverageBy(box) >= 0.5) hits.add((fb.top, fb.left, f));
     }
-    // Okuma sırası: yukarıdan aşağı, aynı satırda soldan sağa.
+    // Okuma sırası: önce yukarıdan aşağı sırala, sonra satırlara kümele
+    // (satırın ilk parçasına 3 birimden yakın olanlar aynı satır), her satırı
+    // soldan sağa sırala. Karşılaştırıcılar geçişli: kararsız sıra yok.
     hits.sort((a, b) {
-      final dy = a.$1 - b.$1;
-      return dy.abs() > 3 ? dy.sign.toInt() : a.$2.compareTo(b.$2);
+      final c = a.$1.compareTo(b.$1);
+      return c != 0 ? c : a.$2.compareTo(b.$2);
     });
+    final lines = <List<(double, double, r.PdfPageTextFragment)>>[];
+    for (final h in hits) {
+      if (lines.isNotEmpty && h.$1 - lines.last.first.$1 <= 3) {
+        lines.last.add(h);
+      } else {
+        lines.add([h]);
+      }
+    }
     final buf = StringBuffer();
-    double? lastTop;
-    for (final (top, _, f) in hits) {
-      if (f.text.trim().isEmpty) continue;
-      if (lastTop != null) buf.write((top - lastTop).abs() > 3 ? '\n' : ' ');
-      buf.write(f.text.trim());
-      lastTop = math.max(top, lastTop ?? top);
+    var firstLine = true;
+    for (final line in lines) {
+      line.sort((a, b) => a.$2.compareTo(b.$2));
+      final words = [for (final h in line) if (h.$3.text.trim().isNotEmpty) h.$3.text.trim()];
+      if (words.isEmpty) continue;
+      if (!firstLine) buf.write('\n');
+      firstLine = false;
+      buf.write(words.join(' '));
     }
     return buf.toString().trim();
   }

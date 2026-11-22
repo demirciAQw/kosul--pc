@@ -30,7 +30,8 @@ void main() {
     expect(titleFromFileName('Tonguç_TYT  Matematik.pdf'), 'Tonguç TYT Matematik');
     expect(titleFromFileName('/a/b/Kitap.PDF'), 'Kitap');
     expect(titleFromFileName('.pdf'), 'PDF');
-    expect(storedFileName('ab'), 'ab.pdf');
+    final h = 'ab' * 32;
+    expect(storedFileName(h), '$h.pdf');
   });
 
   group('kitap önerisi', () {

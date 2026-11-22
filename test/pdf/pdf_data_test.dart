@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:drift/drift.dart' show Value;
@@ -7,7 +8,9 @@ import 'package:kocum/core/database/app_database.dart';
 import 'package:kocum/core/ledger/ledger_service.dart';
 import 'package:kocum/features/pdf/data/pdf_document_repository.dart';
 import 'package:kocum/features/pdf/data/pdf_import_service.dart';
+import 'package:kocum/features/pdf/domain/pdf_document_record.dart';
 import 'package:kocum/features/pdf/domain/pdf_engine.dart';
+import 'package:kocum/features/pdf/domain/pdf_import_rules.dart';
 
 import 'pdf_test_support.dart';
 
@@ -20,6 +23,15 @@ Future<AppDatabase> _open([String source = 'telefon']) async {
 
 Future<void> _book(AppDatabase db, String id, String title) => db.into(db.books).insert(BooksCompanion.insert(
     id: id, title: title, examType: 'TYT', subject: 'Matematik', pageCount: 100, avgQuestionsPerPage: 5, createdAt: DateTime(2026)));
+
+String _h(String c) => c * 64;
+
+class _FailingRepo extends PdfDocumentRepository {
+  _FailingRepo(super.db);
+  @override
+  Future<PdfDocumentRecord> add({required String sha256, required String title, required int pageCount, required String fileName}) =>
+      throw StateError('ekleme başarısız');
+}
 
 void main() {
   late Directory tmp;
@@ -151,11 +163,11 @@ void main() {
     final a = await _open('telefon');
     final b = await _open('pc');
     final ra = PdfDocumentRepository(a);
-    final rec = await ra.add(sha256: 'abc123', title: 'T', pageCount: 7, fileName: 'f.pdf');
+    final rec = await ra.add(sha256: _h('a'), title: 'T', pageCount: 7, fileName: 'f.pdf');
     await ra.setOffset(rec.id, 5);
     await LedgerService(b).applyRemote(await LedgerService(a).pendingFor(0));
     final got = await b.select(b.pdfDocuments).getSingle();
-    expect((got.id, got.sha256, got.pageCount, got.pageOffset), ('abc123', 'abc123', 7, 5));
+    expect((got.id, got.sha256, got.pageCount, got.pageOffset), (_h('a'), _h('a'), 7, 5));
 
     await ra.softDelete(rec.id);
     await LedgerService(b).applyRemote(await LedgerService(a).pendingFor(0));
@@ -167,17 +179,110 @@ void main() {
     expect((await a.select(a.pdfDocuments).getSingle()).deleted, isFalse);
   });
 
-  test('iki cihazda aynı PDF: sha256 benzersiz, ikinci ekleme yeni satır açmaz', () async {
+  test('aynı sha256: ikinci ekleme yeni satır açmaz; id != sha256 satırı CHECK ile reddedilir', () async {
     final a = await _open('telefon');
     final ra = PdfDocumentRepository(a);
-    await ra.add(sha256: 'x', title: 'T', pageCount: 3, fileName: 'f');
-    await ra.add(sha256: 'x', title: 'T2', pageCount: 3, fileName: 'g');
-    expect(await a.select(a.pdfDocuments).get(), hasLength(1));
-    // Aynı sha256, başka kimlikle zorla eklenirse veritabanı reddeder.
+    await ra.add(sha256: _h('c'), title: 'T', pageCount: 3, fileName: 'f');
+    await ra.add(sha256: _h('c'), title: 'T2', pageCount: 3, fileName: 'g');
+    final rows = await a.select(a.pdfDocuments).get();
+    expect(rows, hasLength(1));
+    expect(rows.single.title, 'T'); // var olan satır korunur
     await expectLater(
         a.into(a.pdfDocuments).insert(PdfDocumentsCompanion.insert(
-            id: 'baska', sha256: 'x', title: 'T', pageCount: 1, fileName: 'f', createdAt: DateTime(2026), updatedAt: DateTime(2026))),
+            id: 'baska', sha256: _h('c'), title: 'T', pageCount: 1, fileName: 'f', createdAt: DateTime(2026), updatedAt: DateTime(2026))),
         throwsA(anything));
+  });
+
+  test('defter: id != sha256 gelen satır uygulanmaz, Çakışmalar\'a düşer, kalan değişiklikler uygulanır', () async {
+    final b = await _open('pc');
+    String row(String id, String sha) => jsonEncode({
+          'id': id, 'sha256': sha, 'title': 'T', 'page_count': 1, 'file_name': 'f', 'book_id': null,
+          'page_offset': 0, 'deleted': 0, 'created_at': 1, 'updated_at': 1,
+        });
+    LedgerChange ch(String cid, String id, String sha, String clock) => LedgerChange(
+        id: cid, device: 'uzak', source: 'telefon', table: 'pdf_documents', rowId: id, op: 'ekle', clock: clock, neu: row(id, sha));
+    final r = await LedgerService(b).applyRemote([
+      ch('c1', 'bozuk', _h('d'), '0000000000001-0000-uzak'),
+      ch('c2', _h('e'), _h('e'), '0000000000002-0000-uzak'),
+    ]);
+    expect((r.failed, r.applied), (1, 1));
+    expect((await b.select(b.pdfDocuments).get()).map((e) => e.id), [_h('e')]);
+    final c = await b.select(b.cakismalar).get();
+    expect(c.single.tablo, 'pdf_documents');
+    expect(c.single.satirId, 'bozuk');
+    expect(c.single.kaybeden, isNotNull);
+    // Senkron takılmadı: aynı toplu yeniden gelirse yinelenen sayılır.
+    expect((await LedgerService(b).applyRemote([ch('c1', 'bozuk', _h('d'), '0000000000001-0000-uzak')])).duplicates, 1);
+  });
+
+  test('iki cihaz aynı PDF\'i senkrondan önce ayrı içe aktarır: tek satır, kaybeden Çakışmalar\'da (alan birleştirme yok)', () async {
+    final a = await _open('telefon');
+    final b = await _open('pc');
+    final ra = PdfDocumentRepository(a);
+    final rb = PdfDocumentRepository(b);
+    await ra.add(sha256: _h('f'), title: 'T', pageCount: 4, fileName: 'f');
+    await ra.linkBook(_h('f'), 'k1');
+    await rb.add(sha256: _h('f'), title: 'T', pageCount: 4, fileName: 'f');
+    await rb.setOffset(_h('f'), 7);
+    final r = await LedgerService(b).applyRemote(await LedgerService(a).pendingFor(0));
+    expect(r.conflicts, greaterThan(0));
+    expect(await b.select(b.pdfDocuments).get(), hasLength(1));
+    // Kazanan HLC'ye göre tümden yazılır; her iki sürümün izi kaybolmaz.
+    expect((await b.select(b.cakismalar).get()), isNotEmpty);
+  });
+
+  test('sha256 doğrulaması: fileOf, storedFileName ve add geçersiz kimliği reddeder (yol çıkışı yok)', () async {
+    final bad = ['../../etc/passwd', 'abc', 'A' * 64, '${'a' * 63}/', ''];
+    for (final s in bad) {
+      expect(() => storedFileName(s), throwsArgumentError, reason: s);
+      expect(() => svc.fileOf(PdfDocumentRecord(id: s, sha256: s, title: 't', pageCount: 1, fileName: 'f', pageOffset: 0, deleted: false)),
+          throwsArgumentError,
+          reason: s);
+      await expectLater(repo.add(sha256: s, title: 't', pageCount: 1, fileName: 'f'), throwsArgumentError);
+    }
+    expect(storedFileName(_h('a')), '${_h('a')}.pdf');
+    expect(await repo.list(includeDeleted: true), isEmpty);
+  });
+
+  test('başlık: kırpılır, 300 karakterle sınırlanır, boşsa PDF', () async {
+    final a = await repo.add(sha256: _h('1'), title: '  Ad  ', pageCount: 1, fileName: 'f');
+    expect(a.title, 'Ad');
+    final b = await repo.add(sha256: _h('2'), title: 'x' * 400, pageCount: 1, fileName: 'f');
+    expect(b.title.length, 300);
+    final c = await repo.add(sha256: _h('3'), title: '   ', pageCount: 1, fileName: 'f');
+    expect(c.title, 'PDF');
+    await repo.rename(a.id, 'y' * 500);
+    expect((await repo.findBySha(a.id))!.title.length, 300);
+  });
+
+  test('satır eklenemezse yeni yazılan dosya silinir; önceden var olan dosya silinmez', () async {
+    final failing = _FailingRepo(db);
+    final s2 = PdfImportService(engine: engine, repository: failing, pdfDir: Directory('${tmp.path}/veri/pdfs'));
+    final f = await src('a.pdf', FakePdfEngine.bytes(5));
+    final sha = await PdfImportService.sha256OfFile(f);
+    final target = File('${tmp.path}/veri/pdfs/$sha.pdf');
+
+    await expectLater(s2.importFile(f), throwsStateError);
+    expect(target.existsSync(), isFalse);
+    expect(Directory('${tmp.path}/veri/pdfs').listSync(), isEmpty);
+
+    // Dosya önceden var (satır yok): hata olsa da dosya kalır.
+    await target.writeAsBytes(FakePdfEngine.bytes(5));
+    await expectLater(s2.importFile(f), throwsStateError);
+    expect(target.existsSync(), isTrue);
+    expect(Directory('${tmp.path}/veri/pdfs').listSync().whereType<File>().map((e) => e.path.split('/').last), ['$sha.pdf']);
+  });
+
+  test('özet .part kopyasından: içerik ve ad uyuşur; çift içe aktarma yarışı tek satır tek dosya', () async {
+    final f1 = await src('a.pdf', FakePdfEngine.bytes(5));
+    final f2 = await src('b.pdf', FakePdfEngine.bytes(5));
+    final rs = await Future.wait([svc.importFile(f1), svc.importFile(f2)]);
+    expect(rs.map((e) => e.document.id).toSet(), hasLength(1));
+    expect(rs.where((e) => e.alreadyImported), hasLength(1));
+    expect(await repo.list(includeDeleted: true), hasLength(1));
+    final files = Directory('${tmp.path}/veri/pdfs').listSync().whereType<File>().toList();
+    expect(files, hasLength(1));
+    expect(await PdfImportService.sha256OfFile(files.single), rs.first.document.id);
   });
 
   Future<void> migrate(int from) async {
@@ -204,7 +309,7 @@ void main() {
     expect((await d.select(d.anlikNotes).getSingle()).body, 'eski not');
     expect((await d.customSelect('PRAGMA user_version').getSingle()).read<int>('user_version'), 16);
     // Tetikleyici kurulu: yeni belge deftere yazılır.
-    await PdfDocumentRepository(d).add(sha256: 's', title: 'T', pageCount: 1, fileName: 'f');
+    await PdfDocumentRepository(d).add(sha256: _h('b'), title: 'T', pageCount: 1, fileName: 'f');
     expect((await LedgerService(d).history()).any((c) => c.table == 'pdf_documents'), isTrue);
   }
 

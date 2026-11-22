@@ -12,25 +12,30 @@ class PdfDocumentRepository {
   final DateTime Function() _clock;
 
   /// Ekler. Aynı sha256 varsa (silinmiş de olsa) yeni satır açmaz: satırı
-  /// geri getirir, sayfa sayısı ve dosya adını günceller; kitap bağı ve ofset durur.
+  /// geri getirir, yalnızca sayfa sayısı değişmişse onu günceller; başlık, dosya adı,
+  /// kitap bağı ve ofset durur. Geçersiz [sha256]'da [ArgumentError].
   Future<PdfDocumentRecord> add({
     required String sha256,
     required String title,
     required int pageCount,
     required String fileName,
   }) async {
+    if (!isValidSha256(sha256)) throw ArgumentError.value(sha256, 'sha256', 'Geçersiz sha256');
     final now = _clock();
     final existing = await _row(sha256);
     if (existing == null) {
-      await _db.into(_db.pdfDocuments).insert(PdfDocumentsCompanion.insert(
+      // Eşzamanlı iki çağrıda ikincisi sessizce geçer (tek satır).
+      await _db.into(_db.pdfDocuments).insert(
+          PdfDocumentsCompanion.insert(
             id: sha256,
             sha256: sha256,
-            title: title,
+            title: normalizePdfTitle(title),
             pageCount: pageCount,
             fileName: fileName,
             createdAt: now,
             updatedAt: now,
-          ));
+          ),
+          mode: InsertMode.insertOrIgnore);
     } else if (existing.deleted || existing.pageCount != pageCount) {
       await (_db.update(_db.pdfDocuments)..where((d) => d.id.equals(sha256))).write(PdfDocumentsCompanion(
         deleted: const Value(false),
@@ -72,9 +77,8 @@ class PdfDocumentRepository {
   Future<bool> setOffset(String id, int offset) => _update(id, PdfDocumentsCompanion(pageOffset: Value(offset)));
 
   Future<bool> rename(String id, String title) {
-    final t = title.trim();
-    if (t.isEmpty || t.length > 300) return Future.value(false);
-    return _update(id, PdfDocumentsCompanion(title: Value(t)));
+    if (title.trim().isEmpty) return Future.value(false);
+    return _update(id, PdfDocumentsCompanion(title: Value(normalizePdfTitle(title))));
   }
 
   /// Yumuşak silme. Dosya ve çizgiler durur; yeniden içe aktarma geri getirir.

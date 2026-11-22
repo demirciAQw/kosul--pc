@@ -48,3 +48,11 @@ Dal: `tablet-1`. Her adım: saat, sonuç, ölçüm, "Ahmet elle denesin".
 - `pdf_documents` tablosu (şema 16, `id` = sha256 → iki cihazda aynı PDF aynı satır). Dosya senkron edilmez, yalnız satır. İçe aktarma `pdfs/<sha256>.pdf`, tekrar kopyalamaz; kitap önerisi döner, otomatik bağlanmaz.
 - `flutter build apk --debug` ve `flutter build linux --debug` geçti. 408 test.
 - Doğrulanmadı: döndürülmüş PDF'te metin kutusu koordinatı, 300+ sayfa bellek, release (R8) derlemesi.
+
+### T3a inceleme düzeltmeleri (v9.3.2)
+- `sha256` unique yerine `CHECK (id = sha256)`; bozuk satır Çakışmalar'a düşer, senkron takılmaz.
+- Yol çıkışı engellendi (64 haneli hex doğrulaması), başlık kırpılır, yarım kalan dosya geri alınır, eşzamanlı içe aktarma tek satır/tek dosya (testli).
+- Render üst sınırı 16 MP (aşılırsa hata); piksel BGRA dönüşümsüz taşınır (`PdfRenderedImage.format`).
+- Testler gerçekleşti: renkli dikdörtgen (R/B kanalı), `/Rotate 90` sayfada boyut ve kutu metni.
+- CI iş akışlarında Flutter 3.50.0 sabitlendi.
+- **Açık:** iki cihaz aynı PDF'i ayrı içe aktarırsa kitap bağı/ofset için alan alan birleştirme yok; kaybeden sürüm Çakışmalar ekranından geri alınır.

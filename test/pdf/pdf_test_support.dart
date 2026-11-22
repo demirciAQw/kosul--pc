@@ -5,7 +5,10 @@ import 'dart:typed_data';
 import 'package:kocum/features/pdf/domain/pdf_engine.dart';
 
 /// Elle yazılmış minimal PDF: her sayfa 612x792, verilen metinler (x, y alttan).
-Uint8List minimalPdf(List<List<(String, double, double)>> pages) {
+///
+/// [rotate]: sayfa `/Rotate` değeri (0, 90, 180, 270). [rawContent]: her sayfanın
+/// içeriğine eklenen ham PDF komutları (ör. `1 0 0 rg 0 0 100 100 re f`).
+Uint8List minimalPdf(List<List<(String, double, double)>> pages, {int rotate = 0, String rawContent = ''}) {
   final objs = <String>[];
   // 1 katalog, 2 sayfa ağacı, 3 yazı tipi, sonra her sayfa için (sayfa, içerik).
   objs.add('<< /Type /Catalog /Pages 2 0 R >>');
@@ -17,7 +20,8 @@ Uint8List minimalPdf(List<List<(String, double, double)>> pages) {
     for (final (t, x, y) in pages[i]) {
       content.write('BT /F1 18 Tf $x $y Td ($t) Tj ET\n');
     }
-    objs.add('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents ${5 + i * 2} 0 R '
+    content.write('$rawContent\n');
+    objs.add('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Rotate $rotate /Contents ${5 + i * 2} 0 R '
         '/Resources << /Font << /F1 3 0 R >> >> >>');
     objs.add('<< /Length ${content.length} >>\nstream\n$content\nendstream');
   }
@@ -67,7 +71,7 @@ class _FakeDoc implements PdfEngineDocument {
   Future<PdfPageSize> pageSize(int page) async => const PdfPageSize(612, 792);
   @override
   Future<PdfRenderedImage> renderPage(int page, {required int width, required int height}) async =>
-      PdfRenderedImage(width: width, height: height, rgbaBytes: Uint8List(width * height * 4));
+      PdfRenderedImage(width: width, height: height, bytes: Uint8List(width * height * 4));
   @override
   Future<String> textInBox(int page, PdfBox box) async => '';
 }
