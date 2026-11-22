@@ -95,4 +95,56 @@ void main() {
     final r = offsetObjects([line('a', 0, 0, 10, 10)], 5, 7).single;
     expect((r.id, r.points[0].x, r.points[0].y, r.points[0].pressure), ('a', 5, 7, 0.6));
   });
+
+  group('ince seçim ve sayfa sınırı', () {
+    const page = InkRect(0, 0, 1000, 1000);
+    // Yatay çizgi: yükseklik 0.
+    final hl = line('h', 100, 500, 400, 500);
+    const hbox = InkRect(100, 500, 400, 500);
+
+    test('ince yatay seçimde köşe sürüklemesi ölçeği patlatmaz', () {
+      // Eski max(rx, ry): dikey sürükleme (500 birim aşağı) ry = 500/1e-6 olurdu.
+      final d = LassoDrag(LassoHandle.bottomRight, hbox, 400, 500);
+      final r = d.apply([hl], 400, 1000).single;
+      final w = r.points[1].x - r.points[0].x;
+      expect(w, lessThanOrEqualTo(300 * LassoDrag.maxRatio + 1e-6));
+      expect(w, greaterThanOrEqualTo(300 * LassoDrag.minRatio - 1e-6));
+      expect(w, closeTo(300, 1)); // dikey sürükleme yataya neredeyse etki etmez
+      // Yatay sürükleme düzgün orantılı büyütür.
+      final r2 = d.apply([hl], 700, 500).single;
+      expect(r2.points[1].x - r2.points[0].x, closeTo(600, 1e-6));
+    });
+
+    test('ölçek üst sınırı 20', () {
+      final d = LassoDrag(LassoHandle.bottomRight, box, 200, 160);
+      final r = d.apply([line('a', 100, 100, 200, 160)], 1e9, 1e9).single;
+      expect(r.points[1].x - r.points[0].x, closeTo(100 * LassoDrag.maxRatio, 1e-6));
+      // Alt sınır: ters yöne sürükleme sıfıra/negatife inmez.
+      final r2 = d.apply([line('a', 100, 100, 200, 160)], -500, -500).single;
+      expect(r2.points[1].x - r2.points[0].x, closeTo(100 * LassoDrag.minRatio, 1e-6));
+    });
+
+    test('köşe boyutlandırma sayfa sınırında durur', () {
+      final d = LassoDrag(LassoHandle.bottomRight, hbox, 400, 500, pageBounds: page);
+      final r = d.apply([hl], 5000, 5000).single;
+      expect(r.points[1].x, lessThanOrEqualTo(1000 + 1e-6));
+      final e = LassoDrag(LassoHandle.right, hbox, 400, 500, pageBounds: page);
+      expect(e.apply([hl], 9000, 500).single.points[1].x, lessThanOrEqualTo(1000 + 1e-6));
+    });
+
+    test('taşıma sayfa sınırına kıstırılır; dışarıdaki kutu içeri zorlanmaz', () {
+      final d = LassoDrag(LassoHandle.body, hbox, 250, 500, pageBounds: page);
+      final r = d.apply([hl], 250 + 5000, 500 - 5000).single;
+      expect(r.points[1].x, closeTo(1000, 1e-6)); // sağa dayandı
+      expect(r.points[0].y, closeTo(0, 1e-6)); // üste dayandı
+      final l = d.apply([hl], 250 - 5000, 500).single;
+      expect(l.points[0].x, closeTo(0, 1e-6));
+      // Kutu zaten sayfa dışında: daha da dışarı gitmez, içeri atlamaz.
+      const outBox = InkRect(900, 500, 1200, 500);
+      final out = line('o', 900, 500, 1200, 500);
+      final o = LassoDrag(LassoHandle.body, outBox, 1000, 500, pageBounds: page);
+      expect(o.apply([out], 1100, 500).single.points[0].x, closeTo(900, 1e-6)); // sağa gidemez
+      expect(o.apply([out], 800, 500).single.points[0].x, closeTo(700, 1e-6)); // sola serbest
+    });
+  });
 }

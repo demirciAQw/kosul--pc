@@ -453,11 +453,14 @@ class PdfInkSession extends ChangeNotifier {
       try {
         final ok = await _try(() => repository.updatePoints({for (final e in after.entries) e.key: _toRecord(e.value)}));
         if (!ok) {
-          // Hiçbir şey yazılmadı (işlem geri sarıldı): ekranı kayıtlı konuma döndür.
-          _restoreBaseline();
+          // Hiçbir şey yazılmadı (işlem geri sarıldı): ekranı kayıtlı konuma döndür. Seçim bu arada
+          // kalkmış olabilir; bu yüzden yakalanan [before] kimlikle doğrudan sayfaya uygulanır.
+          _applyPoints(page, before);
           _report('Taşıma kaydedilemedi; çizgiler eski yerine döndü.');
           return;
         }
+        // Başarı: ekran, seçim bu arada temizlenip eski tabana döndürülmüş olsa bile, DB ile aynı olsun.
+        _applyPoints(page, after);
         for (final e in after.entries) {
           sel.baseline[e.key] = e.value;
         }
@@ -467,6 +470,17 @@ class PdfInkSession extends ChangeNotifier {
         _selChanged();
       }
     });
+  }
+
+  /// Sayfadaki çizgilerin noktalarını kimlikle verilen noktalara ayarlar (ekranı günceller).
+  void _applyPoints(int page, Map<String, List<InkPoint>> byId) {
+    final pen = _pens[page];
+    if (pen == null || pen._disposed) return;
+    for (final s in pen._strokes) {
+      final p = byId[s.id];
+      if (p != null) s.setPoints(p);
+    }
+    pen._ping();
   }
 
   static bool _samePoints(List<InkPoint> a, List<InkPoint> b) {
@@ -500,7 +514,9 @@ class PdfInkSession extends ChangeNotifier {
   }
 
   /// Seçimin kopyası (kayıtlı konumda; kimlikler yapıştırırken yenilenir).
-  List<InkObject> copySelection() => selectionOriginals;
+  /// Taşıma kaydı sürerken (busy) kayıtlı taban henüz eski konumdadır: yanlış konumu
+  /// kopyalamamak için boş döner (çağıran önceki panoyu korur).
+  List<InkObject> copySelection() => selectionBusy ? const [] : selectionOriginals;
 
   /// [objects]'i [dx],[dy] (sayfa birimi) kaydırarak yeni çizgi olarak ekler ve seçer.
   /// Tek işlem, tek geri al kaydı; hatada eklenenler kalkar.
@@ -957,13 +973,27 @@ class PdfInkSession extends ChangeNotifier {
     if (removed.isEmpty) return;
     unawaited(
       _enqueue(() async {
+        // Kaydı hiç yazılmamış (id'siz) çizgiler: kayıt kuyruğu silindiği için atladı.
+        // Önce eklenip aynı işlemde yumuşak silinir; geri al onları da getirir.
+        final pending = [for (final s in removed) if (s.id == null) s];
         final ids = [
           for (final s in removed)
             if (s.id != null) s.id!,
         ];
-        final ok = ids.isEmpty || await _try(() async {
-          await repository.softDeleteMany(ids);
-        });
+        var archived = const <String>[];
+        final ok = (ids.isEmpty && pending.isEmpty) ||
+            await _try(() async {
+              if (pending.isEmpty) {
+                await repository.softDeleteMany(ids);
+              } else {
+                final r = await repository.replaceDetailed(
+                  deleteIds: ids,
+                  adds: const [],
+                  archive: [for (final s in pending) _newStroke(page, s)],
+                );
+                archived = r.archived;
+              }
+            });
         _pendingErase.removeAll(ids);
         if (!ok) {
           final pen = _pens[page];
@@ -971,10 +1001,23 @@ class PdfInkSession extends ChangeNotifier {
             s.erased = false;
             if (pen != null && !pen._disposed) pen._add(s);
           }
+          // Kaydı atlanmış çizgiler yeniden kuyruğa: kalıcı kayıt olmadan kaybolmasınlar.
+          for (final s in pending) {
+            await _save(page, s);
+          }
           _report('Silme kaydedilemedi; çizgiler geri konuldu.');
           return;
         }
-        _history.push(InkAction(InkActionKind.erased, page, ids));
+        for (var i = 0; i < pending.length; i++) {
+          pending[i].id = archived[i];
+          _failed.remove(pending[i]);
+          _failedPage.remove(pending[i]);
+        }
+        if (pending.isEmpty) {
+          _history.push(InkAction(InkActionKind.erased, page, ids));
+        } else {
+          _history.push(InkAction(InkActionKind.replaced, page, [...ids, ...archived]));
+        }
         _ping();
       }),
     );
@@ -985,9 +1028,16 @@ class PdfInkSession extends ChangeNotifier {
     clearSelection();
     final a = _history.takeUndo();
     if (a == null) return;
-    if (!await _try(() => _apply(a, forward: false))) {
+    var gone = false;
+    if (!await _try(() async => gone = !await _apply(a, forward: false))) {
       _history.returnUndo(a);
       _report('Geri alınamadı.');
+      _ping();
+      return;
+    }
+    if (gone) {
+      // Çizgiler artık yok (kalıcı hata): eylem düşer, eski geri alınlar kilitlenmez.
+      _report('Bu işlem geri alınamadı: çizgiler artık yok. Eylem listeden düşürüldü.');
       _ping();
       return;
     }
@@ -1000,9 +1050,15 @@ class PdfInkSession extends ChangeNotifier {
     clearSelection();
     final a = _history.takeRedo();
     if (a == null) return;
-    if (!await _try(() => _apply(a, forward: true))) {
+    var gone = false;
+    if (!await _try(() async => gone = !await _apply(a, forward: true))) {
       _history.returnRedo(a);
       _report('Yinelenemedi.');
+      _ping();
+      return;
+    }
+    if (gone) {
+      _report('Bu işlem yinelenemedi: çizgiler artık yok. Eylem listeden düşürüldü.');
       _ping();
       return;
     }
@@ -1011,20 +1067,29 @@ class PdfInkSession extends ChangeNotifier {
   });
 
   /// [forward]: eylemi (yeniden) uygula; değilse tersini. Tekrarlanabilir (idempotent).
-  Future<void> _apply(InkAction a, {required bool forward}) async {
+  /// false: eylemin çizgilerinin HİÇBİRİ artık yok (kalıcı durum; yeniden denemek boşuna).
+  Future<bool> _apply(InkAction a, {required bool forward}) async {
     if (a.kind == InkActionKind.updated) {
       // İleri: sonraki noktalar, geri: önceki noktalar; yerinde yazılır, tek işlem.
-      final pts = (forward ? a.after : a.before)!;
-      await repository.updatePoints({for (final e in pts.entries) e.key: _toRecord(e.value)});
-      final pen = _pens[a.page];
-      if (pen != null) {
-        for (final s in pen._strokes) {
-          final p = pts[s.id];
-          if (p != null) s.setPoints(p);
+      var pts = (forward ? a.after : a.before)!;
+      try {
+        await repository.updatePoints({for (final e in pts.entries) e.key: _toRecord(e.value)});
+      } on MissingStrokeError {
+        // Bazı çizgiler yok (örn. dışarıdan silindi): olanları tek tek yaz, olmayanları atla.
+        final done = <String, List<InkPoint>>{};
+        for (final e in pts.entries) {
+          try {
+            await repository.updatePoints({e.key: _toRecord(e.value)});
+            done[e.key] = e.value;
+          } on MissingStrokeError {
+            // atla
+          }
         }
-        pen._ping();
+        if (done.isEmpty) return false;
+        pts = done;
       }
-      return;
+      _applyPoints(a.page, pts);
+      return true;
     }
     if (a.kind == InkActionKind.replaced) {
       // İleri: özgünler silinir, parçalar gelir. Geri: tersi. Tek işlem.
@@ -1034,7 +1099,7 @@ class PdfInkSession extends ChangeNotifier {
       );
       final pen = _pens[a.page];
       if (pen != null) await _load(pen);
-      return;
+      return true;
     }
     final deleteThem = (a.kind == InkActionKind.added) != forward;
     final pen = _pens[a.page];
@@ -1047,6 +1112,7 @@ class PdfInkSession extends ChangeNotifier {
       }
       if (pen != null) await _load(pen);
     }
+    return true;
   }
 
   void _ping() {

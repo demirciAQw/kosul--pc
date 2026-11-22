@@ -5,6 +5,11 @@ import '../../../core/utils/id_generator.dart';
 import '../domain/ink_stroke_record.dart';
 import '../domain/stroke_codec.dart';
 
+/// [InkStrokeRepository.updatePoints]: kimliği veritabanında olmayan çizgi (kalıcı durum).
+class MissingStrokeError extends StateError {
+  MissingStrokeError(String id) : super('Çizgi yok: $id');
+}
+
 /// Çizgi deposu (T2). Silme yumuşaktır: satır kalır, `deleted` işaretlenir.
 class InkStrokeRepository {
   InkStrokeRepository(this._db, {IdGenerator ids = const UuidV7Generator(), DateTime Function()? clock})
@@ -104,7 +109,7 @@ class InkStrokeRepository {
             pointCount: Value(e.value.length),
             updatedAt: Value(now),
           ));
-          if (n != 1) throw StateError('Çizgi yok: ${e.key}');
+          if (n != 1) throw MissingStrokeError(e.key);
         }
       });
 

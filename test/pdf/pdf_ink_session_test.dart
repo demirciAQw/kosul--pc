@@ -395,7 +395,11 @@ void main() {
     await s.flush();
     expect(pen.strokes, isEmpty);
     expect(await repo.forPage(PdfPageOwner(_doc, 0)), isEmpty);
-    expect(s.canUndo, isFalse);
+    // Silme artık geri alınabilir (kayıt arşivlenip yumuşak silinir; T6b2 inceleme düzeltmesi).
+    expect(s.canUndo, isTrue);
+    await s.undo();
+    expect(await repo.forPage(PdfPageOwner(_doc, 0)), hasLength(1));
+    expect(pen.strokes, hasLength(1));
   });
 
   test('flush sonrası kuyruk boş: sonraki flush anında biter', () async {

@@ -9,6 +9,7 @@ import '../../ink/data/ink_b_controller.dart';
 import '../../ink/data/ink_outline.dart';
 import '../../ink/domain/hold_detector.dart';
 import '../../ink/domain/ink_models.dart';
+import '../../ink/domain/ink_object.dart' show InkRect;
 import '../../ink/domain/lasso_gesture.dart';
 import '../../ink/domain/shape_recognizer.dart';
 import '../domain/page_coords.dart';
@@ -233,7 +234,13 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
       final u = c.pageUnitsPerViewPx;
       final h = hitLassoHandle(b, o.dx, o.dy, tol: 16 * u, rotateOffset: 32 * u);
       if (h != null) {
-        _lassoDrag = LassoDrag(h, b, o.dx, o.dy);
+        _lassoDrag = LassoDrag(
+          h,
+          b,
+          o.dx,
+          o.dy,
+          pageBounds: InkRect(c.originX, c.originY, c.originX + c.pageWidth, c.originY + c.pageHeight),
+        );
         return;
       }
     }

@@ -96,7 +96,12 @@ class NoteInkToolbar extends StatelessWidget {
                                 key: const Key('note-sel-copy'),
                                 tooltip: 'Kopyala',
                                 icon: const Icon(Icons.copy_outlined),
-                                onPressed: session!.hasSelection ? () => t.clipboard = session!.copySelection() : null,
+                                onPressed: session!.hasSelection && !session!.selectionBusy
+                                    ? () {
+                                        final c = session!.copySelection();
+                                        if (c.isNotEmpty) t.clipboard = c;
+                                      }
+                                    : null,
                               ),
                               IconButton(
                                 key: const Key('note-sel-paste'),

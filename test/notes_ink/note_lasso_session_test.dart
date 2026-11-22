@@ -1,12 +1,16 @@
+import 'dart:convert';
+
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kocum/core/database/app_database.dart';
+import 'package:kocum/core/ledger/ledger_service.dart';
 import 'package:kocum/features/ink/data/ink_stroke_repository.dart';
 import 'package:kocum/features/ink/domain/ink_models.dart';
 import 'package:kocum/features/ink/domain/ink_stroke_record.dart';
 import 'package:kocum/features/ink/domain/lasso_gesture.dart';
 import 'package:kocum/features/ink/domain/pen_profiles.dart';
 import 'package:kocum/features/ink/domain/stroke_codec.dart';
+import 'package:kocum/features/pdf/domain/ink_history.dart';
 import 'package:kocum/features/pdf/domain/page_coords.dart';
 import 'package:kocum/features/pdf/presentation/pdf_ink_session.dart';
 
@@ -41,8 +45,10 @@ class _Flaky extends InkStrokeRepository {
   }
 }
 
+late AppDatabase _db;
+
 Future<(_Flaky, PdfInkSession, List<String>)> _open() async {
-  final db = AppDatabase(NativeDatabase.memory());
+  final db = _db = AppDatabase(NativeDatabase.memory());
   addTearDown(db.close);
   await db.customSelect('SELECT 1').get();
   final repo = _Flaky(db);
@@ -258,5 +264,142 @@ void main() {
     expect(after.points.first.x, closeTo(row.points.first.x + 50, 0.2));
     expect(after.durationMs, row.durationMs); // süre ve başlangıç korunur
     expect(after.startedAtMs, row.startedAtMs);
+  });
+
+  group('T6b2 inceleme düzeltmeleri', () {
+    test('kayıt sürerken araç değişip seçim temizlenirse ekran = veritabanı (başarı)', () async {
+      final (repo, s, _) = await _open();
+      await _drawAndSelect(s);
+      final origX = (await _rows(repo)).single.points.first.x;
+      final d = LassoDrag(LassoHandle.body, s.selectionBoundsSaved!, 0, 0);
+      s.previewSelection(d.apply(s.selectionOriginals, 100, 0));
+      final f = s.commitSelectionTransform(); // kuyrukta
+      s.setLassoMode(true);
+      s.setLassoMode(false); // araç değişti: seçim temizlenir, ekran eski tabana döner
+      await f;
+      final dbX = (await _rows(repo)).single.points.first.x;
+      expect(dbX, closeTo(origX + 100, 0.2));
+      expect(s.penFor(0).strokes.single.points.first.x, closeTo(dbX, 0.2)); // ekran DB ile aynı
+    });
+
+    test('kayıt sürerken seçim temizlenir, kayıt kalıcı başarısız: ekran eski konumda', () async {
+      final (repo, s, errors) = await _open();
+      await _drawAndSelect(s);
+      final origX = (await _rows(repo)).single.points.first.x;
+      repo.updateFailures = 99;
+      final d = LassoDrag(LassoHandle.body, s.selectionBoundsSaved!, 0, 0);
+      s.previewSelection(d.apply(s.selectionOriginals, 100, 0));
+      final f = s.commitSelectionTransform();
+      s.clearSelection();
+      await f;
+      await Future<void>.delayed(Duration.zero);
+      expect(s.penFor(0).strokes.single.points.first.x, closeTo(origX, 0.2));
+      expect((await _rows(repo)).single.points.first.x, closeTo(origX, 0.2));
+      expect(errors, isNotEmpty);
+    });
+
+    test('kayıt sürerken kopyalama eski taban konumunu vermez', () async {
+      final (_, s, _) = await _open();
+      await _drawAndSelect(s);
+      final d = LassoDrag(LassoHandle.body, s.selectionBoundsSaved!, 0, 0);
+      s.previewSelection(d.apply(s.selectionOriginals, 100, 0));
+      final f = s.commitSelectionTransform();
+      expect(s.selectionBusy, isTrue);
+      expect(s.copySelection(), isEmpty);
+      await f;
+      final clip = s.copySelection();
+      expect(clip, hasLength(1));
+      expect(clip.single.points.first.x, closeTo(200, 0.2)); // yeni (taşınmış) konum
+    });
+
+    test('geri al belleği: toplam bayt üst sınırı, eski eylemler düşer, en yenisi kalır', () {
+      InkAction act(String id, int n) {
+        final pts = [for (var i = 0; i < n; i++) InkPoint(x: i.toDouble(), y: 0)];
+        return InkAction(InkActionKind.updated, 0, [id], before: {id: pts}, after: {id: pts});
+      }
+
+      final h = InkHistory(maxBytes: 4 * 1000 * 2 * InkAction.bytesPerPoint); // ~4 eylem (1000 noktalı)
+      for (var i = 0; i < 10; i++) {
+        h.push(act('s$i', 1000));
+      }
+      expect(h.undoLength, 4);
+      expect(h.approxBytes, lessThanOrEqualTo(h.maxBytes));
+      expect(h.takeUndo()!.strokeIds.single, 's9'); // en yeni kalır
+      // Sınırı tek başına aşan eylem yine de tutulur (kullanıcının son işlemi).
+      final g = InkHistory(maxBytes: 10)..push(act('b', 1000));
+      expect(g.canUndo, isTrue);
+      expect(InkHistory().maxBytes, 32 * 1024 * 1024);
+    });
+
+    test('kalıcı geri al hatası (çizgi yok): eylem düşer, eski geri alınlar kilitlenmez', () async {
+      final (repo, s, errors) = await _open();
+      s.addStroke(0, s.brush, _hline(100, 800), _coords()); // s1 (seçime girmez)
+      await _drawAndSelect(s); // s2
+      final d = LassoDrag(LassoHandle.body, s.selectionBoundsSaved!, 0, 0);
+      s.previewSelection(d.apply(s.selectionOriginals, 40, 0));
+      await s.commitSelectionTransform();
+      await _db.delete(_db.inkStrokes).go(); // çizgiler dışarıdan yok oldu
+      await s.undo(); // updated: kalıcı hata
+      await Future<void>.delayed(Duration.zero);
+      expect(errors.last, contains('artık yok'));
+      expect(s.canUndo, isTrue); // eski eylemler (ekleme kayıtları) kilitli değil
+      await s.undo();
+      await s.undo();
+      expect(s.canUndo, isFalse);
+      expect(repo.updateCalls, greaterThan(0));
+    });
+
+    test('geçici geri al hatası eylemi korur (yalnız kalıcı eksiklikte düşer)', () async {
+      final (repo, s, errors) = await _open();
+      await _drawAndSelect(s);
+      final d = LassoDrag(LassoHandle.body, s.selectionBoundsSaved!, 0, 0);
+      s.previewSelection(d.apply(s.selectionOriginals, 40, 0));
+      await s.commitSelectionTransform();
+      repo.updateFailures = 99;
+      await s.undo();
+      await Future<void>.delayed(Duration.zero);
+      expect(errors.last, 'Geri alınamadı.');
+      repo.updateFailures = 0;
+      await s.undo(); // aynı eylem hâlâ yığında
+      expect((await _rows(repo)).single.points.first.x, closeTo(100, 0.2));
+    });
+
+    test('çizgi silgisi: kaydı bekleyen (id\'siz) çizgi silinince geri alınabilir', () async {
+      final (repo, s, _) = await _open();
+      s.addStroke(0, s.brush, _hline(100, 200), _coords()); // kayıt kuyrukta, id yok
+      final hit = s.eraseAt(0, 200, 200, 10);
+      expect(hit, hasLength(1));
+      expect(hit.single.id, isNull);
+      s.commitErase(0, hit);
+      await s.flush();
+      expect(s.penFor(0).strokes, isEmpty);
+      expect(await _rows(repo), isEmpty);
+      expect(s.canUndo, isTrue);
+      await s.undo(); // eskiden: geri alınamazdı
+      expect(await _rows(repo), hasLength(1));
+      expect(s.penFor(0).strokes, hasLength(1));
+      await s.redo();
+      expect(await _rows(repo), isEmpty);
+    });
+
+    test('defter eski alanı: updatePoints sonrası eski BLOB durur; defter geri alması eski noktalara döndürür', () async {
+      final (repo, s, _) = await _open();
+      s.addStroke(0, s.brush, _hline(100, 200), _coords());
+      await s.flush();
+      final row = (await _rows(repo)).single;
+      final oldBlob = (await _db.select(_db.inkStrokes).getSingle()).points;
+      final moved = [for (final p in row.points) StrokePoint(p.x + 50, p.y, pressure: p.pressure, t: p.t)];
+      await repo.updatePoints({row.id: moved});
+      final ledger = LedgerService(_db);
+      final ch = (await ledger.history()).firstWhere((c) => c.table == 'ink_strokes' && c.op == 'degistir');
+      final eski = jsonDecode(ch.old!) as Map<String, dynamic>;
+      final hex = [for (final b in oldBlob) b.toRadixString(16).padLeft(2, '0')].join().toLowerCase();
+      expect((eski['points'] as String).toLowerCase(), hex); // eski BLOB onaltılık
+      expect((jsonDecode(ch.neu!) as Map)['points'], isNot(eski['points']));
+      expect(await ledger.undoChange(ch.id), UndoResult.done);
+      final back = (await _rows(repo)).single;
+      expect(back.points.first.x, closeTo(row.points.first.x, 1e-9));
+      expect(back.points.last.x, closeTo(row.points.last.x, 1e-9));
+    });
   });
 }

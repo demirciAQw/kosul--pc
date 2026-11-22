@@ -60,7 +60,12 @@ LassoHandle? hitLassoHandle(InkRect b, double x, double y, {required double tol,
 /// ([startX],[startY]) tutulan nokta. Özgün çizgiler her seferinde [apply]'a verilir
 /// (ardışık uygulamada hata birikmez).
 class LassoDrag {
-  LassoDrag(this.handle, this.bounds, this.startX, this.startY);
+  LassoDrag(this.handle, this.bounds, this.startX, this.startY, {this.pageBounds});
+
+  /// Verilirse sonuç kutusu bu sınırlara kıstırılır (taşıma ve boyutlandırma); çizgiler
+  /// sayfa dışına çıkıp yeniden seçilemez hale gelmez. Kutu zaten dışarıdaysa daha da
+  /// dışarı gitmez, ama içeri de zorlanmaz.
+  final InkRect? pageBounds;
 
   final LassoHandle handle;
   final InkRect bounds;
@@ -69,11 +74,15 @@ class LassoDrag {
   /// Ölçek sınırı: kutu bu orandan küçülmez.
   static const minRatio = 0.02;
 
+  /// Ölçek sınırı: kutu bu orandan büyümez (ince seçimde ölçeğin patlamaması için).
+  static const maxRatio = 20.0;
+
   List<InkObject> apply(List<InkObject> originals, double x, double y) {
     final b = bounds;
     switch (handle) {
       case LassoHandle.body:
-        return [for (final s in originals) translateObject(s, x - startX, y - startY)];
+        final d = _clampMove(x - startX, y - startY);
+        return [for (final s in originals) translateObject(s, d.dx, d.dy)];
       case LassoHandle.rotate:
         final a0 = math.atan2(startY - b.centerY, startX - b.centerX);
         final a1 = math.atan2(y - b.centerY, x - b.centerX);
@@ -83,6 +92,16 @@ class LassoDrag {
       default:
         return resizeSelection(originals, b, _targetRect(x, y), keepAspect: _isCorner);
     }
+  }
+
+  ({double dx, double dy}) _clampMove(double dx, double dy) {
+    final pb = pageBounds, b = bounds;
+    if (pb == null) return (dx: dx, dy: dy);
+    double lim(double d, double lo, double hi) => d.clamp(math.min(lo, 0.0), math.max(hi, 0.0)).toDouble();
+    return (
+      dx: lim(dx, pb.left - b.left, pb.right - b.right),
+      dy: lim(dy, pb.top - b.top, pb.bottom - b.bottom),
+    );
   }
 
   bool get _isCorner =>
@@ -105,13 +124,33 @@ class LassoDrag {
     if (bottom) nh = y - b.top;
     if (top) nh = b.bottom - y;
     var rx = nw / w, ry = nh / h;
+    final pb = pageBounds;
     if (_isCorner) {
-      final k = math.max(math.max(rx, ry), minRatio);
+      // Orantı: sürükleme vektörünün özgün köşegene izdüşümü (ince kutuda baskın eksen;
+      // max(rx, ry) küçük boyutta patlıyordu).
+      var k = (nw * w + nh * h) / (w * w + h * h);
+      if (!k.isFinite) k = 1;
+      var hi = maxRatio;
+      if (pb != null) {
+        // Sayfa sınırı: karşı köşe sabit, sürüklenen köşe sayfadan çıkmaz.
+        final roomX = right ? pb.right - b.left : b.right - pb.left;
+        final roomY = bottom ? pb.bottom - b.top : b.bottom - pb.top;
+        hi = math.min(hi, math.min(roomX / w, roomY / h));
+      }
+      k = math.min(k, math.max(hi, minRatio));
+      k = math.max(k, minRatio);
       rx = k;
       ry = k;
     } else {
-      rx = math.max(rx, minRatio);
-      ry = math.max(ry, minRatio);
+      if (pb != null) {
+        if (right) rx = math.min(rx, (pb.right - b.left) / w);
+        if (left) rx = math.min(rx, (b.right - pb.left) / w);
+        if (bottom) ry = math.min(ry, (pb.bottom - b.top) / h);
+        if (top) ry = math.min(ry, (b.bottom - pb.top) / h);
+      }
+      rx = rx.clamp(minRatio, math.max(maxRatio, minRatio)).toDouble();
+      ry = ry.clamp(minRatio, math.max(maxRatio, minRatio)).toDouble();
+      // Sayfa sınırı alt sınırdan küçükse (kutu zaten dışarıda) alt sınır kazanır; clamp yukarıda güvenli.
     }
     final tw = (left || right) ? w * rx : w, th = (top || bottom) ? h * ry : h;
     final fw = _isCorner ? w * rx : tw, fh = _isCorner ? h * ry : th;

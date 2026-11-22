@@ -6,6 +6,7 @@ import 'package:kocum/core/database/app_database.dart';
 import 'package:kocum/core/di/core_providers.dart';
 import 'package:kocum/features/anlik/data/anlik_repository_impl.dart';
 import 'package:kocum/features/anlik/domain/anlik.dart';
+import 'package:kocum/features/anlik/presentation/widgets/pickers.dart';
 import 'package:kocum/features/notes/data/ink_notebook_repository.dart';
 import 'package:kocum/features/notes/domain/ink_notebook.dart';
 import 'package:kocum/features/notes/domain/notebook_filter.dart';
@@ -219,6 +220,60 @@ void main() {
     await _wait(t, 4);
     expect(find.text('Yeni ad var'), findsNothing);
     expect((await t.runAsync(() => h.anlik.allTags()))!, hasLength(3));
+    expect((await t.runAsync(() => h.anlik.allPeople()))!, hasLength(1));
+  });
+
+  testWidgets('panel: çift Enter ikinci kez göndermez; etiket ve kişi tek kopya', (t) async {
+    final h = await _db(t);
+    late String nb, page;
+    await t.runAsync(() async {
+      nb = await h.repo.createNotebook(title: 'D');
+      page = (await h.repo.pages(nb)).single.id;
+    });
+    await t.pumpWidget(_app(h, InkNotebookScreen(notebookId: nb, stylusOnlyOverride: true)));
+    await _wait(t);
+    await t.tap(find.byKey(const Key('note-tags-btn')));
+    await _wait(t, 4);
+    await t.enterText(find.byKey(const Key('ink-tags-quick')), '((yeni etiket)) @Ali');
+    await t.testTextInput.receiveAction(TextInputAction.done);
+    await t.testTextInput.receiveAction(TextInputAction.done); // ikinci Enter
+    await _wait(t, 4);
+    expect(find.text('Yeni ad var'), findsOneWidget); // ikinci diyalog yok
+    await t.tap(find.byKey(const ValueKey('yeni-onayla')));
+    await _wait(t, 8);
+    expect(find.text('Yeni ad var'), findsNothing);
+    expect((await t.runAsync(() => h.anlik.allTags()))!, hasLength(1));
+    expect((await t.runAsync(() => h.anlik.allPeople()))!, hasLength(1));
+    expect(await t.runAsync(() => h.repo.pageTagIds(page)), hasLength(1));
+  });
+
+  testWidgets('ensureTagPath / ensurePerson: aynı ad eşzamanlı çağrıda mevcut olanı döner', (t) async {
+    final h = await _db(t);
+    late WidgetRef ref;
+    await t.pumpWidget(
+      ProviderScope(
+        overrides: [appDatabaseProvider.overrideWithValue(h.db), clockProvider.overrideWithValue(() => DateTime(2026, 1, 1))],
+        child: MaterialApp(
+          home: Consumer(
+            builder: (_, r, _) {
+              ref = r;
+              return const SizedBox();
+            },
+          ),
+        ),
+      ),
+    );
+    final ids = (await t.runAsync(
+      () => Future.wait([
+        ensureTagPath(ref, 'his > tiksinti'),
+        ensureTagPath(ref, 'HİS > Tiksinti'),
+        ensureTagPath(ref, 'his'),
+      ]),
+    ))!;
+    expect(ids[0], ids[1]);
+    expect((await t.runAsync(() => h.anlik.allTags()))!, hasLength(2));
+    final people = (await t.runAsync(() => Future.wait([ensurePerson(ref, 'Ayşe'), ensurePerson(ref, 'ayşe')])))!;
+    expect(people[0], people[1]);
     expect((await t.runAsync(() => h.anlik.allPeople()))!, hasLength(1));
   });
 }

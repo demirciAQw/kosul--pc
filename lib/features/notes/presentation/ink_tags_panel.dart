@@ -32,6 +32,7 @@ class _InkTagsPanelState extends ConsumerState<InkTagsPanel> {
   Set<String> _nbTags = {}, _nbPeople = {}, _pgTags = {}, _pgPeople = {};
   bool _loaded = false;
   final _quick = TextEditingController();
+  bool _busy = false;
 
   @override
   void initState() {
@@ -104,6 +105,21 @@ class _InkTagsPanelState extends ConsumerState<InkTagsPanel> {
   /// onay ister (Anlık notundaki gibi), onaylanırsa ortak listeye eklenir. Bağ SAYFAYA
   /// (sayfa açıksa) yoksa deftere yazılır.
   Future<void> _submitQuick() async {
+    if (_busy) return; // çift Enter / çift dokunma: ilk iş bitmeden ikincisi başlamaz
+    _busy = true;
+    try {
+      await _submitQuickInner();
+    } catch (e) {
+      debugPrint('Etiket/kişi eklenemedi: $e');
+      if (mounted) {
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(content: Text('Eklenemedi, yeniden dene.')));
+      }
+    } finally {
+      _busy = false;
+    }
+  }
+
+  Future<void> _submitQuickInner() async {
     final text = _quick.text;
     final paths = parseTagMentions(text);
     final names = parsePersonMentions(text);

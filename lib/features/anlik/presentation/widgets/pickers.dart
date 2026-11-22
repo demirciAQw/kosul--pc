@@ -19,40 +19,62 @@ Future<String?> showTagPicker(BuildContext context, WidgetRef ref, {Set<String> 
   );
 }
 
-/// "üst > alt" yolundaki etiketleri (yoksa) oluşturur; son etiketin kimliğini döner.
-/// Etiket seçici ve defter etiket paneli aynı yolu kullanır.
-Future<String?> ensureTagPath(WidgetRef ref, String raw) async {
-  final path = tagPath(raw);
-  if (path.isEmpty) return null;
-  final repo = ref.read(anlikRepositoryProvider);
-  final now = ref.read(clockProvider)();
-  final tags = await repo.allTags();
-  final byKey = {for (final t in tags) t.name: t};
-  String? parent;
-  String? last;
-  for (final label in path) {
-    var t = byKey[tagKey(label)];
-    if (t == null) {
-      t = Tag(id: ref.read(idGeneratorProvider).next(), name: tagKey(label), label: label, parentId: parent, createdAt: now);
-      await repo.saveTag(t);
-      byKey[t.name] = t;
-    }
-    parent = t.id;
-    last = t.id;
-  }
-  return last;
+final Expando<Future<void>> _ensureTails = Expando('ensureTail');
+
+/// Etiket/kişi oluşturmayı (aynı depo için) sırayla çalıştırır: aynı adı iki çağrı aynı anda
+/// oluşturmaya kalkmaz (`tags.name` UNIQUE hatası, kişi tekrarı). İş hata verse de kuyruk tıkanmaz.
+Future<T> _serialized<T>(Object repo, Future<T> Function() job) {
+  final run = (_ensureTails[repo] ?? Future<void>.value()).then((_) => job());
+  _ensureTails[repo] = run.then((_) {}, onError: (_) {});
+  return run;
 }
 
-/// Adı ya da takma adı eşleşen kişiyi bulur; yoksa oluşturur. Kimliğini döner.
-Future<String?> ensurePerson(WidgetRef ref, String name) async {
-  final n = name.trim();
-  if (n.isEmpty) return null;
+/// "üst > alt" yolundaki etiketleri (yoksa) oluşturur; son etiketin kimliğini döner.
+/// Etiket seçici ve defter etiket paneli aynı yolu kullanır. Yarış güvenli: aynı ad ikinci
+/// çağrıda mevcut etiketi döner.
+Future<String?> ensureTagPath(WidgetRef ref, String raw) {
+  final path = tagPath(raw);
+  if (path.isEmpty) return Future.value(null);
   final repo = ref.read(anlikRepositoryProvider);
-  final found = matchPerson(n, await repo.allPeople());
-  if (found != null) return found.id;
-  final p = Person(id: ref.read(idGeneratorProvider).next(), name: n, createdAt: ref.read(clockProvider)());
-  await repo.savePerson(p);
-  return p.id;
+  return _serialized(repo, () async {
+    final now = ref.read(clockProvider)();
+    final byKey = {for (final t in await repo.allTags()) t.name: t};
+    String? parent;
+    String? last;
+    for (final label in path) {
+      var t = byKey[tagKey(label)];
+      if (t == null) {
+        final fresh = Tag(id: ref.read(idGeneratorProvider).next(), name: tagKey(label), label: label, parentId: parent, createdAt: now);
+        try {
+          await repo.saveTag(fresh);
+          t = fresh;
+        } catch (_) {
+          // Başka yol aynı adı az önce yazmış olabilir: varsa onu kullan, yoksa hata yukarı.
+          final again = {for (final x in await repo.allTags()) x.name: x};
+          t = again[fresh.name];
+          if (t == null) rethrow;
+        }
+        byKey[t.name] = t;
+      }
+      parent = t.id;
+      last = t.id;
+    }
+    return last;
+  });
+}
+
+/// Adı ya da takma adı eşleşen kişiyi bulur; yoksa oluşturur. Kimliğini döner (yarış güvenli).
+Future<String?> ensurePerson(WidgetRef ref, String name) {
+  final n = name.trim();
+  if (n.isEmpty) return Future.value(null);
+  final repo = ref.read(anlikRepositoryProvider);
+  return _serialized(repo, () async {
+    final found = matchPerson(n, await repo.allPeople());
+    if (found != null) return found.id;
+    final p = Person(id: ref.read(idGeneratorProvider).next(), name: n, createdAt: ref.read(clockProvider)());
+    await repo.savePerson(p);
+    return p.id;
+  });
 }
 
 class _TagPickerSheet extends ConsumerStatefulWidget {

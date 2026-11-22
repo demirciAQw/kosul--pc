@@ -24,10 +24,29 @@ class InkAction {
   /// Yalnız updated (kement taşıma/boyutlandırma): kimlik → noktalar, önce ve sonra.
   /// Geri al [before]'u, yinele [after]'ı yazar.
   final Map<String, List<InkPoint>>? before, after;
+
+  /// [InkPoint] başına yaklaşık bellek (nesne başlığı + 5 double).
+  static const bytesPerPoint = 56;
+
+  /// Eylemin tuttuğu noktaların yaklaşık belleği (bayt); yalnız updated eylemleri nokta taşır.
+  int get approxBytes {
+    var n = 0;
+    for (final m in [before, after]) {
+      if (m == null) continue;
+      for (final pts in m.values) {
+        n += pts.length;
+      }
+    }
+    return n * bytesPerPoint;
+  }
 }
 
 class InkHistory {
-  InkHistory({this.limit = 200});
+  InkHistory({this.limit = 200, this.maxBytes = defaultMaxBytes});
+
+  /// Nokta kopyaları (taşıma/boyutlandırma) için toplam bellek üst sınırı: 32 MB.
+  static const defaultMaxBytes = 32 * 1024 * 1024;
+  final int maxBytes;
 
   /// Yığın üst sınırı (bellek); aşılınca en eski eylem düşer (çizgiler silinmez).
   final int limit;
@@ -42,7 +61,20 @@ class InkHistory {
     _undo.add(a);
     if (_undo.length > limit) _undo.removeAt(0);
     _redo.clear();
+    _trim();
   }
+
+  /// Bellek üst sınırı aşılınca en eski eylemler düşer (en yeni eylem her zaman kalır).
+  void _trim() {
+    var total = _undo.fold<int>(0, (n, a) => n + a.approxBytes);
+    while (total > maxBytes && _undo.length > 1) {
+      total -= _undo.removeAt(0).approxBytes;
+    }
+  }
+
+  /// Yığındaki toplam yaklaşık bayt (test/teşhis).
+  int get approxBytes => [..._undo, ..._redo].fold<int>(0, (n, a) => n + a.approxBytes);
+  int get undoLength => _undo.length;
 
   /// Geri alınacak eylemi yığından çıkarıp döner (yinele yığınına koymak
   /// [commitUndo] ile, işlem başarılıysa).

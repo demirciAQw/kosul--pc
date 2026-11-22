@@ -121,7 +121,12 @@ List<InkObject> resizeSelection(
   final sy0 = from.height == 0 ? 1.0 : _clampScale(to.height / from.height);
   var sx = sx0, sy = sy0;
   if (keepAspect) {
-    final k = sx0.abs() < sy0.abs() ? sx0 : sy0;
+    // Bir boyut sıfırsa (tek yatay/dikey çizgi) orantı öteki boyuttan gelir.
+    final k = from.height == 0 && from.width != 0
+        ? sx0
+        : from.width == 0 && from.height != 0
+            ? sy0
+            : (sx0.abs() < sy0.abs() ? sx0 : sy0);
     sx = k;
     sy = k;
   }
