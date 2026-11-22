@@ -50,6 +50,14 @@ double pressureFactor(double pressure, double hardness) {
   return math.pow(p, gamma).toDouble();
 }
 
+/// [pressureFactor]'ün tersi: biçimlenmiş baskıdan ham baskıya.
+double pressureUnfactor(double shaped, double hardness) {
+  final s = shaped.clamp(0.0, 1.0);
+  final h = hardness.clamp(0.0, 1.0);
+  final gamma = math.pow(2, (h - 0.5) * 2).toDouble();
+  return math.pow(s, 1 / gamma).toDouble();
+}
+
 const penProfiles = <PenKind, PenProfile>{
   PenKind.ballpoint: PenProfile(
     kind: PenKind.ballpoint,

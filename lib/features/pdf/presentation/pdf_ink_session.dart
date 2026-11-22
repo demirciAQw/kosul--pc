@@ -27,6 +27,22 @@ class PenStroke {
   final InkBrush brush;
   List<InkPoint> points;
   ui.Picture? _picture;
+  List<InkPoint>? _boundsOf;
+  ui.Rect? _bounds;
+
+  /// Noktaların kaba sınır kutusu (kalınlık hariç); alan silgisi ön elemesi için önbellekli.
+  ui.Rect get bounds {
+    if (_bounds != null && identical(_boundsOf, points)) return _bounds!;
+    var l = double.infinity, t = double.infinity, r = -double.infinity, b = -double.infinity;
+    for (final p in points) {
+      if (p.x < l) l = p.x;
+      if (p.x > r) r = p.x;
+      if (p.y < t) t = p.y;
+      if (p.y > b) b = p.y;
+    }
+    _boundsOf = points;
+    return _bounds = points.isEmpty ? ui.Rect.zero : ui.Rect.fromLTRB(l, t, r, b);
+  }
 
   /// Kement taşıma/boyutlandırma önizlemesi: noktaları değiştirir, resim yeniden çizilir.
   void setPoints(List<InkPoint> p) {
@@ -505,18 +521,7 @@ class PdfInkSession extends ChangeNotifier {
       List<String> ids = const [];
       final ok = await _try(() async {
         ids = await repository.replace(deleteIds: const [], adds: [
-          for (final n in news)
-            NewStroke(
-              owner: _owner(page),
-              points: _toRecord(n.points),
-              startedAtMs: n.startedAtMs,
-              layer: layer,
-              attemptNo: attemptNo,
-              questionId: questionId,
-              tool: n.brush.kind?.name ?? n.brush.tool.name,
-              color: n.brush.color,
-              width: n.brush.width,
-            ),
+          for (final n in news) _newStroke(page, n),
         ]);
       });
       if (!ok) {
@@ -681,16 +686,18 @@ class PdfInkSession extends ChangeNotifier {
   );
 
   InkBrush _brushOf(InkStroke r) {
-    final kind = penKinds ? PenKind.values.where((k) => k.name == r.tool).firstOrNull : null;
+    final t = parseToolColumn(r.tool);
+    final kind = penKinds ? PenKind.values.where((k) => k.name == t.name).firstOrNull : null;
     if (kind != null) {
       return InkBrush(
         tool: kind == PenKind.highlighter ? InkTool.highlighter : InkTool.pen,
         color: r.color,
         width: r.width,
         kind: kind,
+        hardness: t.hardness,
       );
     }
-    return InkBrush(tool: _toolOf(r.tool), color: r.color, width: r.width);
+    return InkBrush(tool: _toolOf(t.name), color: r.color, width: r.width);
   }
 
   static InkTool _toolOf(String name) => InkTool.values.firstWhere(
@@ -708,6 +715,12 @@ class PdfInkSession extends ChangeNotifier {
   ) {
     if (viewPoints.isEmpty || viewBrush.tool == InkTool.eraser) return;
     final t0 = viewPoints.first.tMs;
+    // Canlı çizim biçimlenmiş baskı taşır ([shapePressure]); kayda HAM baskı + sertlik gider,
+    // eğri çizimde uygulanır. Sabit baskılı çizgi (fare/parmak) olduğu gibi kalır.
+    final profile = viewBrush.kind == null ? null : penProfiles[viewBrush.kind];
+    final firstP = viewPoints.first.pressure;
+    final varies = viewPoints.any((p) => p.pressure != firstP);
+    final h = (profile?.pressureSensitive ?? false) && varies ? double.parse(_hardness.toStringAsFixed(2)) : null;
     final pts = <InkPoint>[
       for (final p in viewPoints)
         () {
@@ -715,14 +728,14 @@ class PdfInkSession extends ChangeNotifier {
           return InkPoint(
             x: o.dx,
             y: o.dy,
-            pressure: p.pressure,
+            pressure: h == null ? p.pressure : pressureUnfactor(p.pressure, _hardness),
             tilt: p.tilt,
             tMs: p.tMs - t0,
           );
         }(),
     ];
     final stroke = PenStroke(
-      viewBrush.copyWith(width: viewBrush.width * coords.pageUnitsPerViewPx),
+      viewBrush.copyWith(width: viewBrush.width * coords.pageUnitsPerViewPx, hardness: h),
       pts,
     )..startedAtMs = _clock().millisecondsSinceEpoch - pts.last.tMs.round(); // saat çizgi SONUNDA okunur
     penFor(page)._add(stroke);
@@ -755,7 +768,7 @@ class PdfInkSession extends ChangeNotifier {
         layer: layer,
         attemptNo: attemptNo,
         questionId: questionId,
-        tool: stroke.brush.kind?.name ?? stroke.brush.tool.name,
+        tool: toolColumnOf(stroke.brush),
         color: stroke.brush.color,
         width: stroke.brush.width,
       );
@@ -806,7 +819,7 @@ class PdfInkSession extends ChangeNotifier {
           x,
           y,
           radius,
-          halfWidth: s.brush.width / 2,
+          halfWidth: brushHalfWidth(s.brush),
         ))
           s,
     ];
@@ -822,6 +835,9 @@ class PdfInkSession extends ChangeNotifier {
 
   _AreaMove? _areaMove;
 
+  static bool _boxesTouch(ui.Rect a, ui.Rect b, double margin) =>
+      a.left <= b.right + margin && a.right >= b.left - margin && a.top <= b.bottom + margin && a.bottom >= b.top - margin;
+
   List<PenStroke> _eraseArea(int page, double x, double y, double radius, double? prevX, double? prevY) {
     final pen = penFor(page);
     final move = _areaMove ??= _AreaMove(page);
@@ -831,7 +847,15 @@ class PdfInkSession extends ChangeNotifier {
       InkPoint(x: x, y: y),
     ];
     final changed = <PenStroke>[];
+    // Kaba ön eleme: silgi yolunun kutusu + yarıçap + çizgi yarı kalınlığı çizgi kutusuyla kesişmiyorsa atla.
+    final pathBox = ui.Rect.fromLTRB(
+      path.map((p) => p.x).reduce(math.min) - radius,
+      path.map((p) => p.y).reduce(math.min) - radius,
+      path.map((p) => p.x).reduce(math.max) + radius,
+      path.map((p) => p.y).reduce(math.max) + radius,
+    );
     for (final s in List.of(pen._strokes)) {
+      if (!_boxesTouch(pathBox, s.bounds, brushHalfWidth(s.brush))) continue;
       final obj = InkObject(id: 'x', points: s.points, brush: s.brush);
       final res = eraseArea(obj, path, radius, idFor: (b, i) => '$b/$i');
       if (!res.changed) continue;
@@ -853,6 +877,18 @@ class PdfInkSession extends ChangeNotifier {
     return changed;
   }
 
+  NewStroke _newStroke(int page, PenStroke p) => NewStroke(
+    owner: _owner(page),
+    points: _toRecord(p.points),
+    startedAtMs: p.startedAtMs,
+    layer: layer,
+    attemptNo: attemptNo,
+    questionId: questionId,
+    tool: toolColumnOf(p.brush),
+    color: p.brush.color,
+    width: p.brush.width,
+  );
+
   /// Alan silgisi hareketi bitti: parçalar eklenir, özgünler yumuşak silinir (tek işlem, tek geri al kaydı).
   void _commitArea() {
     final move = _areaMove;
@@ -860,32 +896,23 @@ class PdfInkSession extends ChangeNotifier {
     if (move == null || (move.originals.isEmpty && move.pieces.isEmpty)) return;
     unawaited(
       _enqueue(() async {
+        // Kaydı hiç yazılmamış (id'siz) özgünler: kayıt kuyruğu silindiği için atladı.
+        // Önce eklenip aynı işlemde yumuşak silinir; geri al onları da getirir.
+        final pending = [for (final s in move.originals) if (s.id == null) s];
         final ids = [
           for (final s in move.originals)
             if (s.id != null) s.id!,
         ];
-        List<String> added = const [];
+        var added = const <String>[];
+        var archived = const <String>[];
         final ok = await _try(() async {
-          added = await repository.replace(
+          final r = await repository.replaceDetailed(
             deleteIds: ids,
-            adds: [
-              for (final p in move.pieces)
-                NewStroke(
-                  owner: _owner(move.page),
-                  points: [
-                    for (final q in p.points)
-                      StrokePoint(q.x, q.y, pressure: q.pressure, tilt: q.tilt, t: math.max<int>(0, q.tMs.round())),
-                  ],
-                  startedAtMs: p.startedAtMs,
-                  layer: layer,
-                  attemptNo: attemptNo,
-                  questionId: questionId,
-                  tool: p.brush.kind?.name ?? p.brush.tool.name,
-                  color: p.brush.color,
-                  width: p.brush.width,
-                ),
-            ],
+            adds: [for (final p in move.pieces) _newStroke(move.page, p)],
+            archive: [for (final s in pending) _newStroke(move.page, s)],
           );
+          added = r.added;
+          archived = r.archived;
         });
         _pendingErase.removeAll(ids);
         final pen = _pens[move.page];
@@ -897,6 +924,14 @@ class PdfInkSession extends ChangeNotifier {
               s.erased = false;
               pen._add(s);
             }
+          } else {
+            for (final s in move.originals) {
+              s.erased = false;
+            }
+          }
+          // Kaydı bekleyenler yeniden kuyruğa: kalıcı kayıt olmadan kaybolmasınlar.
+          for (final s in pending) {
+            await _save(move.page, s);
           }
           _report('Silme kaydedilemedi; çizgiler geri konuldu.');
           return;
@@ -904,7 +939,12 @@ class PdfInkSession extends ChangeNotifier {
         for (var i = 0; i < move.pieces.length; i++) {
           move.pieces[i].id = added[i];
         }
-        _history.push(InkAction(InkActionKind.replaced, move.page, ids, addedIds: added));
+        for (var i = 0; i < pending.length; i++) {
+          pending[i].id = archived[i];
+          _failed.remove(pending[i]);
+          _failedPage.remove(pending[i]);
+        }
+        _history.push(InkAction(InkActionKind.replaced, move.page, [...ids, ...archived], addedIds: added));
         _ping();
       }),
     );

@@ -1,3 +1,4 @@
+import 'package:drift/drift.dart' show TableUpdate, UpdateKind;
 import 'package:drift/native.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -9,6 +10,7 @@ import 'package:kocum/features/ink/data/ink_stroke_repository.dart';
 import 'package:kocum/features/ink/domain/ink_stroke_record.dart';
 import 'package:kocum/features/notes/data/ink_notebook_repository.dart';
 import 'package:kocum/features/notes/domain/ink_notebook.dart';
+import 'package:kocum/features/notes/notes_providers.dart';
 import 'package:kocum/features/notes/domain/page_template.dart';
 import 'package:kocum/features/notes/presentation/ink_notebook_screen.dart';
 import 'package:kocum/features/notes/presentation/note_page_editor.dart';
@@ -339,6 +341,68 @@ void main() {
     expect(pages, hasLength(3));
   });
 
+  testWidgets('açıkken tüm sayfalar senkronla silinirse: sonsuz gösterge yok, görünür sayfa sağlanır', (t) async {
+    final h = await _db(t);
+    late String nb, only;
+    await t.runAsync(() async {
+      nb = await h.repo.createNotebook(title: 'Senkron');
+      only = (await h.repo.pages(nb)).single.id;
+    });
+    await _mountScreen(t, h, nb);
+    expect(find.byType(NotePageEditor), findsOneWidget);
+    await t.runAsync(() async {
+      await h.db.customStatement('UPDATE ink_note_pages SET deleted = 1 WHERE id = ?', [only]);
+      h.db.notifyUpdates({TableUpdate.onTable(h.db.inkNotePages, kind: UpdateKind.update)});
+    });
+    await _wait(t);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(find.byType(NotePageEditor), findsOneWidget);
+    late List<InkNotePageRecord> p;
+    await t.runAsync(() async => p = await h.repo.pages(nb));
+    expect(p.single.id, only); // silinen geri geldi
+  });
+
+  testWidgets('açık sayfa başka cihazda silinirse: işlemler gösterilen (ilk) sayfaya uygulanır', (t) async {
+    final h = await _db(t);
+    late String nb;
+    late List<InkNotePageRecord> pages;
+    await t.runAsync(() async {
+      nb = await h.repo.createNotebook(title: 'Üç');
+      await h.repo.addPage(nb);
+      await h.repo.addPage(nb);
+      pages = await h.repo.pages(nb);
+    });
+    await _mountScreen(t, h, nb);
+    await t.tap(find.byKey(Key('note-thumb-${pages[2].id}')));
+    await _wait(t);
+    expect(t.widget<Text>(find.byKey(const Key('note-page-indicator'))).data, '3 / 3');
+    await t.runAsync(() async {
+      await h.db.customStatement('UPDATE ink_note_pages SET deleted = 1 WHERE id = ?', [pages[2].id]);
+      h.db.notifyUpdates({TableUpdate.onTable(h.db.inkNotePages, kind: UpdateKind.update)});
+    });
+    await _wait(t);
+    expect(t.widget<Text>(find.byKey(const Key('note-page-indicator'))).data, '1 / 2');
+    await _tapMenu(t, 'note-page-del');
+    await t.tap(find.byKey(const Key('note-page-delete-confirm')));
+    await _wait(t);
+    late List<InkNotePageRecord> left;
+    await t.runAsync(() async => left = await h.repo.pages(nb));
+    expect(left.map((p) => p.id), [pages[1].id]); // gösterilen 1. sayfa silindi, eski id (3.) değil
+  });
+
+  testWidgets('sayfa ekleyince yeni sayfa kendi oturumuyla açılır, eskisi kapanır', (t) async {
+    final h = await _db(t);
+    late String nb;
+    await t.runAsync(() async => nb = await h.repo.createNotebook(title: 'Bir'));
+    await _mountScreen(t, h, nb);
+    final first = _editor(t);
+    await _tapMenu(t, 'note-page-add');
+    final second = _editor(t);
+    expect(identical(first, second), isFalse);
+    expect(t.widget<Text>(find.byKey(const Key('note-page-indicator'))).data, '2 / 2');
+    expect(first.mounted, isFalse);
+  });
+
   group('defter listesi', () {
     Future<List<InkNotebookRecord>> opened(WidgetTester t, _H h, List<InkNotebookRecord> out) async {
       await t.pumpWidget(
@@ -436,5 +500,43 @@ void main() {
       expect(list.first.title, 'C');
       expect(y('C'), lessThan(y('A')));
     });
+
+
+    testWidgets('sıralama hatası: ArgumentError yakalanır, ileti çıkar, liste eski sıraya döner', (t) async {
+      final h = await _db(t);
+      late List<String> ids;
+      await t.runAsync(() async {
+        ids = [await h.repo.createNotebook(title: 'A'), await h.repo.createNotebook(title: 'B')];
+      });
+      await t.pumpWidget(
+        ProviderScope(
+          overrides: [
+            appDatabaseProvider.overrideWithValue(h.db),
+            inkNotebookRepositoryProvider.overrideWithValue(_FailingReorderRepo(h.db)),
+          ],
+          child: MaterialApp(home: NotebooksScreen(onOpen: (_, n) {})),
+        ),
+      );
+      await _wait(t);
+      double y(String t0) => t.getTopLeft(find.text(t0)).dy;
+      final handle = find.descendant(of: find.byKey(Key('notebook-${ids[1]}')), matching: find.byIcon(Icons.drag_handle));
+      final g = await t.startGesture(t.getCenter(handle));
+      for (var i = 0; i < 8; i++) {
+        await g.moveBy(const Offset(0, -25));
+        await t.pump(const Duration(milliseconds: 50));
+      }
+      await g.up();
+      await _wait(t);
+      expect(find.textContaining('Sıralama kaydedilemedi'), findsOneWidget);
+      expect(y('A'), lessThan(y('B')));
+      expect(t.takeException(), isNull);
+    });
   });
+}
+
+class _FailingReorderRepo extends InkNotebookRepository {
+  _FailingReorderRepo(super.db);
+
+  @override
+  Future<void> reorderNotebooks(List<String> ids) async => throw ArgumentError('Sıralama tüm defterleri içermeli');
 }

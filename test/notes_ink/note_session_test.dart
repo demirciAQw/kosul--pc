@@ -6,6 +6,7 @@ import 'package:kocum/core/database/app_database.dart';
 import 'package:kocum/features/ink/data/ink_outline.dart';
 import 'package:kocum/features/ink/data/ink_stroke_repository.dart';
 import 'package:kocum/features/ink/domain/ink_models.dart';
+import 'package:kocum/features/ink/domain/ink_object.dart';
 import 'package:kocum/features/ink/domain/ink_stroke_record.dart';
 import 'package:kocum/features/ink/domain/pen_profiles.dart';
 import 'package:kocum/features/ink/domain/stroke_codec.dart';
@@ -29,12 +30,16 @@ class _Flaky extends InkStrokeRepository {
   int addCalls = 0;
 
   @override
-  Future<List<String>> replace({required Iterable<String> deleteIds, required List<NewStroke> adds}) {
+  Future<({List<String> added, List<String> archived})> replaceDetailed({
+    required Iterable<String> deleteIds,
+    required List<NewStroke> adds,
+    List<NewStroke> archive = const [],
+  }) {
     if (replaceFailures > 0) {
       replaceFailures--;
       throw StateError('disk dolu');
     }
-    return super.replace(deleteIds: deleteIds, adds: adds);
+    return super.replaceDetailed(deleteIds: deleteIds, adds: adds, archive: archive);
   }
 
   @override
@@ -174,6 +179,68 @@ void main() {
     expect(await _rows(repo), hasLength(2));
   });
 
+  test('baskı ham saklanır, sertlik çizgiyle yazılır; sabit baskı ve eski kayıt olduğu gibi', () async {
+    final (repo, s) = await _open();
+    s.setHardness(1.0);
+    // Canlı çizim biçimlenmiş baskı taşır (sertlik 1: p^2).
+    final raws = [0.2, 0.5, 0.8, 0.9];
+    final live = [
+      for (var i = 0; i < raws.length; i++)
+        InkPoint(x: 100.0 + i * 20, y: 300, pressure: s.shapePressure(raws[i]), tMs: 1000.0 + i * 8),
+    ];
+    s.addStroke(0, s.brush, live, _coords());
+    // Sabit baskı (fare/parmak): sertlikle eğilmez, hiç biçimlenmemiş yazılır.
+    s.addStroke(0, s.brush, _hline(100, 500), _coords());
+    await s.flush();
+    // Sıra başlangıç zamanına göre; araç adından seç.
+    final all = await _rows(repo);
+    final rows = [all.firstWhere((r) => r.tool.contains(':')), all.firstWhere((r) => !r.tool.contains(':'))];
+    expect(rows[0].tool, 'fountain:1.00');
+    expect([for (final p in rows[0].points) p.pressure], [for (final r in raws) closeTo(r, 0.002)]);
+    expect(rows[1].tool, 'fountain');
+    expect(rows[1].points.every((p) => (p.pressure - 0.5).abs() < 0.002), isTrue);
+    // Yeniden açılınca sertlik fırçada; çizimde uygulanır (ham baskıdan aynı biçim).
+    final s2 = PdfInkSession(
+      documentId: 'sayfa-1',
+      repository: repo,
+      attemptNo: 0,
+      ownerOf: (_) => _owner,
+      penKinds: true,
+    );
+    addTearDown(s2.dispose);
+    final pen = s2.penFor(0);
+    await s2.flush();
+    final hs = pen.strokes.firstWhere((x) => x.brush.hardness != null);
+    expect(hs.brush.hardness, 1.0);
+    expect(pen.strokes.where((x) => x.brush.hardness == null), hasLength(1));
+    final soft = inkOutlinePath(hs.points, hs.brush.copyWith(hardness: 0.0), complete: true);
+    final hard = inkOutlinePath(hs.points, hs.brush, complete: true);
+    expect(soft.getBounds(), isNot(hard.getBounds()));
+    // Sertlik 0,5 eğriyi değiştirmez: ham baskıyla aynı yol.
+    final mid = inkOutlinePath(hs.points, hs.brush.copyWith(hardness: 0.5), complete: true);
+    final none = inkOutlinePath(hs.points, hs.brush.copyWith(hardness: null), complete: true);
+    expect(mid.getBounds(), none.getBounds());
+  });
+
+  test('fırça: copyWith kind/hardness null yapabilir; tool sütunu gidiş dönüş', () {
+    const b = InkBrush(kind: PenKind.pencil, hardness: 0.3);
+    expect(b.copyWith(kind: null).kind, isNull);
+    expect(b.copyWith(hardness: null).hardness, isNull);
+    expect(b.copyWith(width: 9).kind, PenKind.pencil);
+    expect(b.copyWith(width: 9).hardness, 0.3);
+    expect(toolColumnOf(b), 'pencil:0.30');
+    expect(toolColumnOf(b.copyWith(hardness: null)), 'pencil');
+    expect(parseToolColumn('pencil:0.30'), (name: 'pencil', hardness: 0.3));
+    expect(parseToolColumn('pencil'), (name: 'pencil', hardness: null));
+  });
+
+  test('InkObject.halfWidth dolma kalemin en kalın payını sayar', () {
+    const w = 4.0;
+    expect(const InkObject(id: 'a', points: [], brush: InkBrush(width: w)).halfWidth, 2.0);
+    expect(const InkObject(id: 'a', points: [], brush: InkBrush(width: w, kind: PenKind.fountain)).halfWidth, closeTo(3.2, 1e-9));
+    expect(const InkObject(id: 'a', points: [], brush: InkBrush(width: w, kind: PenKind.highlighter)).halfWidth, 2.0);
+  });
+
   group('alan silgisi', () {
     test('hareket başına TEK kayıt: özgün yumuşak silinir, parçalar eklenir; geri al/yinele', () async {
       final (repo, s) = await _open();
@@ -196,8 +263,14 @@ void main() {
       expect(rows.map((r) => r.id), isNot(contains(originalId)));
       expect(rows.every((r) => r.tool == 'fountain' && r.width == 4), isTrue);
       // Özgün köşeler korunur: parça uçları dışında tüm noktalar özgün x'lerden.
+      // Silgi payı = yarıçap 6 + dolma kalem en kalın yarı genişlik (4 * 1,6 / 2 = 3,2) = 9,2:
+      // kesim uçları tam 180 ± 9,2 ve 350 ± 9,2 olmalı; geri kalan tüm x özgün 10'luk ızgarada.
       final xs = {for (final r in rows) ...r.points.map((p) => p.x)};
-      expect(xs.where((x) => x % 10 != 0 && (x - 100) % 10 != 0).length, lessThanOrEqualTo(6));
+      final cuts = xs.where((x) => x % 10 != 0).toList()..sort();
+      expect(cuts, hasLength(4));
+      for (final (i, expected) in [170.8, 189.2, 340.8, 359.2].indexed) {
+        expect(cuts[i], closeTo(expected, 0.1));
+      }
       // TEK kayıt: bir geri al hepsini eski haline getirir.
       expect(s.canUndo, isTrue);
       await s.undo();
@@ -237,16 +310,16 @@ void main() {
       s.setErasing(true);
       // Ortadan kes, sonra sağ parçayı da tamamen kaz.
       s.eraseAt(0, 300, 200, 6);
-      s.eraseAt(0, 340, 200, 400, prevX: 300, prevY: 200); // büyük yarıçap: sağ taraf gider
+      s.eraseAt(0, 340, 200, 60, prevX: 300, prevY: 200); // sağ parça tamamen, sol parçanın ucu gider
       s.commitErase(0, const []);
       s.setErasing(false);
       await s.flush();
       final rows = await _rows(repo);
-      expect(rows.length, lessThanOrEqualTo(1));
-      // Kayıtlı çizgilerin hiçbiri silgi alanına girmez.
-      for (final r in rows) {
-        expect(r.points.every((p) => p.x < 300), isTrue);
-      }
+      expect(rows, hasLength(1)); // yalnız kalan sol parça; ara/sağ parça hiç yazılmadı
+      expect(repo.addCalls, 2); // özgün + sol parça
+      // Kayıtlı çizgi silgi alanına (x >= 340 - 60 - 3,2) girmez ve soldan başlar.
+      expect(rows.single.points.first.x, closeTo(100, 0.1));
+      expect(rows.single.points.every((p) => p.x < 280), isTrue);
     });
 
     test('kayıt kalıcı başarısız: özgün çizgi geri konur, hiçbir şey yazılmaz, ikaz gelir', () async {
@@ -283,9 +356,61 @@ void main() {
       s.commitErase(0, hit);
       s.setErasing(false);
       await s.flush();
-      final rows = await _rows(repo);
+      var rows = await _rows(repo);
       expect(rows, hasLength(2));
       expect(rows.every((r) => r.points.every((p) => (p.x - 300).abs() > 3)), isTrue);
+      // Geri al: özgün çizgi TAMAMEN geri gelir (kimliği kayda girmişti), parçalar gider.
+      expect(s.canUndo, isTrue);
+      await s.undo();
+      rows = await _rows(repo);
+      expect(rows, hasLength(1));
+      expect(rows.single.points, hasLength(31));
+      expect(s.penFor(0).strokes, hasLength(1));
+      await s.redo();
+      expect(await _rows(repo), hasLength(2));
+    });
+
+    test('kaydı bekleyen çizgi kesilir, silme kalıcı başarısız: çizgi kaybolmaz, yeniden kaydolur', () async {
+      final (repo, s) = await _open();
+      final msgs = <String>[];
+      s.errors.listen(msgs.add);
+      repo.replaceFailures = 100;
+      s.addStroke(0, s.brush, _hline(100, 200), _coords()); // kayıt kuyrukta
+      s.setEraseMode(EraseMode.area);
+      s.setErasing(true);
+      final hit = s.eraseAt(0, 300, 200, 6);
+      expect(hit, isNotEmpty);
+      s.commitErase(0, hit);
+      s.setErasing(false);
+      await s.flush();
+      await Future<void>.delayed(Duration.zero);
+      expect(msgs, isNotEmpty);
+      final pen = s.penFor(0);
+      expect(pen.strokes, hasLength(1));
+      expect(pen.strokes.single.erased, isFalse);
+      expect(pen.strokes.single.points, hasLength(31)); // bütün çizgi ekranda
+      final rows = await _rows(repo);
+      expect(rows, hasLength(1)); // ... ve veritabanında
+      expect(rows.single.points, hasLength(31));
+      expect(pen.strokes.single.id, rows.single.id);
+    });
+
+    test('kaydı bekleyen çizgi kesilir, silme VE kayıt başarısız: çizgi başarısızlar listesine girer, sonra kaydolur', () async {
+      final (repo, s) = await _open();
+      repo.replaceFailures = 100;
+      repo.addFailures = 100;
+      s.addStroke(0, s.brush, _hline(100, 200), _coords());
+      s.setEraseMode(EraseMode.area);
+      s.setErasing(true);
+      s.commitErase(0, s.eraseAt(0, 300, 200, 6));
+      s.setErasing(false);
+      await s.flush();
+      expect(s.penFor(0).strokes, hasLength(1));
+      expect(await _rows(repo), isEmpty);
+      repo.addFailures = 0;
+      repo.replaceFailures = 0;
+      await s.flush(); // yeniden deneme: çizgi yazılır (silme bayrağı kalktı)
+      expect(await _rows(repo), hasLength(1));
     });
 
     test('radius NaN/negatif: silgi yok sayılır, çizgi değişmez', () async {

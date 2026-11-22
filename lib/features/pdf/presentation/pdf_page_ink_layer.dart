@@ -138,11 +138,12 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
     return InkPoint(
       x: l.dx,
       y: l.dy,
-      pressure: widget.session.shapePressure(
-        e.pressureMax > e.pressureMin
-            ? ((e.pressure - e.pressureMin) / (e.pressureMax - e.pressureMin)).clamp(0.0, 1.0)
-            : 0.5,
-      ),
+      // Baskı olmayan aygıtta (fare/parmak) sabit 0.5, sertlikle eğilmez.
+      pressure: e.pressureMax > e.pressureMin
+          ? widget.session.shapePressure(
+              ((e.pressure - e.pressureMin) / (e.pressureMax - e.pressureMin)).clamp(0.0, 1.0),
+            )
+          : 0.5,
       tilt: e.tilt,
       tMs: e.timeStamp.inMicroseconds / 1000,
     );

@@ -54,24 +54,38 @@ class InkStrokeRepository {
 
   /// Alan silgisi: [deleteIds] yumuşak silinir, [adds] eklenir; TEK işlemde (ya hep ya hiç,
   /// bu yüzden yeniden deneme güvenli). Eklenenlerin kimlikleri sırayla döner.
-  Future<List<String>> replace({required Iterable<String> deleteIds, required List<NewStroke> adds}) =>
+  Future<List<String>> replace({required Iterable<String> deleteIds, required List<NewStroke> adds}) async =>
+      (await replaceDetailed(deleteIds: deleteIds, adds: adds)).added;
+
+  /// [replace] + [archive]: kaydı hiç yazılmamış özgün çizgiler önce eklenir, aynı işlemde
+  /// hemen yumuşak silinir (geri al onları da geri getirebilsin). Kimlikler sırayla döner.
+  Future<({List<String> added, List<String> archived})> replaceDetailed({
+    required Iterable<String> deleteIds,
+    required List<NewStroke> adds,
+    List<NewStroke> archive = const [],
+  }) =>
       _db.transaction(() async {
-        final ids = <String>[];
-        for (final a in adds) {
-          ids.add(await add(
-            owner: a.owner,
-            points: a.points,
-            startedAtMs: a.startedAtMs,
-            layer: a.layer,
-            attemptNo: a.attemptNo,
-            questionId: a.questionId,
-            tool: a.tool,
-            color: a.color,
-            width: a.width,
-          ));
+        Future<String> put(NewStroke a) => add(
+              owner: a.owner,
+              points: a.points,
+              startedAtMs: a.startedAtMs,
+              layer: a.layer,
+              attemptNo: a.attemptNo,
+              questionId: a.questionId,
+              tool: a.tool,
+              color: a.color,
+              width: a.width,
+            );
+        final archived = <String>[];
+        for (final a in archive) {
+          archived.add(await put(a));
         }
-        await softDeleteMany(deleteIds);
-        return ids;
+        final added = <String>[];
+        for (final a in adds) {
+          added.add(await put(a));
+        }
+        await softDeleteMany([...deleteIds, ...archived]);
+        return (added: added, archived: archived);
       });
 
   /// Kement taşıma/boyutlandırma/döndürme: çizgilerin NOKTALARI yerinde yeniden yazılır

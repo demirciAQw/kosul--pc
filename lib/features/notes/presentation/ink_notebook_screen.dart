@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -33,6 +36,14 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
   var _editorKey = GlobalKey<NotePageEditorState>();
   String? _keyFor;
   String? _pageId;
+
+  /// Yerel işlem (ekle/çoğalt/geri al) yeni sayfayı seçti ama liste henüz getirmedi:
+  /// gelene kadar eski sayfa açık kalır (oturum bir kare için açılıp kapanmasın).
+  String? _pendingId;
+  bool _ensuring = false;
+
+  /// Şeritte iyimser yerel sıra (kayıt sürerken); akış aynı sırayı getirince ya da hata olunca düşer.
+  List<String>? _order;
   Object? _openError;
   bool _strip = true;
   bool _stripInit = false;
@@ -69,13 +80,32 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
       await f();
     } on StateError catch (e) {
       if (mounted) _msg(e.message);
+    } on ArgumentError {
+      if (mounted) _msg('İşlem kaydedilemedi; liste yenilendi, yeniden dene.');
     }
+  }
+
+  /// Liste boş geldi (senkronda tüm sayfalar silinmiş): bir kez görünür sayfa sağlanır.
+  void _ensureAfterFrame() {
+    if (_ensuring) return;
+    _ensuring = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      try {
+        if (!mounted) return;
+        final id = await _repo.ensureVisiblePage(widget.notebookId);
+        if (mounted) setState(() => _pageId = id);
+      } catch (e) {
+        if (mounted) setState(() => _openError = e);
+      } finally {
+        _ensuring = false;
+      }
+    });
   }
 
   Future<void> _add(List<InkNotePageRecord> pages, {required bool afterCurrent}) => _guard(() async {
     final i = pages.indexWhere((p) => p.id == _pageId);
     final id = await _repo.addPage(widget.notebookId, index: afterCurrent && i >= 0 ? i + 1 : null);
-    if (mounted) setState(() => _pageId = id);
+    if (mounted) setState(() => _pendingId = id);
   });
 
   Future<void> _duplicate() => _guard(() async {
@@ -84,7 +114,7 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
     // Çoğaltma çizgileri veritabanından kopyalar: bekleyen kayıtlar önce bitmeli.
     await _editorKey.currentState?.flush();
     final id = await _repo.duplicatePage(cur);
-    if (mounted) setState(() => _pageId = id);
+    if (mounted) setState(() => _pendingId = id);
   });
 
   Future<void> _delete(List<InkNotePageRecord> pages) async {
@@ -127,12 +157,32 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
               label: 'Geri al',
               onPressed: () async {
                 await _repo.restorePage(cur);
-                if (mounted) setState(() => _pageId = cur);
+                if (mounted) setState(() => _pendingId = cur);
               },
             ),
           ),
         );
     });
+  }
+
+  Future<void> _reorderStrip(List<InkNotePageRecord> shown, int from, int to) async {
+    if (from < 0 || from >= shown.length) return;
+    final ids = [for (final p in shown) p.id];
+    ids.insert(to.clamp(0, ids.length - 1), ids.removeAt(from));
+    setState(() => _order = ids); // iyimser: kayıt bitmeden şerit yeni sırayı gösterir
+    try {
+      await _repo.reorderPages(widget.notebookId, ids);
+    } on StateError catch (e) {
+      if (mounted) {
+        setState(() => _order = null);
+        _msg(e.message);
+      }
+    } on ArgumentError {
+      if (mounted) {
+        setState(() => _order = null);
+        _msg('Sıralama kaydedilemedi; liste yenilendi, yeniden dene.');
+      }
+    }
   }
 
   Future<void> _move(List<InkNotePageRecord> pages, int delta) => _guard(() async {
@@ -154,9 +204,31 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
       _strip = MediaQuery.sizeOf(context).width >= 600;
     }
     // Açık sayfa listeden düştüyse (başka cihazda silindi) en yakın sayfaya geç.
+    if (_pendingId != null && pages.any((p) => p.id == _pendingId)) {
+      _pageId = _pendingId;
+      _pendingId = null;
+    }
     InkNotePageRecord? current;
     if (_pageId != null && pages.isNotEmpty) {
-      current = pages.where((p) => p.id == _pageId).firstOrNull ?? pages.first;
+      current = pages.where((p) => p.id == _pageId).firstOrNull;
+      if (current == null && _pendingId == null) {
+        current = pages.first;
+        _pageId = current.id; // işlemler (sil/taşı/çoğalt) gösterilen sayfaya uygulanır
+      } else {
+        current ??= pages.first; // bekleyen sayfa gelene kadar yedek: ilk sayfa kalır
+      }
+    }
+    if (pagesAsync.hasValue && pages.isEmpty && nb != null && !nb.deleted) _ensureAfterFrame();
+    var shown = pages;
+    final order = _order;
+    if (order != null) {
+      final byId = {for (final p in pages) p.id: p};
+      final sameSet = order.length == pages.length && order.every(byId.containsKey);
+      if (!sameSet || [for (final p in pages) p.id].join('|') == order.join('|')) {
+        _order = null;
+      } else {
+        shown = [for (final id in order) byId[id]!];
+      }
     }
     if (current != null && _keyFor != current.id) {
       _keyFor = current.id;
@@ -217,13 +289,11 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
               children: [
                 if (_strip)
                   _PageStrip(
-                    pages: pages,
+                    pages: shown,
                     currentId: current.id,
                     onTap: (p) => setState(() => _pageId = p.id),
                     onAdd: () => _add(pages, afterCurrent: false),
-                    onReorder: (from, to) => _guard(() async {
-                      await _repo.movePage(pages[from].id, to);
-                    }),
+                    onReorder: (from, to) => _reorderStrip(shown, from, to),
                   ),
                 if (_strip) const VerticalDivider(width: 1),
                 Expanded(
@@ -307,28 +377,114 @@ class _PageStrip extends StatelessWidget {
   }
 }
 
-/// Küçük resim: şablon + sayfanın çizgileri (çizgiler değişince kendini yeniler).
-class _PageThumb extends ConsumerWidget {
+/// Küçük resim: şablon + sayfanın çizgileri. Çizgiler akışta TEK abonelikle izlenir
+/// (State'te), sonuç bir kez `ui.Picture`'a kaydedilir (yeniden boyamada outline hesabı yok);
+/// ardışık güncellemeler [_ThumbState.delay] ile geciktirilir.
+class _PageThumb extends ConsumerStatefulWidget {
   const _PageThumb({required this.page});
   final InkNotePageRecord page;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final repo = ref.watch(inkStrokeRepositoryProvider);
-    return StreamBuilder<List<InkStroke>>(
-      stream: repo.watchPage(NotePageOwner(page.id, page.pageNo), attemptNo: 0, layer: 0, noQuestion: true),
-      builder: (context, snap) => CustomPaint(
-        painter: _ThumbPainter(page, snap.data ?? const []),
-        size: Size.infinite,
-      ),
-    );
+  ConsumerState<_PageThumb> createState() => _ThumbState();
+}
+
+class _ThumbState extends ConsumerState<_PageThumb> {
+  /// Peş peşe çizgi değişikliklerinde yeniden çözme/çizme bekleme süresi.
+  static const delay = Duration(milliseconds: 400);
+
+  StreamSubscription<List<InkStroke>>? _sub;
+  Timer? _timer;
+  List<InkStroke>? _pending;
+  bool _first = true;
+  ui.Picture? _picture;
+
+  @override
+  void initState() {
+    super.initState();
+    _listen();
   }
+
+  void _listen() {
+    _sub?.cancel();
+    _timer?.cancel();
+    _first = true;
+    _pending = null;
+    final p = widget.page;
+    _sub = ref
+        .read(inkStrokeRepositoryProvider)
+        .watchPage(NotePageOwner(p.id, p.pageNo), attemptNo: 0, layer: 0, noQuestion: true)
+        .listen(_onData);
+  }
+
+  void _onData(List<InkStroke> strokes) {
+    if (_first) {
+      _first = false;
+      _apply(strokes);
+      return;
+    }
+    _pending = strokes;
+    _timer ??= Timer(delay, () {
+      _timer = null;
+      final d = _pending;
+      _pending = null;
+      if (d != null && mounted) _apply(d);
+    });
+  }
+
+  void _apply(List<InkStroke> strokes) {
+    final old = _picture;
+    _picture = _record(strokes);
+    setState(() {});
+    old?.dispose();
+  }
+
+  ui.Picture _record(List<InkStroke> strokes) {
+    final rec = ui.PictureRecorder();
+    final c = Canvas(rec);
+    for (final s in strokes) {
+      final t = parseToolColumn(s.tool);
+      final kind = penProfiles.keys.where((k) => k.name == t.name).firstOrNull;
+      final brush = InkBrush(
+        tool: kind == PenKind.highlighter ? InkTool.highlighter : InkTool.pen,
+        color: s.color,
+        width: s.width,
+        kind: kind,
+        hardness: t.hardness,
+      );
+      final pts = [
+        for (final p in s.points) InkPoint(x: p.x, y: p.y, pressure: p.pressure, tilt: p.tilt, tMs: p.t.toDouble()),
+      ];
+      c.drawPath(inkOutlinePath(pts, brush, complete: true), inkPaintFor(brush));
+    }
+    return rec.endRecording();
+  }
+
+  @override
+  void didUpdateWidget(_PageThumb old) {
+    super.didUpdateWidget(old);
+    if (old.page.id != widget.page.id || old.page.pageNo != widget.page.pageNo) {
+      _listen();
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _sub?.cancel();
+    _picture?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => RepaintBoundary(
+    child: CustomPaint(painter: _ThumbPainter(widget.page, _picture), size: Size.infinite),
+  );
 }
 
 class _ThumbPainter extends CustomPainter {
   _ThumbPainter(this.page, this.strokes);
   final InkNotePageRecord page;
-  final List<InkStroke> strokes;
+  final ui.Picture? strokes;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -338,21 +494,11 @@ class _ThumbPainter extends CustomPainter {
       pageWidth: page.width,
       pageHeight: page.height,
     ).paint(canvas, size);
+    final pic = strokes;
+    if (pic == null) return;
     canvas.save();
     canvas.scale(size.width / page.width, size.height / page.height);
-    for (final s in strokes) {
-      final kind = penProfiles.keys.where((k) => k.name == s.tool).firstOrNull;
-      final brush = InkBrush(
-        tool: kind == PenKind.highlighter ? InkTool.highlighter : InkTool.pen,
-        color: s.color,
-        width: s.width,
-        kind: kind,
-      );
-      final pts = [
-        for (final p in s.points) InkPoint(x: p.x, y: p.y, pressure: p.pressure, tilt: p.tilt, tMs: p.t.toDouble()),
-      ];
-      canvas.drawPath(inkOutlinePath(pts, brush, complete: true), inkPaintFor(brush));
-    }
+    canvas.drawPicture(pic);
     canvas.restore();
   }
 

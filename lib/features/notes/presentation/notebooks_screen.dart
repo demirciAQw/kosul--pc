@@ -101,10 +101,34 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
       );
   }
 
-  Future<void> _reorder(List<InkNotebookRecord> alive, int from, int to) async {
-    final ids = [for (final n in alive) n.id];
-    ids.insert(to, ids.removeAt(from));
-    await ref.read(inkNotebookRepositoryProvider).reorderNotebooks(ids);
+  /// İyimser yerel sıra (tüm silinmemiş defterler); akış aynı sırayı getirince ya da hata olunca düşer.
+  List<String>? _order;
+
+  /// [shown] süzülmüş (etiket) liste olabilir; yeni sıra TÜM silinmemiş defterlere yazılır:
+  /// süzülmüş defterler kendi yerlerini, süzülmeyenler yerlerini korur.
+  Future<void> _reorder(List<InkNotebookRecord> aliveAll, List<InkNotebookRecord> shown, int from, int to) async {
+    if (from < 0 || from >= shown.length) return;
+    final moved = [for (final n in shown) n.id];
+    moved.insert(to.clamp(0, moved.length - 1), moved.removeAt(from));
+    final inShown = moved.toSet();
+    var k = 0;
+    final ids = [for (final n in aliveAll) inShown.contains(n.id) ? moved[k++] : n.id];
+    setState(() => _order = ids);
+    try {
+      await ref.read(inkNotebookRepositoryProvider).reorderNotebooks(ids);
+    } on ArgumentError {
+      _failOrder('Sıralama kaydedilemedi; liste yenilendi, yeniden dene.');
+    } on StateError catch (e) {
+      _failOrder(e.message);
+    }
+  }
+
+  void _failOrder(String msg) {
+    if (!mounted) return;
+    setState(() => _order = null);
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(msg)));
   }
 
   Widget _subtitle(InkNotebookRecord n, Set<String> tagIds, List<Tag> allTags) {
@@ -142,7 +166,17 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
       data: (list) {
         final tagsOf = ref.watch(inkNotebookTagMapProvider).value ?? const <String, Set<String>>{};
         final allTags = ref.watch(tagsProvider).value ?? const <Tag>[];
-        final aliveAll = [for (final n in list) if (!n.deleted) n];
+        var aliveAll = [for (final n in list) if (!n.deleted) n];
+        final order = _order;
+        if (order != null) {
+          final byId = {for (final n in aliveAll) n.id: n};
+          final sameSet = order.length == aliveAll.length && order.every(byId.containsKey);
+          if (!sameSet || [for (final n in aliveAll) n.id].join('|') == order.join('|')) {
+            _order = null;
+          } else {
+            aliveAll = [for (final id in order) byId[id]!];
+          }
+        }
         final usedTagIds = {for (final n in aliveAll) ...(tagsOf[n.id] ?? const <String>{})};
         final filtering = _tagFilter != null && allTags.any((t) => t.id == _tagFilter);
         final alive = filterNotebooksByTag(aliveAll, tagsOf, allTags, filtering ? _tagFilter : null);
@@ -192,7 +226,7 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
               physics: const NeverScrollableScrollPhysics(),
               buildDefaultDragHandles: false,
               itemCount: alive.length,
-              onReorderItem: (a, b) => _reorder(alive, a, b),
+              onReorderItem: (a, b) => _reorder(aliveAll, alive, a, b),
               itemBuilder: (context, i) {
                 final n = alive[i];
                 return Card(

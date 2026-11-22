@@ -58,6 +58,7 @@ class InkBrush {
     this.color = 0xFF1B1B1F,
     this.width = 3,
     this.kind,
+    this.hardness,
   });
 
   final InkTool tool;
@@ -65,12 +66,22 @@ class InkBrush {
   final double width;
   final PenKind? kind;
 
-  InkBrush copyWith({InkTool? tool, int? color, double? width, PenKind? kind}) => InkBrush(
-    tool: tool ?? this.tool,
-    color: color ?? this.color,
-    width: width ?? this.width,
-    kind: kind ?? this.kind,
-  );
+  /// Baskı eğrisi sertliği (0..1) ÇİZİMDE uygulanır; çizgi ham baskıyı taşır.
+  /// null: baskı olduğu gibi (sabit baskılı çizgi ve sertlik yazılmadan önceki kayıtlar).
+  final double? hardness;
+
+  static const _keep = Object();
+
+  /// [kind] ve [hardness] null'a çevrilebilir: `kind: null` verilirse silinir,
+  /// hiç verilmezse korunur.
+  InkBrush copyWith({InkTool? tool, int? color, double? width, Object? kind = _keep, Object? hardness = _keep}) =>
+      InkBrush(
+        tool: tool ?? this.tool,
+        color: color ?? this.color,
+        width: width ?? this.width,
+        kind: identical(kind, _keep) ? this.kind : kind as PenKind?,
+        hardness: identical(hardness, _keep) ? this.hardness : (hardness as num?)?.toDouble(),
+      );
 
   @override
   bool operator ==(Object other) =>
@@ -78,13 +89,32 @@ class InkBrush {
       other.tool == tool &&
       other.color == color &&
       other.width == width &&
-      other.kind == kind;
+      other.kind == kind &&
+      other.hardness == hardness;
 
   @override
-  int get hashCode => Object.hash(tool, color, width, kind);
+  int get hashCode => Object.hash(tool, color, width, kind, hardness);
 
   @override
-  String toString() => 'InkBrush($tool, #${color.toRadixString(16)}, w=$width${kind == null ? '' : ', $kind'})';
+  String toString() =>
+      'InkBrush($tool, #${color.toRadixString(16)}, w=$width${kind == null ? '' : ', $kind'}${hardness == null ? '' : ', h=$hardness'})';
+}
+
+/// `tool` sütunu değeri: kalem türü adı, sertlik varsa `ad:0.80` (ham baskı + sertlik çizimde).
+/// Sertliksiz eski kayıtlar yalnız adı taşır (baskıları yazılırken biçimlenmiştir).
+String toolColumnOf(InkBrush b) {
+  final k = b.kind;
+  if (k == null) return b.tool.name;
+  final h = b.hardness;
+  return h == null ? k.name : '${k.name}:${h.toStringAsFixed(2)}';
+}
+
+/// [toolColumnOf]'un tersi: ad ve (varsa) sertlik.
+({String name, double? hardness}) parseToolColumn(String v) {
+  final i = v.indexOf(':');
+  if (i < 0) return (name: v, hardness: null);
+  final h = double.tryParse(v.substring(i + 1));
+  return (name: v.substring(0, i), hardness: h?.clamp(0.0, 1.0));
 }
 
 /// Yüzeyden çıkan olaylar.

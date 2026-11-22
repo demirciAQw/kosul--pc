@@ -2,6 +2,14 @@
 library;
 
 import 'ink_models.dart';
+import 'pen_profiles.dart';
+
+/// Fırçanın en kalın yerinin yarısı (kalem türünün en büyük çarpanı dahil).
+double brushHalfWidth(InkBrush brush) {
+  final k = brush.kind;
+  final f = k == null ? 1.0 : (penProfiles[k]?.maxFactor ?? 1.0);
+  return brush.width * (f < 1.0 ? 1.0 : f) / 2;
+}
 
 class InkObject {
   const InkObject({
@@ -14,7 +22,9 @@ class InkObject {
   final List<InkPoint> points;
   final InkBrush brush;
 
-  double get halfWidth => brush.width / 2;
+  /// Çizginin en kalın yerinin yarısı: kalem türünün en büyük çarpanı dahil
+  /// (dolma kalem baskıyla 1,6 kat kalınlaşır; silgi ince şerit bırakmasın).
+  double get halfWidth => brushHalfWidth(brush);
 
   InkObject copyWith({String? id, List<InkPoint>? points, InkBrush? brush}) =>
       InkObject(

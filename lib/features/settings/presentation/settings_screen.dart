@@ -99,7 +99,8 @@ class _SettingsBody extends ConsumerWidget {
               onTap: () => context.push(AppRoutes.pdfLibrary),
             ),
           ),
-        if (isAndroid)
+        // Telefonda kalemli defter anlamsız: yalnız kısa kenarı 600dp ve üstü ekranlarda (tablet).
+        if (isAndroid && MediaQuery.sizeOf(context).shortestSide >= 600)
           Card(
             child: ListTile(
               key: const Key('settings-notebooks'),

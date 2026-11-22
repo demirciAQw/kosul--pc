@@ -32,9 +32,11 @@ Path inkOutlinePath(
     simulatePressure: !pressureFromDevice && !highlighter,
     isComplete: complete,
   );
+  // Sertlik çizimde uygulanır (kayıt ham baskıyı taşır). Yalnızca baskıya duyarlı kalemlerde.
+  final h = (profile?.pressureSensitive ?? false) ? brush.hardness : null;
   final outline = getStroke([
     for (final p in points)
-      PointVector(p.x, p.y, pressureFromDevice ? p.pressure : null),
+      PointVector(p.x, p.y, pressureFromDevice ? (h == null ? p.pressure : pressureFactor(p.pressure, h)) : null),
   ], options: options);
   final path = Path();
   if (outline.length < 2) return path;
