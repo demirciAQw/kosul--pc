@@ -606,3 +606,30 @@ class InkStrokes extends Table {
   @override
   Set<Column> get primaryKey => {id};
 }
+
+/// PDF belgeleri (T3). Yalnızca SATIR senkron olur; PDF dosyası olmaz
+/// (`<veri klasörü>/pdfs/<sha256>.pdf`, her cihaz kendisi ekler).
+/// `id` = `sha256`: iki cihazda aynı PDF aynı satır olur (çakışma çıkmaz);
+/// `ink_strokes.pdfDocumentId` bu kimliği taşır.
+/// Kitap sayfa no = pdf sayfa no (1'den) + `pageOffset`. Silme yumuşaktır.
+@DataClassName('PdfDocumentRow')
+class PdfDocuments extends Table {
+  TextColumn get id => text()();
+  TextColumn get sha256 => text()();
+  TextColumn get title => text().withLength(min: 1, max: 300)();
+  IntColumn get pageCount => integer()();
+  TextColumn get fileName => text()();
+  TextColumn get bookId => text().nullable()();
+  IntColumn get pageOffset => integer().withDefault(const Constant(0))();
+  BoolColumn get deleted => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  @override
+  List<Set<Column>> get uniqueKeys => [
+        {sha256},
+      ];
+}

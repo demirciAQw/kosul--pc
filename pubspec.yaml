@@ -1,10 +1,10 @@
 name: kocum
 description: "Koçum: YKS öğrencileri için tamamen çevrimdışı çalışma, süre ve hata analizi takipçisi."
 publish_to: 'none'
-version: 9.2.0+51
+version: 9.3.0+52
 
 environment:
-  sdk: ^3.8.0
+  sdk: ^3.14.0
 
 dependencies:
   flutter:
@@ -24,6 +24,9 @@ dependencies:
   # Dosya sistemi
   path_provider: ^2.1.5
   path: ^1.9.0
+
+  # PDF motoru (MIT, PDFium): tablet PDF modu. Arayüz domain'de, uygulama data'da.
+  pdfrx: ^3.1.0
 
   # Fotoğraf: çekim/seçim + otomatik sıkıştırma (WebP).
   # Kırpma/döndürme uygulamanın kendi ekranında (lib/core/media/crop_screen.dart).

@@ -130,7 +130,7 @@ void main() {
     addTearDown(db.close);
     expect(await _tables(db), contains('ink_strokes'));
     expect((await db.select(db.anlikNotes).getSingle()).body, 'eski not');
-    expect((await db.customSelect('PRAGMA user_version').getSingle()).read<int>('user_version'), 15);
+    expect((await db.customSelect('PRAGMA user_version').getSingle()).read<int>('user_version'), 16);
     final idx = await db.customSelect("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'ix_ink_%'").get();
     expect(idx, hasLength(2));
     // Tetikleyici kurulu: yeni çizgi deftere yazılır.

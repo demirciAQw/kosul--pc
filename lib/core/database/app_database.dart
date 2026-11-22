@@ -36,6 +36,7 @@ part 'app_database.g.dart';
   EsitlemeDurum,
   SilmeOnerileri,
   InkStrokes,
+  PdfDocuments,
 ])
 class AppDatabase extends _$AppDatabase {
   /// Testlerde: `AppDatabase(NativeDatabase.memory())`
@@ -54,8 +55,9 @@ class AppDatabase extends _$AppDatabase {
   /// v13: değişiklik defteri, bağlam, çakışmalar, senkron imleçleri; tetikleyiciler.
   /// v14: silme önerileri (Claude silmez, işaretler).
   /// v15: kalem çizgileri (ink_strokes), noktalar sıkıştırılmış BLOB.
+  /// v16: PDF belgeleri (pdf_documents): satır senkron olur, dosya olmaz.
   @override
-  int get schemaVersion => 15;
+  int get schemaVersion => 16;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -153,6 +155,7 @@ class AppDatabase extends _$AppDatabase {
             await m.createTable(inkStrokes);
             await _createInkIndexes();
           }
+          if (from < 16) await m.createTable(pdfDocuments);
           // Tablolar yeniden kurulmuş ya da sütun eklenmiş olabilir: tetikleyiciler baştan.
           await LedgerService(this).installTriggers(rebuild: true);
         },

@@ -41,3 +41,10 @@ Dal: `tablet-1`. Her adım: saat, sonuç, ölçüm, "Ahmet elle denesin".
 - Depo: ekle, sayfaya göre oku/izle, yumuşak sil/geri al.
 - Dikkat: defterde çizgi başına ~2x yer (hex). Çok çizgi birikirse defter boyutunu izle. `kocum fix` BLOB sütununu düzenleyemez.
 - Göç testi gerçek eski dosyayla değil, güncel şemadan taklitle yapıldı.
+
+## T3a: PDF motoru, içe aktarma, kitaplık eşleme (22.11.2026)
+- `pdfrx` 3.1.0 (MIT) eklendi; `environment sdk` `^3.14.0`. Geçişli paketlerin lisansı tek tek doğrulandı, GPL yok. Debug APK'da arm64 `libpdfium.so` 6,6 MB (release boyutu ölçülmedi).
+- `PdfEngine` arayüzü saf Dart; pdfrx yalnız `data/pdfrx_engine.dart`'ta. Gerçek PDFium Linux'ta çalıştı (aç, boyut, çiz, kutudaki metin, bozuk dosya).
+- `pdf_documents` tablosu (şema 16, `id` = sha256 → iki cihazda aynı PDF aynı satır). Dosya senkron edilmez, yalnız satır. İçe aktarma `pdfs/<sha256>.pdf`, tekrar kopyalamaz; kitap önerisi döner, otomatik bağlanmaz.
+- `flutter build apk --debug` ve `flutter build linux --debug` geçti. 408 test.
+- Doğrulanmadı: döndürülmüş PDF'te metin kutusu koordinatı, 300+ sayfa bellek, release (R8) derlemesi.

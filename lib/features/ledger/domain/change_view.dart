@@ -14,6 +14,7 @@ const _tableTitles = <String, String>{
   'anlik_note_people': 'Not kişisi',
   'anlik_links': 'Not bağı',
   'ink_strokes': 'Çizgi',
+  'pdf_documents': 'PDF belgesi',
   'question_cards': 'Soru',
   'study_notes': 'Ders notu',
   'note_photos': 'Not fotoğrafı',
