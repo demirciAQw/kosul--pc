@@ -1,9 +1,13 @@
+import 'dart:async';
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:flutter/services.dart';
 import 'package:kocum/app/app_shell.dart';
+import 'package:kocum/app/router.dart';
+import 'package:kocum/core/di/core_providers.dart';
 import 'package:kocum/app/tablet.dart';
 import 'package:kocum/core/database/app_database.dart';
 import 'package:kocum/features/ink/data/ink_stroke_repository.dart';
@@ -70,6 +74,20 @@ Future<void> _pump(
   addTearDown(t.view.reset);
   await t.pumpWidget(app);
   await t.pump();
+}
+
+/// Gerçek ana sayfa süresiz akış/animasyon tutar: `pumpAndSettle` bitmez.
+Future<void> _settle(WidgetTester t) async {
+  for (var i = 0; i < 8; i++) {
+    await t.pump(const Duration(milliseconds: 100));
+  }
+}
+
+/// Ağacı sök, Drift akışlarının kapanış zamanlayıcıları işlesin.
+Future<void> _unmount(WidgetTester t) async {
+  await t.pumpWidget(const SizedBox());
+  await t.runAsync(() => Future.delayed(const Duration(milliseconds: 20)));
+  await t.pump(const Duration(milliseconds: 20));
 }
 
 Widget _app(GoRouter r) => ProviderScope(
@@ -288,4 +306,222 @@ void main() {
       expect(find.byKey(const Key('note-shape-snap')), findsOneWidget);
     });
   });
+
+  group('durum ve gezinme (tablet↔telefon, geri tuşu, odak)', () {
+    testWidgets('tablet↔telefon boyut değişince çocuğun State\'i korunur', (
+      t,
+    ) async {
+      final r = GoRouter(
+        routes: [
+          GoRoute(
+            path: '/',
+            builder: (c, s) => const TabletFrame(
+              selected: RailItem.kitaplik,
+              child: _Counter(),
+            ),
+          ),
+        ],
+      );
+      addTearDown(r.dispose);
+      await _pump(t, _app(r), const Size(1280, 800));
+      await t.tap(find.byKey(const Key('counter')));
+      await t.pump();
+      expect(find.text('n=1'), findsOneWidget);
+      expect(find.byKey(const Key('tablet-rail')), findsOneWidget);
+      t.view.physicalSize = const Size(412, 915);
+      await t.pumpAndSettle();
+      expect(find.byKey(const Key('tablet-rail')), findsNothing);
+      expect(find.text('n=1'), findsOneWidget);
+      t.view.physicalSize = const Size(1280, 800);
+      await t.pumpAndSettle();
+      expect(find.byKey(const Key('tablet-rail')), findsOneWidget);
+      expect(find.text('n=1'), findsOneWidget);
+    });
+
+    group('gerçek routerProvider', () {
+      late AppDatabase db;
+      late List<SystemUiMode> modes;
+      late Future<void> Function(SystemUiMode) oldSetter;
+
+      setUp(() {
+        modes = [];
+        oldSetter = systemUiModeSetter;
+        systemUiModeSetter = (m) async => modes.add(m);
+      });
+      tearDown(() => systemUiModeSetter = oldSetter);
+
+      Future<GoRouter> boot(WidgetTester t, Size size) async {
+        await t.runAsync(() async {
+          db = AppDatabase(NativeDatabase.memory());
+          await db.customSelect('SELECT 1').get();
+        });
+        // Gerçek ana sayfanın açık Drift akışları close()'u bekletir; bellekte
+        // veritabanı olduğu için kapatılmaz, ağaç söküldükten sonra çöpe gider.
+        addTearDown(() => t.runAsync(db.close));
+        late GoRouter router;
+        final app = ProviderScope(
+          overrides: [appDatabaseProvider.overrideWithValue(db)],
+          child: Consumer(
+            builder: (c, ref, _) {
+              router = ref.watch(routerProvider);
+              return MaterialApp.router(routerConfig: router);
+            },
+          ),
+        );
+        await _pump(t, app, size);
+        await t.runAsync(() => Future.delayed(const Duration(milliseconds: 50)));
+        await t.pump();
+        return router;
+      }
+
+      testWidgets('ray bağlantıları; geri tuşu Kitaplık\'tan ana sayfaya', (
+        t,
+      ) async {
+        final r = await boot(t, const Size(1280, 800));
+        await t.tap(find.byKey(const Key('rail-kitaplik')));
+        await _settle(t);
+        expect(r.state.uri.path, '/pdf');
+        expect(find.byKey(const Key('tablet-rail')), findsOneWidget);
+        await t.tap(find.byKey(const Key('rail-defterler')));
+        await _settle(t);
+        expect(r.state.uri.path, '/defter');
+        expect(find.byKey(const Key('tablet-rail')), findsOneWidget);
+        // Geri tuşu: uygulama kapanmaz, ana sayfaya gider.
+        await t.binding.handlePopRoute();
+        await _settle(t);
+        expect(r.state.uri.path, '/');
+        expect(find.byType(AppShell), findsOneWidget);
+        await _unmount(t);
+      });
+
+      testWidgets('odak: giriş, çıkış, alt sayfaya geçiş, eşik altı, dispose', (
+        t,
+      ) async {
+        final r = await boot(t, const Size(1280, 800));
+        r.go('/pdf');
+        await _settle(t);
+        // Çerçevenin altındaki herhangi bir öğeden odak durumuna ulaş.
+        final inner = t.element(find.byType(KeyedSubtree).first);
+        final n = TabletFocus.maybeOf(inner)!;
+        modes.clear();
+        n.value = true;
+        await _settle(t);
+        expect(modes.last, SystemUiMode.immersiveSticky);
+        expect(find.byKey(const Key('tablet-rail')), findsNothing);
+        n.value = false;
+        await _settle(t);
+        expect(modes.last, SystemUiMode.edgeToEdge);
+
+        // Alt sayfa açılınca odak kapanır, çubuklar gelir.
+        n.value = true;
+        await _settle(t);
+        modes.clear();
+        unawaited(r.push('/settings'));
+        await _settle(t);
+        expect(modes, contains(SystemUiMode.edgeToEdge));
+        expect(n.value, isFalse);
+        await _unmount(t);
+      });
+
+      testWidgets('eşik altına inince odak kapanır, çubuklar gelir', (t) async {
+        final r = await boot(t, const Size(1280, 800));
+        r.go('/pdf');
+        await _settle(t);
+        final n = TabletFocus.maybeOf(
+          t.element(find.byType(KeyedSubtree).first),
+        )!;
+        n.value = true;
+        await _settle(t);
+        modes.clear();
+        t.view.physicalSize = const Size(412, 915);
+        await _settle(t);
+        expect(modes, contains(SystemUiMode.edgeToEdge));
+        expect(n.value, isFalse);
+        await _unmount(t);
+      });
+
+      testWidgets('odak açıkken çerçeve kalkarsa çubuklar geri gelir', (
+        t,
+      ) async {
+        final r = await boot(t, const Size(1280, 800));
+        r.go('/pdf');
+        await _settle(t);
+        TabletFocus.maybeOf(t.element(find.byType(KeyedSubtree).first))!.value =
+            true;
+        await _settle(t);
+        modes.clear();
+        r.go('/');
+        await _settle(t);
+        expect(modes.last, SystemUiMode.edgeToEdge);
+        await _unmount(t);
+      });
+    });
+  });
+
+  group('"…" menüsü gerçekten değer değiştirir', () {
+    Future<NoteToolSettings> open(WidgetTester t) async {
+      final tools = NoteToolSettings();
+      addTearDown(tools.dispose);
+      await _pump(
+        t,
+        MaterialApp(
+          home: Scaffold(
+            body: NoteInkToolbar(
+              tools: tools,
+              session: null,
+              template: PageTemplate.values.first,
+              onTemplate: (_) {},
+              onTemplateAll: (_) {},
+            ),
+          ),
+        ),
+        const Size(800, 1280),
+      );
+      await t.tap(find.byKey(const Key('note-more')));
+      await t.pumpAndSettle();
+      return tools;
+    }
+
+    testWidgets('sertlik sürgüsü etkin, değeri değiştirir, menü açık kalır', (
+      t,
+    ) async {
+      final tools = await open(t);
+      final slider = find.byKey(const Key('note-hardness'));
+      expect(slider, findsOneWidget);
+      final before = tools.hardness;
+      await t.drag(slider, const Offset(60, 0));
+      await t.pumpAndSettle();
+      expect(tools.hardness, greaterThan(before));
+      await t.tapAt(t.getTopLeft(slider) + const Offset(10, 24));
+      await t.pumpAndSettle();
+      expect(tools.hardness, lessThan(0.2));
+      expect(find.byKey(const Key('note-hardness')), findsOneWidget);
+    });
+
+    testWidgets('şekil düzelt işareti değeri değiştirir', (t) async {
+      final tools = await open(t);
+      final was = tools.shapeSnap;
+      await t.tap(find.byKey(const Key('note-shape-snap')));
+      await t.pumpAndSettle();
+      expect(tools.shapeSnap, !was);
+    });
+  });
+}
+
+class _Counter extends StatefulWidget {
+  const _Counter();
+  @override
+  State<_Counter> createState() => _CounterState();
+}
+
+class _CounterState extends State<_Counter> {
+  int n = 0;
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    body: TextButton(
+      key: const Key('counter'),
+      onPressed: () => setState(() => n++),
+      child: Text('n=$n'),
+    ),
+  );
 }

@@ -43,6 +43,7 @@ import '../features/tools/presentation/practice_test_screen.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   final router = GoRouter(
+    observers: [tabletRouteObserver],
     routes: [
       StatefulShellRoute.indexedStack(
         builder: (context, state, shell) => AppShell(shell: shell),

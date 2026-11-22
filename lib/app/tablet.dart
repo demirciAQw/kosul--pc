@@ -20,6 +20,16 @@ const double kToolbarCompactWidth = 900;
 bool isTabletLayout(Size size, {required bool android}) =>
     android && size.shortestSide >= kTabletShortestSide;
 
+/// Çerçeveli sayfaların üstüne başka sayfa açıldığını duyuran gözlemci
+/// ([routerProvider] gözlemcilerine eklenir).
+final RouteObserver<PageRoute<dynamic>> tabletRouteObserver =
+    RouteObserver<PageRoute<dynamic>>();
+
+/// Sistem çubuğu kipi çağrısı; testte yerine konur.
+@visibleForTesting
+Future<void> Function(SystemUiMode mode) systemUiModeSetter =
+    SystemChrome.setEnabledSystemUIMode;
+
 /// Testte Android'i taklit eder (yalnızca testler kurar).
 @visibleForTesting
 bool? debugAndroidOverride;
@@ -237,8 +247,12 @@ class TabletFrame extends ConsumerStatefulWidget {
   ConsumerState<TabletFrame> createState() => _TabletFrameState();
 }
 
-class _TabletFrameState extends ConsumerState<TabletFrame> {
+class _TabletFrameState extends ConsumerState<TabletFrame> with RouteAware {
   final _focus = ValueNotifier<bool>(false);
+  // Telefon↔tablet geçişinde (bölünmüş ekran, katlanabilir) çocuğun State'i
+  // (kaydırma, araç, geri al yığını, çizgi) kaybolmasın: aynı anahtarla taşınır.
+  final _childKey = GlobalKey();
+  ModalRoute<dynamic>? _route;
 
   @override
   void initState() {
@@ -246,8 +260,32 @@ class _TabletFrameState extends ConsumerState<TabletFrame> {
     _focus.addListener(_applyChrome);
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route is PageRoute && route != _route) {
+      tabletRouteObserver.unsubscribe(this);
+      _route = route;
+      tabletRouteObserver.subscribe(this, route);
+    }
+  }
+
+  // Üstüne çerçevesiz bir sayfa açılınca odak kapanır: orada çıkış düğmesi yok.
+  @override
+  void didPushNext() => _leaveFocus();
+
+  void _leaveFocus() {
+    if (!_focus.value) return;
+    systemUiModeSetter(SystemUiMode.edgeToEdge);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focus.value = false;
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
   void _applyChrome() {
-    SystemChrome.setEnabledSystemUIMode(
+    systemUiModeSetter(
       _focus.value ? SystemUiMode.immersiveSticky : SystemUiMode.edgeToEdge,
     );
     if (mounted) setState(() {});
@@ -255,8 +293,9 @@ class _TabletFrameState extends ConsumerState<TabletFrame> {
 
   @override
   void dispose() {
+    tabletRouteObserver.unsubscribe(this);
     if (_focus.value) {
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      systemUiModeSetter(SystemUiMode.edgeToEdge);
     }
     _focus.dispose();
     super.dispose();
@@ -264,18 +303,32 @@ class _TabletFrameState extends ConsumerState<TabletFrame> {
 
   @override
   Widget build(BuildContext context) {
-    if (!isTabletContext(context)) return widget.child;
+    final child = KeyedSubtree(key: _childKey, child: widget.child);
+    if (!isTabletContext(context)) {
+      // Tablet eşiğinin altına inildi: odak açıksa kapat, çubukları geri getir.
+      if (_focus.value) _leaveFocus();
+      return child;
+    }
     final due = ref.watch(dueCountProvider).value ?? 0;
-    return TabletFocus(
-      focus: _focus,
-      child: Row(
-        children: [
-          if (!_focus.value) ...[
-            TabletRail(selected: widget.selected, due: due),
-            const VerticalDivider(width: 1),
+    // Yığında tek sayfa (ray `go` ile açtı) iken geri tuşu uygulamayı
+    // kapatmasın: ana sayfaya git. Telefonun `push` akışı etkilenmez.
+    final canPop = Navigator.of(context).canPop();
+    return PopScope(
+      canPop: canPop,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) context.go(AppRoutes.home);
+      },
+      child: TabletFocus(
+        focus: _focus,
+        child: Row(
+          children: [
+            if (!_focus.value) ...[
+              TabletRail(selected: widget.selected, due: due),
+              const VerticalDivider(width: 1),
+            ],
+            Expanded(child: child),
           ],
-          Expanded(child: widget.child),
-        ],
+        ),
       ),
     );
   }

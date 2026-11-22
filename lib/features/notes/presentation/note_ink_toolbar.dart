@@ -221,26 +221,7 @@ class NoteInkToolbar extends StatelessWidget {
                     child: const Text('Şekil düzelt'),
                   ),
                   if (penProfiles[t.kind]!.pressureSensitive)
-                    PopupMenuItem(
-                      enabled: false,
-                      child: StatefulBuilder(
-                        builder: (context, setState) => Row(
-                          children: [
-                            const Text('Sertlik'),
-                            Expanded(
-                              child: Slider(
-                                key: const Key('note-hardness'),
-                                value: t.hardness,
-                                onChanged: (v) {
-                                  t.setHardness(v);
-                                  setState(() {});
-                                },
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
+                    _HardnessMenuEntry(tools: t),
                 ],
               ),
             PopupMenuButton<(PageTemplate, bool)>(
@@ -279,4 +260,43 @@ class NoteInkToolbar extends StatelessWidget {
       },
     );
   }
+}
+
+/// "…" menüsündeki sertlik sürgüsü. `PopupMenuItem(enabled: false)` soluk ve
+/// "devre dışı" görünürdü; bu girdi etkin, dokunuşta menüyü kapatmaz (InkWell
+/// yok), sürgü değeri doğrudan [NoteToolSettings]'e yazar.
+class _HardnessMenuEntry extends PopupMenuEntry<String> {
+  const _HardnessMenuEntry({required this.tools});
+  final NoteToolSettings tools;
+
+  @override
+  double get height => kMinInteractiveDimension;
+
+  @override
+  bool represents(String? value) => false;
+
+  @override
+  State<_HardnessMenuEntry> createState() => _HardnessMenuEntryState();
+}
+
+class _HardnessMenuEntryState extends State<_HardnessMenuEntry> {
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 16),
+    child: Row(
+      children: [
+        const Text('Sertlik'),
+        Expanded(
+          child: Slider(
+            key: const Key('note-hardness'),
+            value: widget.tools.hardness,
+            onChanged: (v) {
+              widget.tools.setHardness(v);
+              setState(() {});
+            },
+          ),
+        ),
+      ],
+    ),
+  );
 }
