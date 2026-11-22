@@ -113,3 +113,15 @@ Dal: `tablet-1`. Her adım: saat, sonuç, ölçüm, "Ahmet elle denesin".
 - Veri (şema 19): `ink_notebooks`, `ink_note_pages`, defter/sayfa için etiket+kişi bağ tabloları; depo (defter/sayfa oluştur, sırala, çoğalt, yumuşak sil/geri al, şablon). Şablon çizgi geometrisi saf fonksiyon.
 - Sözleşme kararı: `ink_strokes.noteId` = sayfa id'si, `notePage` = sayfanın DEĞİŞMEYEN `pageNo`'su (sıra `sortOrder`'da); araya ekleme/taşıma BLOB'lu çizgi satırlarını yeniden yazmaz. Sapma: sayfa→defter ve bağ→sahip yabancı anahtarları yok (sıra bozuk eşitlenince takılmasın), etiket/kişiye var. Defterin son sayfası silinemez.
 - Eşikler rastgele gürültüyle ayarlı; gerçek tablet çiziminde yeniden ayar gerekebilir.
+
+## T6b1: Defter arayüzü, kalem, silgi (v9.8)
+- `/defter` (kapak rengi, başlık, sayfa sayısı; yeni, yeniden adlandır, sırala, onaylı yumuşak sil, geri al), `/defter/:id` (yan şeritte küçük resimler, sayfa ekle/araya/çoğalt/sırala/sil, şablon). Açılışta `ensureVisiblePage`. Giriş: Ayarlar → "Defterler (tablet için)" (Android), masaüstünde "Defterler".
+- Sayfa editörü T3b oturum altyapısını yeniden kullanır (kalem çizer, parmak kaydırır/yakınlaştırır, avuç yutulur, kayıt hatası yeniden denenir). Kalem türleri (tükenmez/dolma/kurşun/fosforlu), renk, kalınlık, sertlik; çizgi ve alan silgisi; geri al/yinele.
+- Alan silgisi: parçaları ekler + özgünü yumuşak siler tek işlemde; hatada özgünler geri konur.
+- Sapmalar: geri al için `InkCommandStack` yerine mevcut `InkHistory` (kimlikle kalıcı); çizgi silgisi T3b'nin `eraseAt`'ı ile; sertlik yazarken baskıya uygulanır (saklanan baskı biçimlenmiş).
+- Doğrulanmadı: gerçek kalem, avuç, Casper'da `InteractiveViewer` + stylus; fosforlu multiply yalnız çizgi katmanında; çok sayfada küçük resim performansı.
+
+### Ahmet elle denesin (T6)
+- Defterler → yeni defter → çizgili/kareli sayfa; dört kalem türü; sertlik ayarı baskıya göre kalınlığı değiştiriyor mu?
+- Çizgi silgisi / alan silgisi / geri al / yinele; uygulamayı kapat-aç: çizgiler yerinde mi?
+- Sayfa şeridi: sayfa ekle, çoğalt, sırala.

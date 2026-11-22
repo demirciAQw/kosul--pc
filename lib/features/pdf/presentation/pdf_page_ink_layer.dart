@@ -120,10 +120,11 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
     return InkPoint(
       x: l.dx,
       y: l.dy,
-      pressure: e.pressureMax > e.pressureMin
-          ? ((e.pressure - e.pressureMin) / (e.pressureMax - e.pressureMin))
-                .clamp(0.0, 1.0)
-          : 0.5,
+      pressure: widget.session.shapePressure(
+        e.pressureMax > e.pressureMin
+            ? ((e.pressure - e.pressureMin) / (e.pressureMax - e.pressureMin)).clamp(0.0, 1.0)
+            : 0.5,
+      ),
       tilt: e.tilt,
       tMs: e.timeStamp.inMicroseconds / 1000,
     );
@@ -188,14 +189,24 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
   double _eraseRadiusPage(InkBrush b) =>
       math.max(8.0, b.width * 2) * (_coords?.pageUnitsPerViewPx ?? 1);
 
+  Offset? _lastErase;
+
   void _eraseAt(InkPoint p) {
     final c = _coords;
     final brush = _ctl.liveBrush;
     if (c == null || brush == null) return;
     final o = c.toPage(Offset(p.x, p.y));
     _erased.addAll(
-      widget.session.eraseAt(widget.page, o.dx, o.dy, _eraseRadiusPage(brush)),
+      widget.session.eraseAt(
+        widget.page,
+        o.dx,
+        o.dy,
+        _eraseRadiusPage(brush),
+        prevX: _lastErase?.dx,
+        prevY: _lastErase?.dy,
+      ),
     );
+    _lastErase = o;
   }
 
   void _commitErase() {
@@ -212,6 +223,7 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
       case InkStrokeStart():
         _erasing = _ctl.liveBrush?.tool == InkTool.eraser;
         _erased.clear();
+        _lastErase = null;
         widget.session.setErasing(_erasing);
         if (_erasing) _eraseAt(e.point);
       case InkStrokePoint():

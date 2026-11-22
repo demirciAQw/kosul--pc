@@ -1,17 +1,23 @@
 /// Çizgi düzeyinde geri al / yinele yığını (saf Dart).
 ///
-/// Bir eylem, bir sayfadaki çizgi kümesinin eklenmesi ya da silinmesidir.
+/// Bir eylem, bir sayfadaki çizgi kümesinin eklenmesi, silinmesi ya da (alan silgisi)
+/// bir kümenin başka bir kümeyle değiştirilmesidir.
 /// Geri al: eklenenleri yumuşak siler, silinenleri geri getirir. Yinele tersi.
 /// Yeni eylem yinele yığınını boşaltır.
 library;
 
-enum InkActionKind { added, erased }
+enum InkActionKind { added, erased, replaced }
 
 class InkAction {
-  const InkAction(this.kind, this.page, this.strokeIds);
+  const InkAction(this.kind, this.page, this.strokeIds, {this.addedIds = const []});
   final InkActionKind kind;
   final int page;
+
+  /// added: eklenenler; erased: silinenler; replaced: yerine konulanlar (silinen özgünler).
   final List<String> strokeIds;
+
+  /// Yalnız replaced (alan silgisi, hareket başına TEK kayıt): özgünlerin yerine eklenen parçalar.
+  final List<String> addedIds;
 }
 
 class InkHistory {
@@ -26,7 +32,7 @@ class InkHistory {
   bool get canRedo => _redo.isNotEmpty;
 
   void push(InkAction a) {
-    if (a.strokeIds.isEmpty) return;
+    if (a.strokeIds.isEmpty && a.addedIds.isEmpty) return;
     _undo.add(a);
     if (_undo.length > limit) _undo.removeAt(0);
     _redo.clear();

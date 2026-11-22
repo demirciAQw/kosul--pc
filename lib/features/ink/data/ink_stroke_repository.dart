@@ -52,6 +52,37 @@ class InkStrokeRepository {
     return id;
   }
 
+  /// Alan silgisi: [deleteIds] yumuşak silinir, [adds] eklenir; TEK işlemde (ya hep ya hiç,
+  /// bu yüzden yeniden deneme güvenli). Eklenenlerin kimlikleri sırayla döner.
+  Future<List<String>> replace({required Iterable<String> deleteIds, required List<NewStroke> adds}) =>
+      _db.transaction(() async {
+        final ids = <String>[];
+        for (final a in adds) {
+          ids.add(await add(
+            owner: a.owner,
+            points: a.points,
+            startedAtMs: a.startedAtMs,
+            layer: a.layer,
+            attemptNo: a.attemptNo,
+            questionId: a.questionId,
+            tool: a.tool,
+            color: a.color,
+            width: a.width,
+          ));
+        }
+        await softDeleteMany(deleteIds);
+        return ids;
+      });
+
+  /// Geri al / yinele: [deleteIds] yumuşak silinir, [restoreIds] geri gelir; tek işlem.
+  Future<void> swap({required Iterable<String> deleteIds, required Iterable<String> restoreIds}) =>
+      _db.transaction(() async {
+        await softDeleteMany(deleteIds);
+        for (final id in restoreIds) {
+          await restore(id);
+        }
+      });
+
   SimpleSelectStatement<$InkStrokesTable, InkStrokeRow> _query(StrokeOwner owner,
       {int? attemptNo, int? layer, String? questionId, bool noQuestion = false}) {
     return _db.select(_db.inkStrokes)
@@ -151,4 +182,28 @@ class InkStrokeRepository {
         durationMs: r.durationMs,
         deleted: r.deleted,
       );
+}
+
+/// [InkStrokeRepository.replace] ile eklenecek yeni çizgi.
+class NewStroke {
+  const NewStroke({
+    required this.owner,
+    required this.points,
+    required this.startedAtMs,
+    this.layer = 0,
+    this.attemptNo = 0,
+    this.questionId,
+    this.tool = 'pen',
+    this.color = 0xFF000000,
+    this.width = 1.0,
+  });
+  final StrokeOwner owner;
+  final List<StrokePoint> points;
+  final int startedAtMs;
+  final int layer;
+  final int attemptNo;
+  final String? questionId;
+  final String tool;
+  final int color;
+  final double width;
 }

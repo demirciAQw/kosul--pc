@@ -99,6 +99,17 @@ class _SettingsBody extends ConsumerWidget {
               onTap: () => context.push(AppRoutes.pdfLibrary),
             ),
           ),
+        if (isAndroid)
+          Card(
+            child: ListTile(
+              key: const Key('settings-notebooks'),
+              leading: ToneIcon(Icons.draw_outlined, color: KocumColors.blue),
+              title: const Text('Defterler (tablet için)'),
+              subtitle: const Text('Kalemle yazılan defterler ve sayfalar'),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => context.push(AppRoutes.notebooks),
+            ),
+          ),
         _Section('Hatırlatıcılar'),
         Card(
           child: Column(

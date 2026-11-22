@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:perfect_freehand/perfect_freehand.dart';
 
 import '../domain/ink_models.dart';
+import '../domain/pen_profiles.dart';
 
 /// Noktalardan dolu çizgi yolunu üretir (perfect_freehand, MIT).
 /// [pressureFromDevice] false ise (fare) baskı benzetilir.
@@ -14,9 +15,18 @@ Path inkOutlinePath(
 }) {
   if (points.isEmpty) return Path();
   final highlighter = brush.tool == InkTool.highlighter;
+  // Kalem türü verilmişse genişlik profilden: perfect_freehand yarıçapı baskıyla
+  // doğrusal değiştirir; boyut/inceltme `penProfiles.widthAt` ile aynı aralığı verir.
+  final profile = brush.kind == null ? null : penProfiles[brush.kind];
+  final size = profile == null ? brush.width : brush.width * (profile.minFactor + profile.maxFactor) / 2;
+  final thinning = profile == null
+      ? (highlighter ? 0.0 : 0.55)
+      : (profile.pressureSensitive
+            ? (profile.maxFactor - profile.minFactor) / (profile.maxFactor + profile.minFactor)
+            : 0.0);
   final options = StrokeOptions(
-    size: brush.width,
-    thinning: highlighter ? 0 : 0.55,
+    size: size,
+    thinning: thinning,
     smoothing: 0.5,
     streamline: 0.4,
     simulatePressure: !pressureFromDevice && !highlighter,
@@ -40,10 +50,14 @@ Path inkOutlinePath(
 /// Fırça boyası: fosforlu yarı saydam.
 Paint inkPaintFor(InkBrush brush) {
   final base = Color(brush.color);
-  final color = brush.tool == InkTool.highlighter
+  final profile = brush.kind == null ? null : penProfiles[brush.kind];
+  final color = profile != null
+      ? (profile.opacity < 1 ? base.withValues(alpha: base.a * profile.opacity) : base)
+      : brush.tool == InkTool.highlighter
       ? base.withValues(alpha: base.a * 0.35)
       : base;
   return Paint()
+    ..blendMode = (profile?.multiply ?? false) ? BlendMode.multiply : BlendMode.srcOver
     ..color = color
     ..style = PaintingStyle.fill
     ..isAntiAlias = true;

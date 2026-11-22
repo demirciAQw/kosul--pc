@@ -5,6 +5,8 @@
 /// bu dosyadaki sözleşme değişmez.
 library;
 
+import 'pen_profiles.dart' show PenKind;
+
 /// Çizgi üzerindeki tek nokta.
 class InkPoint {
   const InkPoint({
@@ -47,21 +49,27 @@ class InkPoint {
 enum InkTool { pen, highlighter, eraser }
 
 /// Fırça: araç, ARGB renk (0xAARRGGBB) ve kalınlık (mantıksal piksel).
+///
+/// [kind] yalnız not uygulamasında verilir (tükenmez/dolma/kurşun/fosforlu);
+/// verilirse çizgi biçimi `pen_profiles` profilinden gelir. Null: eski davranış.
 class InkBrush {
   const InkBrush({
     this.tool = InkTool.pen,
     this.color = 0xFF1B1B1F,
     this.width = 3,
+    this.kind,
   });
 
   final InkTool tool;
   final int color;
   final double width;
+  final PenKind? kind;
 
-  InkBrush copyWith({InkTool? tool, int? color, double? width}) => InkBrush(
+  InkBrush copyWith({InkTool? tool, int? color, double? width, PenKind? kind}) => InkBrush(
     tool: tool ?? this.tool,
     color: color ?? this.color,
     width: width ?? this.width,
+    kind: kind ?? this.kind,
   );
 
   @override
@@ -69,13 +77,14 @@ class InkBrush {
       other is InkBrush &&
       other.tool == tool &&
       other.color == color &&
-      other.width == width;
+      other.width == width &&
+      other.kind == kind;
 
   @override
-  int get hashCode => Object.hash(tool, color, width);
+  int get hashCode => Object.hash(tool, color, width, kind);
 
   @override
-  String toString() => 'InkBrush($tool, #${color.toRadixString(16)}, w=$width)';
+  String toString() => 'InkBrush($tool, #${color.toRadixString(16)}, w=$width${kind == null ? '' : ', $kind'})';
 }
 
 /// Yüzeyden çıkan olaylar.

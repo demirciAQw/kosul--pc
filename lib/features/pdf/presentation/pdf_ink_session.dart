@@ -6,8 +6,11 @@ import 'package:flutter/foundation.dart';
 
 import '../../ink/data/ink_outline.dart';
 import '../../ink/data/ink_stroke_repository.dart';
+import '../../ink/domain/eraser.dart';
 import '../../ink/domain/ink_geometry.dart';
 import '../../ink/domain/ink_models.dart';
+import '../../ink/domain/ink_object.dart';
+import '../../ink/domain/pen_profiles.dart';
 import '../../ink/domain/ink_stroke_record.dart';
 import '../../ink/domain/stroke_codec.dart';
 import '../domain/ink_history.dart';
@@ -63,6 +66,15 @@ class PagePen extends ChangeNotifier {
     _ping();
   }
 
+  /// [old]'u aynı z-sırasında [news] ile değiştirir (alan silgisi).
+  void _replaceOne(PenStroke old, List<PenStroke> news) {
+    final i = _strokes.indexOf(old);
+    if (i < 0) return;
+    _strokes.replaceRange(i, i + 1, news);
+    _ping();
+    old.dispose();
+  }
+
   void _removeWhere(bool Function(PenStroke) test) {
     final gone = _strokes.where(test).toList();
     if (gone.isEmpty) return;
@@ -115,7 +127,22 @@ class PagePen extends ChangeNotifier {
   }
 }
 
-/// Bir PDF belgesinin kalem oturumu: araç durumu, sayfa çizgileri, kayıt,
+/// Silgi türü: çizgiyi bütün siler ya da yalnız değdiği yeri keser.
+enum EraseMode { stroke, area }
+
+/// Alan silgisi: sürüklenen bir hareketin geçici durumu (hareket sonunda tek kayıt).
+class _AreaMove {
+  _AreaMove(this.page);
+  final int page;
+
+  /// Hareket başında sayfada duran (kayıtlı ya da kaydı süren) özgün çizgiler.
+  final List<PenStroke> originals = [];
+
+  /// Şu an ekranda duran, henüz kaydedilmemiş parçalar.
+  final List<PenStroke> pieces = [];
+}
+
+/// Bir PDF belgesinin (ya da defter sayfasının) kalem oturumu: araç durumu, sayfa çizgileri, kayıt,
 /// geri al / yinele. Okuyucu ekranının ve sayfa katmanlarının ortak durumu.
 class PdfInkSession extends ChangeNotifier {
   PdfInkSession({
@@ -131,9 +158,18 @@ class PdfInkSession extends ChangeNotifier {
       Duration(seconds: 3),
     ],
     this.hoverHold = const Duration(milliseconds: 800),
+    this.ownerOf,
+    this.penKinds = false,
   }) : _clock = clock ?? DateTime.now;
 
   final String documentId;
+
+  /// Verilirse çizgi sahibi sayfa numarasından bu işlevle bulunur (defter sayfası:
+  /// `NotePageOwner(sayfaId, pageNo)`); null ise PDF sayfası.
+  final StrokeOwner Function(int page)? ownerOf;
+
+  /// Kalem türü (tükenmez/dolma/kurşun/fosforlu) `tool` sütununa yazılır ve geri okunur.
+  final bool penKinds;
   final InkStrokeRepository repository;
   final DateTime Function() _clock;
   final int attemptNo;
@@ -206,6 +242,30 @@ class PdfInkSession extends ChangeNotifier {
     notifyListeners();
   }
 
+  EraseMode _eraseMode = EraseMode.stroke;
+  EraseMode get eraseMode => _eraseMode;
+  void setEraseMode(EraseMode m) {
+    if (_eraseMode == m) return;
+    _eraseMode = m;
+    notifyListeners();
+  }
+
+  double _hardness = 0.5;
+
+  /// Baskı eğrisi sertliği (0..1; bkz. `pressureFactor`).
+  double get hardness => _hardness;
+  void setHardness(double v) {
+    _hardness = v.clamp(0.0, 1.0);
+    notifyListeners();
+  }
+
+  /// Ham baskıyı (0..1) seçili sertlikle biçimlendirir; kalem türü yoksa aynen döner.
+  /// Çizgi hem canlı çizilirken hem kaydedilirken AYNI biçimlenmiş baskıyı taşır.
+  double shapePressure(double raw) =>
+      _brush.kind == null || !(penProfiles[_brush.kind]?.pressureSensitive ?? false)
+          ? raw
+          : pressureFactor(raw, _hardness);
+
   bool get canUndo => _history.canUndo;
   bool get canRedo => _history.canRedo;
 
@@ -249,6 +309,10 @@ class PdfInkSession extends ChangeNotifier {
   /// Silgi hareketi sürüyor: geri al / yinele kapalı (yarış olmasın).
   bool get erasing => _erasing;
   void setErasing(bool v) {
+    if (v) {
+      final m = _areaMove;
+      if (m != null && m.originals.isEmpty && m.pieces.isEmpty) _areaMove = null; // değmeyen eski hareket
+    }
     if (_erasing == v) return;
     _erasing = v;
     _ping();
@@ -314,7 +378,7 @@ class PdfInkSession extends ChangeNotifier {
     return pen;
   }
 
-  PdfPageOwner _owner(int page) => PdfPageOwner(documentId, page);
+  StrokeOwner _owner(int page) => ownerOf?.call(page) ?? PdfPageOwner(documentId, page);
 
   Future<void> _load(PagePen pen) async {
     if (_disposed || pen._disposed) return;
@@ -334,7 +398,7 @@ class PdfInkSession extends ChangeNotifier {
   }
 
   PenStroke _fromRecord(InkStroke r) => PenStroke(
-    InkBrush(tool: _toolOf(r.tool), color: r.color, width: r.width),
+    _brushOf(r),
     [
       for (final p in r.points)
         InkPoint(
@@ -347,6 +411,19 @@ class PdfInkSession extends ChangeNotifier {
     ],
     id: r.id,
   );
+
+  InkBrush _brushOf(InkStroke r) {
+    final kind = penKinds ? PenKind.values.where((k) => k.name == r.tool).firstOrNull : null;
+    if (kind != null) {
+      return InkBrush(
+        tool: kind == PenKind.highlighter ? InkTool.highlighter : InkTool.pen,
+        color: r.color,
+        width: r.width,
+        kind: kind,
+      );
+    }
+    return InkBrush(tool: _toolOf(r.tool), color: r.color, width: r.width);
+  }
 
   static InkTool _toolOf(String name) => InkTool.values.firstWhere(
     (t) => t.name == name,
@@ -410,7 +487,7 @@ class PdfInkSession extends ChangeNotifier {
         layer: layer,
         attemptNo: attemptNo,
         questionId: questionId,
-        tool: stroke.brush.tool.name,
+        tool: stroke.brush.kind?.name ?? stroke.brush.tool.name,
         color: stroke.brush.color,
         width: stroke.brush.width,
       );
@@ -446,7 +523,13 @@ class PdfInkSession extends ChangeNotifier {
 
   /// Silgi: sayfa noktasına (x, y) [radius] sayfa biriminde değen çizgileri
   /// ekrandan kaldırır ve kaldırılanları döner (kayıt [commitErase] ile).
-  List<PenStroke> eraseAt(int page, double x, double y, double radius) {
+  ///
+  /// [EraseMode.area]: çizgi bütün kalkmaz, silgi yolu ([prevX]/[prevY]'den (x, y)'ye
+  /// doğru parçası) üstündeki kısım kesilir; dönen liste bu çağrıda değişen çizgilerdir
+  /// (kayıt yine [commitErase] ile, hareket başına tek kayıt).
+  List<PenStroke> eraseAt(int page, double x, double y, double radius, {double? prevX, double? prevY}) {
+    if (!x.isFinite || !y.isFinite || !radius.isFinite || radius < 0) return const [];
+    if (_eraseMode == EraseMode.area) return _eraseArea(page, x, y, radius, prevX, prevY);
     final pen = penFor(page);
     final hit = [
       for (final s in pen._strokes)
@@ -469,9 +552,100 @@ class PdfInkSession extends ChangeNotifier {
     return hit;
   }
 
+  _AreaMove? _areaMove;
+
+  List<PenStroke> _eraseArea(int page, double x, double y, double radius, double? prevX, double? prevY) {
+    final pen = penFor(page);
+    final move = _areaMove ??= _AreaMove(page);
+    if (move.page != page) return const []; // hareket başka sayfada sürüyor
+    final path = [
+      if (prevX != null && prevY != null && prevX.isFinite && prevY.isFinite) InkPoint(x: prevX, y: prevY),
+      InkPoint(x: x, y: y),
+    ];
+    final changed = <PenStroke>[];
+    for (final s in List.of(pen._strokes)) {
+      final obj = InkObject(id: 'x', points: s.points, brush: s.brush);
+      final res = eraseArea(obj, path, radius, idFor: (b, i) => '$b/$i');
+      if (!res.changed) continue;
+      final news = [
+        for (final p in res.pieces)
+          PenStroke(p.brush, p.points)..startedAtMs = s.startedAtMs,
+      ];
+      if (move.pieces.remove(s)) {
+        // Hareketin kendi parçası: yalnız bellekte, kaydı yok.
+      } else {
+        s.erased = true;
+        if (s.id != null) _pendingErase.add(s.id!);
+        move.originals.add(s);
+      }
+      move.pieces.addAll(news);
+      pen._replaceOne(s, news);
+      changed.add(s);
+    }
+    return changed;
+  }
+
+  /// Alan silgisi hareketi bitti: parçalar eklenir, özgünler yumuşak silinir (tek işlem, tek geri al kaydı).
+  void _commitArea() {
+    final move = _areaMove;
+    _areaMove = null;
+    if (move == null || (move.originals.isEmpty && move.pieces.isEmpty)) return;
+    unawaited(
+      _enqueue(() async {
+        final ids = [
+          for (final s in move.originals)
+            if (s.id != null) s.id!,
+        ];
+        List<String> added = const [];
+        final ok = await _try(() async {
+          added = await repository.replace(
+            deleteIds: ids,
+            adds: [
+              for (final p in move.pieces)
+                NewStroke(
+                  owner: _owner(move.page),
+                  points: [
+                    for (final q in p.points)
+                      StrokePoint(q.x, q.y, pressure: q.pressure, tilt: q.tilt, t: math.max<int>(0, q.tMs.round())),
+                  ],
+                  startedAtMs: p.startedAtMs,
+                  layer: layer,
+                  attemptNo: attemptNo,
+                  questionId: questionId,
+                  tool: p.brush.kind?.name ?? p.brush.tool.name,
+                  color: p.brush.color,
+                  width: p.brush.width,
+                ),
+            ],
+          );
+        });
+        _pendingErase.removeAll(ids);
+        final pen = _pens[move.page];
+        if (!ok) {
+          // Hiçbir şey yazılmadı (işlem geri sarıldı): parçalar çıkar, özgünler geri konur.
+          if (pen != null && !pen._disposed) {
+            pen._removeWhere(move.pieces.contains);
+            for (final s in move.originals) {
+              s.erased = false;
+              pen._add(s);
+            }
+          }
+          _report('Silme kaydedilemedi; çizgiler geri konuldu.');
+          return;
+        }
+        for (var i = 0; i < move.pieces.length; i++) {
+          move.pieces[i].id = added[i];
+        }
+        _history.push(InkAction(InkActionKind.replaced, move.page, ids, addedIds: added));
+        _ping();
+      }),
+    );
+  }
+
   /// Silgi hareketi bitti: kaldırılan çizgileri yumuşak siler (geri alınabilir).
   /// Kayıt başarısızsa çizgiler ekrana geri konur.
   void commitErase(int page, List<PenStroke> removed) {
+    if (_areaMove != null) return _commitArea();
     if (removed.isEmpty) return;
     unawaited(
       _enqueue(() async {
@@ -528,6 +702,16 @@ class PdfInkSession extends ChangeNotifier {
 
   /// [forward]: eylemi (yeniden) uygula; değilse tersini. Tekrarlanabilir (idempotent).
   Future<void> _apply(InkAction a, {required bool forward}) async {
+    if (a.kind == InkActionKind.replaced) {
+      // İleri: özgünler silinir, parçalar gelir. Geri: tersi. Tek işlem.
+      await repository.swap(
+        deleteIds: forward ? a.strokeIds : a.addedIds,
+        restoreIds: forward ? a.addedIds : a.strokeIds,
+      );
+      final pen = _pens[a.page];
+      if (pen != null) await _load(pen);
+      return;
+    }
     final deleteThem = (a.kind == InkActionKind.added) != forward;
     final pen = _pens[a.page];
     if (deleteThem) {

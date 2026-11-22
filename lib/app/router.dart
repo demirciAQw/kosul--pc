@@ -35,6 +35,8 @@ import '../features/study_session/presentation/screens/session_setup_screen.dart
 import '../features/sync/presentation/send_to_computer_screen.dart';
 import 'app_shell.dart';
 import 'routes.dart';
+import '../features/notes/presentation/ink_notebook_screen.dart';
+import '../features/notes/presentation/notebooks_screen.dart';
 import '../features/tools/presentation/tools_screen.dart';
 import '../features/tools/presentation/practice_test_screen.dart';
 
@@ -109,6 +111,11 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: AppRoutes.conflicts, builder: (context, state) => const ConflictsScreen()),
       GoRoute(path: AppRoutes.inkLab, builder: (context, state) => const InkLabPage()),
       GoRoute(path: AppRoutes.pdfLibrary, builder: (context, state) => const PdfLibraryPage()),
+      GoRoute(path: AppRoutes.notebooks, builder: (context, state) => const NotebooksScreen()),
+      GoRoute(
+        path: '/defter/:id',
+        builder: (context, state) => InkNotebookScreen(notebookId: state.pathParameters['id']!),
+      ),
       GoRoute(
         path: '/pdf/:id',
         builder: (context, state) {

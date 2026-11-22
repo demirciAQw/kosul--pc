@@ -13,6 +13,8 @@ import '../entry/exams_page.dart';
 import '../entry/optic_page.dart';
 import '../entry/plans_page.dart';
 import '../entry/sessions_page.dart';
+import '../../features/notes/presentation/ink_notebook_screen.dart';
+import '../../features/notes/presentation/notebooks_screen.dart';
 import '../../features/pdf/presentation/pdf_library_page.dart';
 import '../../features/pdf/presentation/pdf_reader_page.dart';
 import '../import/import_providers.dart';
@@ -103,6 +105,17 @@ Widget _page(DesktopSection section) => switch (section) {
               embedded: true,
               onOpen: (context, d) => Navigator.of(context)
                   .push(MaterialPageRoute<void>(builder: (_) => PdfReaderPage(documentId: d.id))),
+            ),
+          ),
+        ),
+      DesktopSection.notebooks => DesktopPage(
+          title: 'Defterler',
+          subtitle: 'Kalemli defterler ve sayfalar',
+          child: Builder(
+            builder: (context) => NotebooksScreen(
+              embedded: true,
+              onOpen: (context, n) => Navigator.of(context)
+                  .push(MaterialPageRoute<void>(builder: (_) => InkNotebookScreen(notebookId: n.id))),
             ),
           ),
         ),

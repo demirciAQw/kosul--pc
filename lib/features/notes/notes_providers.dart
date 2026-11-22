@@ -1,7 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/di/core_providers.dart';
+import 'data/ink_notebook_repository.dart';
 import 'data/note_repository_impl.dart';
+import 'domain/ink_notebook.dart';
 import 'domain/notes.dart';
 
 final noteRepositoryProvider = Provider<NoteRepository>((ref) => DriftNoteRepository(ref.watch(appDatabaseProvider)));
@@ -26,3 +28,14 @@ class NoteSubjectFilter extends Notifier<String?> {
 }
 
 final noteSubjectFilterProvider = NotifierProvider<NoteSubjectFilter, String?>(NoteSubjectFilter.new);
+
+/// Kalemli defterler (tablet T6). Ders/Anlık notlarından ayrıdır.
+final inkNotebookRepositoryProvider =
+    Provider((ref) => InkNotebookRepository(ref.watch(appDatabaseProvider), clock: ref.watch(clockProvider)));
+
+/// Silinenler dahil tüm defterler; ekran süzer (geri alma listesi için).
+final inkNotebooksProvider = StreamProvider.autoDispose<List<InkNotebookRecord>>(
+    (ref) => ref.watch(inkNotebookRepositoryProvider).watchNotebooks(includeDeleted: true));
+
+final inkNotebookPagesProvider = StreamProvider.autoDispose.family<List<InkNotePageRecord>, String>(
+    (ref, notebookId) => ref.watch(inkNotebookRepositoryProvider).watchPages(notebookId));

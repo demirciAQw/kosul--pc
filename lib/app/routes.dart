@@ -13,6 +13,8 @@ abstract final class AppRoutes {
   static const conflicts = '/tools/cakismalar';
   static const inkLab = '/tools/kalem';
   static const pdfLibrary = '/pdf';
+  static const notebooks = '/defter';
+  static String inkNotebook(String id) => '/defter/$id';
   static String pdfReader(String id) => '/pdf/$id';
 
   /// Soru kartından PDF'e: sayfa (0'dan) ve kutu `sol,üst,sağ,alt` (sayfa birimi).

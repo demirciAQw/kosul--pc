@@ -34,6 +34,7 @@ enum DesktopSection {
   changes('Claude\'un değişiklikleri', Icons.auto_fix_high_outlined, Icons.auto_fix_high),
   conflicts('Çakışmalar', Icons.merge_type_outlined, Icons.merge_type),
   pdf('PDF\'ler', Icons.picture_as_pdf_outlined, Icons.picture_as_pdf),
+  notebooks('Defterler', Icons.draw_outlined, Icons.draw),
   settings('Ayarlar', Icons.settings_outlined, Icons.settings);
 
   const DesktopSection(this.label, this.icon, this.selectedIcon);
