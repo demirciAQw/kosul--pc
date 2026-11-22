@@ -194,7 +194,7 @@ void main() {
     await _flush(t);
     expect(await _rows(t, h, pageId), hasLength(2));
     // Boşluğa çiz: seçim kalkar.
-    await _path(t, _loop(Rect.fromLTWH(c.dx + 200, c.dy + 300, 60, 60)));
+    await _path(t, _loop(Rect.fromLTWH(c.dx + 200, c.dy - 300, 60, 60)));
     expect(_editor(t).session.hasSelection, isFalse);
   });
 
@@ -291,7 +291,11 @@ void main() {
       expect((await _rows(t, h, pageId)).single.points.length, greaterThan(5));
 
       // Ayarı kapat.
+      await t.tap(find.byKey(const Key('note-shape')));
+      await t.pumpAndSettle();
       await t.tap(find.byKey(const Key('note-shape-snap')));
+      await t.pumpAndSettle();
+      await t.tapAt(const Offset(2, 2)); // pencereyi kapat
       await t.pumpAndSettle();
       expect(_editor(t).session.shapeSnap, isFalse);
       final pts2 = await wobblyLine(c + const Offset(-120, 80), c + const Offset(120, 80));

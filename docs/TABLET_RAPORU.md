@@ -164,3 +164,10 @@ Sürümler v9.0 → v9.10.3, 8 şema artışı (14 → 19 + question_cards/ink_s
 - WebP önizleme Android'de üretiliyor ama cihazda doğrulanmadı; ML Kit yolu gerçek cihazda denenmedi.
 - Soru türü (Şekilli, Hesap…) kartta ayrı alan değil, OcrRecord'dan türetiliyor.
 - İki cihaz çevrimdışı "Yeniden çöz" derse aynı deneme numarası karışır (veri kaybı yok).
+
+## Tablette ilk deneme sonrası düzeltmeler (v9.11, 22.11.2026)
+Casper PAD H10'da (SDK 36, 1600×2560) deneme sürümü kuruldu ve gerçek kalemle denendi.
+- **Ölçüm:** gerçek kalem Flutter'a `stylus` olarak, basınç 0–1 (çizerken ~0.1–0.55), eğimli, `radiusMajor=0` ve hover olaylarıyla geliyor; çizgi doğru sayfaya yönleniyor. Parmak teması `radiusMajor` 75–143 (iki parmak yakınlaştırma): avuç eşiği 24 doğru ayırıyor. Ahmet'in hissi: gecikme fark edilmiyor.
+- **Ahmet'in eksik listesi ve karşılığı:** sınırlı zum (1–6x) → 0.1–30x, sonsuz kenar boşluğu, çift dokunuşla sığdır, zum göstergesi; yeni defterde şablon (düz/çizgili/kareli/noktalı) ve sayfa boyutu (A4 / ekrana tam / sınırsız-büyük tuval) seçimi; görünür "Yeni sayfa" düğmesi ve sayfa okları; sayfa varsayılan tam genişlik; kalem/fosforlu/silgi için ayrı boyut paneli ve silgi daire imleci; fosforlu için kendi paleti (saydam, multiply, kesik uç); Şekil paneli (otomatik düzelt anahtarı + çizgi, ok, daire, elips, dikdörtgen, üçgen araçları), basılı tutma eşiği 10 px / 600 ms (kalem titremesi için).
+- Sınırsız tuval gerçek sonsuz DEĞİL: 1404 × 14040 sabit büyük sayfa (veri modeli sayfa boyutlu).
+- Açık: boyutlar yalnız oturumda tutuluyor (`toSizes`/`restoreSizes` hazır, ekran bağlamadı); `recognizeShape` tam dikdörtgeni tanımıyor (elle dikdörtgen aracı var); fosforlu uç yönü yatay çizgide kalınlık kadar (metin vurgulamak için); 30x zumda keskinlik tablette bakılmalı.

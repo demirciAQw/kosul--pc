@@ -66,20 +66,8 @@ const penProfiles = <PenKind, PenProfile>{
     opacity: 1,
     cap: PenCap.round,
   ),
-  PenKind.fountain: PenProfile(
-    kind: PenKind.fountain,
-    minFactor: 0.4,
-    maxFactor: 1.6,
-    opacity: 1,
-    cap: PenCap.round,
-  ),
-  PenKind.pencil: PenProfile(
-    kind: PenKind.pencil,
-    minFactor: 0.6,
-    maxFactor: 1.3,
-    opacity: 0.8,
-    cap: PenCap.round,
-  ),
+  PenKind.fountain: PenProfile(kind: PenKind.fountain, minFactor: 0.4, maxFactor: 1.6, opacity: 1, cap: PenCap.round),
+  PenKind.pencil: PenProfile(kind: PenKind.pencil, minFactor: 0.6, maxFactor: 1.3, opacity: 0.8, cap: PenCap.round),
   PenKind.highlighter: PenProfile(
     kind: PenKind.highlighter,
     minFactor: 1,
@@ -107,16 +95,36 @@ const penPalette = <int>[
 
 /// Fosforlu için sade renkler.
 const highlighterPalette = <int>[
-  0xFFFFEB3B,
-  0xFF8BC34A,
-  0xFF40C4FF,
-  0xFFFF80AB,
-  0xFFFFAB40,
+  0xFFFFEB3B, // sarı
+  0xFF8BC34A, // yeşil
+  0xFFFF80AB, // pembe
+  0xFFFFAB40, // turuncu
+  0xFF40C4FF, // mavi
 ];
+
+/// Fosforlunun varsayılan kalınlığı (bant yüksekliği, mantıksal piksel).
+const highlighterDefaultWidth = 18.0;
+
+/// Fosforlu uç: dar kenar / geniş kenar oranı (kesik uç; yatay çekince bant [width] yüksekliğinde).
+const highlighterTipRatio = 0.35;
+
+/// Silgi yarıçapı sınırları ve hazır boyutları (görünüm pikseli).
+const eraserRadiusMin = 8.0;
+const eraserRadiusMax = 60.0;
+const eraserRadiusDefault = 16.0;
+const eraserRadiusLevels = <double>[8, 16, 28, 44];
+
+/// Silgi yarıçapını sınırlar; sonlu olmayan değer varsayılana döner.
+double clampEraserRadius(double r) =>
+    r.isFinite ? r.clamp(eraserRadiusMin, eraserRadiusMax).toDouble() : eraserRadiusDefault;
 
 /// Kalınlık seviyeleri (mantıksal piksel).
 const penWidthLevels = <double>[1, 2, 3, 5, 8];
-const highlighterWidthLevels = <double>[10, 16, 24];
+const highlighterWidthLevels = <double>[12, 18, 26, 36];
+const penWidthMin = 1.0;
+const penWidthMax = 12.0;
+const highlighterWidthMin = 8.0;
+const highlighterWidthMax = 40.0;
 
 /// En yakın kalınlık seviyesinin sırası.
 int nearestWidthLevel(double width, List<double> levels) {

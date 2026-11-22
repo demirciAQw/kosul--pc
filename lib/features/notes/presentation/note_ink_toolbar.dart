@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../app/tablet.dart';
 import '../../ink/domain/pen_profiles.dart';
+import '../../ink/domain/shape_recognizer.dart';
 import '../../pdf/presentation/pdf_ink_session.dart';
 import '../domain/page_template.dart';
 import 'note_tool_settings.dart';
@@ -26,21 +27,28 @@ class NoteInkToolbar extends StatelessWidget {
   final ValueChanged<PageTemplate> onTemplate;
   final ValueChanged<PageTemplate> onTemplateAll;
 
+  /// Seçili aracın görünen adı.
+  static String _toolName(NoteToolSettings t) {
+    if (t.lasso) return 'Kement';
+    if (t.eraser) return 'Silgi';
+    if (t.shapeTool != null) return shapeToolLabel(t.shapeTool!);
+    return _kindIcons[t.kind]!.$2;
+  }
+
   static const _kindIcons = {
     PenKind.ballpoint: (Icons.edit_outlined, 'Tükenmez'),
-    PenKind.fountain: (Icons.brush_outlined, 'Dolma kalem'),
-    PenKind.pencil: (Icons.create_outlined, 'Kurşun kalem'),
+    PenKind.fountain: (Icons.brush_outlined, 'Dolma'),
+    PenKind.pencil: (Icons.create_outlined, 'Kurşun'),
     PenKind.highlighter: (Icons.border_color_outlined, 'Fosforlu'),
   };
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
     return ListenableBuilder(
       listenable: tools,
       builder: (context, _) {
         final t = tools;
-        // Dar tablette (dikey) şekil düzeltme ve sertlik "…" menüsüne iner;
+        // Dar tablette (dikey) sertlik "…" menüsüne iner;
         // telefonda ve geniş tablette olduğu gibi.
         final compact = isTabletContext(context) && MediaQuery.sizeOf(context).width < kToolbarCompactWidth;
         return Row(
@@ -73,17 +81,16 @@ class NoteInkToolbar extends StatelessWidget {
                       icon: const Icon(Icons.gesture),
                       onPressed: () => t.setLasso(true),
                     ),
-                    if (!compact)
-                    Tooltip(
-                      message: 'Şekil düzelt: çizgiyi çizip kalemi bekletince',
-                      child: FilterChip(
-                        key: const Key('note-shape-snap'),
-                        avatar: const Icon(Icons.category_outlined, size: 18),
-                        label: const Text('Şekil'),
-                        selected: t.shapeSnap,
-                        onSelected: t.setShapeSnap,
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      child: Text(
+                        _toolName(t),
+                        key: const Key('note-tool-name'),
+                        style: Theme.of(context).textTheme.labelLarge,
                       ),
                     ),
+                    _ShapeButton(tools: t),
+                    if (!t.lasso) _SizeButton(tools: t),
                     const SizedBox(width: 8),
                     if (t.lasso) ...[
                       if (session != null)
@@ -147,24 +154,6 @@ class NoteInkToolbar extends StatelessWidget {
                             ),
                           ),
                         ),
-                      const SizedBox(width: 8),
-                      for (final w in t.widthLevels)
-                        InkWell(
-                          key: Key('note-width-${w.toInt()}'),
-                          customBorder: const CircleBorder(),
-                          onTap: () => t.setWidth(w),
-                          child: Padding(
-                            padding: const EdgeInsets.all(6),
-                            child: Container(
-                              width: 6 + w.clamp(1, 16),
-                              height: 6 + w.clamp(1, 16),
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: t.width == w ? cs.primary : cs.outline,
-                              ),
-                            ),
-                          ),
-                        ),
                       if (!compact && penProfiles[t.kind]!.pressureSensitive)
                         Tooltip(
                           message: 'Sertlik (baskı eğrisi)',
@@ -210,18 +199,9 @@ class NoteInkToolbar extends StatelessWidget {
                 key: const Key('note-more'),
                 tooltip: 'Diğer araçlar',
                 icon: const Icon(Icons.more_horiz),
-                onSelected: (v) {
-                  if (v == 'shape') t.setShapeSnap(!t.shapeSnap);
-                },
                 itemBuilder: (_) => [
-                  CheckedPopupMenuItem(
-                    key: const Key('note-shape-snap'),
-                    value: 'shape',
-                    checked: t.shapeSnap,
-                    child: const Text('Şekil düzelt'),
-                  ),
-                  if (penProfiles[t.kind]!.pressureSensitive)
-                    _HardnessMenuEntry(tools: t),
+                  if (!t.eraser && !t.lasso && penProfiles[t.kind]!.pressureSensitive) _HardnessMenuEntry(tools: t),
+                  const PopupMenuItem(enabled: false, height: 32, child: Text('Boyut ve şekil: araç çubuğunda')),
                 ],
               ),
             PopupMenuButton<(PageTemplate, bool)>(
@@ -299,4 +279,230 @@ class _HardnessMenuEntryState extends State<_HardnessMenuEntry> {
       ],
     ),
   );
+}
+
+const _shapeIcons = {
+  ShapeTool.line: Icons.horizontal_rule,
+  ShapeTool.arrow: Icons.arrow_right_alt,
+  ShapeTool.circle: Icons.circle_outlined,
+  ShapeTool.ellipse: Icons.panorama_fish_eye,
+  ShapeTool.rectangle: Icons.crop_square,
+  ShapeTool.triangle: Icons.change_history,
+};
+
+/// "Şekil" düğmesi: otomatik düzeltme anahtarı ve doğrudan şekil araçları penceresi.
+class _ShapeButton extends StatelessWidget {
+  const _ShapeButton({required this.tools});
+  final NoteToolSettings tools;
+
+  @override
+  Widget build(BuildContext context) {
+    final active = tools.shapeTool != null;
+    return PopupMenuButton<void>(
+      key: const Key('note-shape'),
+      tooltip: 'Şekil: çiz ve düzelt',
+      itemBuilder: (_) => [_ShapePanelEntry(tools: tools)],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(active ? _shapeIcons[tools.shapeTool] : Icons.category_outlined, size: 20),
+            const SizedBox(width: 4),
+            Text('Şekil', style: TextStyle(fontWeight: active || tools.shapeSnap ? FontWeight.bold : null)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ShapePanelEntry extends PopupMenuEntry<void> {
+  const _ShapePanelEntry({required this.tools});
+  final NoteToolSettings tools;
+
+  @override
+  double get height => 200;
+
+  @override
+  bool represents(void value) => false;
+
+  @override
+  State<_ShapePanelEntry> createState() => _ShapePanelEntryState();
+}
+
+class _ShapePanelEntryState extends State<_ShapePanelEntry> {
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: widget.tools,
+    builder: (context, _) {
+      final t = widget.tools;
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SwitchListTile(
+              key: const Key('note-shape-snap'),
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Çizip basılı tut: otomatik düzelt'),
+              value: t.shapeSnap,
+              onChanged: t.setShapeSnap,
+            ),
+            const Text('Şekil çiz (sürükle, bırakınca düzgün olur)'),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 4,
+              runSpacing: 4,
+              children: [
+                for (final s in ShapeTool.values)
+                  ChoiceChip(
+                    key: Key('note-shape-${s.name}'),
+                    avatar: Icon(_shapeIcons[s], size: 18),
+                    label: Text(shapeToolLabel(s)),
+                    selected: t.shapeTool == s,
+                    onSelected: (_) {
+                      t.setShapeTool(s);
+                      Navigator.pop(context);
+                    },
+                  ),
+              ],
+            ),
+          ],
+        ),
+      );
+    },
+  );
+}
+
+/// "Boyut" düğmesi: kalem seçiliyken kalınlık, silgi seçiliyken silgi yarıçapı.
+class _SizeButton extends StatelessWidget {
+  const _SizeButton({required this.tools});
+  final NoteToolSettings tools;
+
+  @override
+  Widget build(BuildContext context) => PopupMenuButton<void>(
+    key: const Key('note-size'),
+    tooltip: tools.eraser ? 'Silgi boyutu' : 'Kalem boyutu',
+    itemBuilder: (_) => [_SizePanelEntry(tools: tools)],
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.line_weight, size: 20),
+          const SizedBox(width: 4),
+          Text('Boyut ${tools.size.round()}'),
+        ],
+      ),
+    ),
+  );
+}
+
+class _SizePanelEntry extends PopupMenuEntry<void> {
+  const _SizePanelEntry({required this.tools});
+  final NoteToolSettings tools;
+
+  @override
+  double get height => 190;
+
+  @override
+  bool represents(void value) => false;
+
+  @override
+  State<_SizePanelEntry> createState() => _SizePanelEntryState();
+}
+
+class _SizePanelEntryState extends State<_SizePanelEntry> {
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: widget.tools,
+    builder: (context, _) {
+      final t = widget.tools;
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              height: 64,
+              width: 200,
+              child: CustomPaint(
+                key: const Key('note-size-preview'),
+                painter: _SizePreviewPainter(
+                  eraser: t.eraser,
+                  size: t.size,
+                  color: Color(t.eraser ? 0xFF455A64 : t.color),
+                  highlighter: !t.eraser && t.kind == PenKind.highlighter,
+                ),
+              ),
+            ),
+            Row(
+              children: [
+                Text(t.eraser ? 'Yarıçap' : 'Kalınlık'),
+                Expanded(
+                  child: Slider(
+                    key: const Key('note-size-slider'),
+                    min: t.sizeMin,
+                    max: t.sizeMax,
+                    value: t.size.clamp(t.sizeMin, t.sizeMax),
+                    onChanged: t.setSize,
+                  ),
+                ),
+              ],
+            ),
+            Wrap(
+              spacing: 4,
+              children: [
+                for (final v in t.sizeLevels)
+                  ChoiceChip(
+                    key: Key('note-size-chip-${v.toInt()}'),
+                    label: Text('${v.toInt()}'),
+                    selected: (t.size - v).abs() < 0.5,
+                    onSelected: (_) => t.setSize(v),
+                  ),
+              ],
+            ),
+          ],
+        ),
+      );
+    },
+  );
+}
+
+/// Canlı önizleme: silgide yarıçap dairesi, kalemde örnek çizgi (fosforluda saydam bant).
+class _SizePreviewPainter extends CustomPainter {
+  _SizePreviewPainter({required this.eraser, required this.size, required this.color, required this.highlighter});
+  final bool eraser;
+  final double size;
+  final Color color;
+  final bool highlighter;
+
+  @override
+  void paint(Canvas canvas, Size box) {
+    final c = box.center(Offset.zero);
+    if (eraser) {
+      canvas.drawCircle(c, size, Paint()..color = const Color(0x22000000));
+      canvas.drawCircle(
+        c,
+        size,
+        Paint()
+          ..color = color
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.5,
+      );
+      return;
+    }
+    final paint = Paint()
+      ..color = highlighter ? color.withValues(alpha: 0.35) : color
+      ..strokeWidth = size
+      ..strokeCap = highlighter ? StrokeCap.butt : StrokeCap.round;
+    canvas.drawLine(Offset(12, c.dy), Offset(box.width - 12, c.dy), paint);
+  }
+
+  @override
+  bool shouldRepaint(_SizePreviewPainter old) =>
+      old.eraser != eraser || old.size != size || old.color != color || old.highlighter != highlighter;
 }

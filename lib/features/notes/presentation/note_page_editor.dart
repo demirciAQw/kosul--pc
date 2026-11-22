@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -30,6 +31,10 @@ class NotePageEditor extends ConsumerStatefulWidget {
     required this.onTemplateAll,
     this.stylusOnlyOverride,
   });
+
+  /// Zum aralığı (1 = sayfa genişliğe sığmış): 0.1 sayfayı küçük görmek, 30 ayrıntı için.
+  static const minZoom = 0.1;
+  static const maxZoom = 30.0;
 
   final ValueChanged<PageTemplate> onTemplate;
   final ValueChanged<PageTemplate> onTemplateAll;
@@ -71,7 +76,11 @@ class NotePageEditorState extends ConsumerState<NotePageEditor> {
         ..showSnackBar(SnackBar(content: Text(m)));
     });
     // Uygulama arka plana giderken bekleyen kayıtları bitir.
-    _lifecycle = AppLifecycleListener(onInactive: flush, onHide: flush, onPause: flush);
+    _lifecycle = AppLifecycleListener(
+      onInactive: flush,
+      onHide: flush,
+      onPause: flush,
+    );
   }
 
   void _applyTools() => widget.tools.apply(session);
@@ -100,63 +109,138 @@ class NotePageEditorState extends ConsumerState<NotePageEditor> {
     super.dispose();
   }
 
+  /// Önceki zum (çift dokunuşla "sığdır"dan geri dönmek için).
+  Matrix4? _zoomBack;
+
+  /// Sayfa genişliğe sığdırılmış mı (zum 1, kaydırma 0).
+  bool get _isFit => _transform.value.isIdentity();
+
+  /// Sayfayı genişliğe sığdırır (zum 1, üstte). Önceki zum geri dönmek için saklanır.
+  void fitToWidth() {
+    if (!_isFit) _zoomBack = _transform.value.clone();
+    _transform.value = Matrix4.identity();
+  }
+
+  /// Çift dokunuş: sığdırılmamışsa sığdır; sığdırılmışsa önceki zuma dön.
+  void toggleFit() {
+    if (_isFit) {
+      final back = _zoomBack;
+      if (back != null) _transform.value = back;
+    } else {
+      fitToWidth();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final page = widget.page;
     final cs = Theme.of(context).colorScheme;
     final viewer = ColoredBox(
       color: cs.surfaceContainerHighest,
-      child: PdfInkInput(
-        session: session,
-        stylusOnlyOverride: widget.stylusOnlyOverride,
-        // Kalem çizerken / sayfa üstünde havadayken görünüm kaymaz ve yakınlaşmaz
-        // (avuç kalemden önce değse bile).
-        child: ValueListenableBuilder<bool>(
-          valueListenable: session.viewerLocked,
-          builder: (context, locked, _) => InteractiveViewer(
-            transformationController: _transform,
-            panEnabled: !locked,
-            scaleEnabled: !locked,
-            minScale: 1,
-            maxScale: 6,
-            child: Center(
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: AspectRatio(
-                  aspectRatio: page.width / page.height,
-                  child: DecoratedBox(
-                    decoration: const BoxDecoration(
-                      boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 6, offset: Offset(0, 2))],
-                    ),
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        RepaintBoundary(
-                          child: CustomPaint(
-                            key: const Key('note-page-paper'),
-                            painter: PageTemplatePainter(
-                              template: page.template,
-                              background: page.background,
-                              pageWidth: page.width,
-                              pageHeight: page.height,
-                            ),
+      child: LayoutBuilder(
+        builder: (context, box) {
+          // Sayfa genişliğe TAM oturur (kenar boşluğu yok); yükseklik sayfa oranından.
+          // Kaydırma/zum matrisi ekran içindir, çizgi koordinatı (not koordinatı) etkilenmez.
+          final w = box.maxWidth.isFinite ? box.maxWidth : page.width;
+          final h = w * page.height / page.width;
+          return Stack(
+            children: [
+              GestureDetector(
+                // Kalemin çift dokunuşu sığdırmasın: yalnız parmak/fare.
+                supportedDevices: const {
+                  PointerDeviceKind.touch,
+                  PointerDeviceKind.mouse,
+                },
+                onDoubleTap: toggleFit,
+                child: PdfInkInput(
+                  session: session,
+                  stylusOnlyOverride: widget.stylusOnlyOverride,
+                  // Kalem çizerken / sayfa üstünde havadayken görünüm kaymaz ve yakınlaşmaz
+                  // (avuç kalemden önce değse bile).
+                  child: ValueListenableBuilder<bool>(
+                    valueListenable: session.viewerLocked,
+                    builder: (context, locked, _) => InteractiveViewer(
+                      transformationController: _transform,
+                      panEnabled: !locked,
+                      scaleEnabled: !locked,
+                      constrained: false,
+                      // Sayfa kenarda takılmaz; kaybolursa "sığdır" geri getirir.
+                      boundaryMargin: const EdgeInsets.all(double.infinity),
+                      minScale: NotePageEditor.minZoom,
+                      maxScale: NotePageEditor.maxZoom,
+                      child: SizedBox(
+                        width: w,
+                        height: h,
+                        child: DecoratedBox(
+                          decoration: const BoxDecoration(
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black26,
+                                blurRadius: 6,
+                                offset: Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              RepaintBoundary(
+                                child: CustomPaint(
+                                  key: const Key('note-page-paper'),
+                                  painter: PageTemplatePainter(
+                                    template: page.template,
+                                    background: page.background,
+                                    pageWidth: page.width,
+                                    pageHeight: page.height,
+                                  ),
+                                ),
+                              ),
+                              PdfPageInkLayer(
+                                key: const Key('note-page-ink'),
+                                session: session,
+                                page: 0,
+                                pageWidth: page.width,
+                                pageHeight: page.height,
+                              ),
+                            ],
                           ),
                         ),
-                        PdfPageInkLayer(
-                          key: const Key('note-page-ink'),
-                          session: session,
-                          page: 0,
-                          pageWidth: page.width,
-                          pageHeight: page.height,
-                        ),
-                      ],
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-          ),
-        ),
+              Positioned(
+                right: 8,
+                bottom: 8,
+                child: Material(
+                  color: cs.surface.withValues(alpha: 0.9),
+                  elevation: 2,
+                  borderRadius: BorderRadius.circular(20),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const SizedBox(width: 12),
+                      ValueListenableBuilder<Matrix4>(
+                        valueListenable: _transform,
+                        builder: (_, m, _) => Text(
+                          '%${(m.getMaxScaleOnAxis() * 100).round()}',
+                          key: const Key('note-zoom-label'),
+                        ),
+                      ),
+                      IconButton(
+                        key: const Key('note-zoom-fit'),
+                        tooltip: 'Sayfaya sığdır',
+                        icon: const Icon(Icons.fit_screen),
+                        onPressed: fitToWidth,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
     return Column(

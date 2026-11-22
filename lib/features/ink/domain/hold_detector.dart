@@ -10,8 +10,13 @@ import 'dart:math' as math;
 /// Varsayılan basılı tutma süresi (ms).
 const shapeHoldMs = 600;
 
-/// Varsayılan hareketsizlik eşiği (görünüm pikseli).
-const shapeHoldTolerancePx = 6.0;
+/// Varsayılan hareketsizlik eşiği (görünüm pikseli). Gerçek kalem ucu bekleyince
+/// birkaç piksel oynar; 10 px titremeyi hareket saymaz.
+const shapeHoldTolerancePx = 10.0;
+
+/// Çizginin ilk bu kadar ms'sinde hareket zamanlayıcıyı sıfırlamaz (kalem
+/// yere değerken ilk atılım; çapa bu sürede noktayı izler).
+const shapeHoldSettleMs = 150;
 
 class HoldDetector {
   HoldDetector({this.holdMs = shapeHoldMs, this.tolerance = shapeHoldTolerancePx});

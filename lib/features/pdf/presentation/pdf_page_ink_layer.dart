@@ -74,8 +74,22 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
   late HoldDetector _hold = HoldDetector(holdMs: widget.session.holdMs, tolerance: widget.session.holdTolerancePx);
   Timer? _holdTimer;
   final List<InkPoint> _raw = [];
+
+  /// [_raw] içinde çapanın (son gerçek hareket noktasının) sırası: sonrasındaki
+  /// kalem titremesi tanımaya girmez (yol uzunluğunu şişirip çizgiyi bozar).
+  int _anchorIdx = 0;
   final _shape = ValueNotifier<List<InkPoint>?>(null);
   InkBrush? _shapeBrush;
+  Timer? _settleTimer;
+  bool _settling = false;
+
+  // --- doğrudan şekil aracı: sürükle, bırakınca mükemmel şekil ---
+  bool _shapeDrag = false;
+  InkPoint? _shapeP0;
+
+  // --- silgi imleci (hover / değme): görünüm yerel noktası ---
+  final _cursor = ValueNotifier<Offset?>(null);
+  Timer? _cursorTimer;
 
   @override
   void initState() {
@@ -108,6 +122,9 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
     widget.session.removeListener(_syncBrush);
     widget.session.unregisterLayer(this, page: widget.page);
     _holdTimer?.cancel();
+    _settleTimer?.cancel();
+    _cursorTimer?.cancel();
+    _cursor.dispose();
     _sub?.cancel();
     _ctl.dispose();
     _sel.dispose();
@@ -150,10 +167,41 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
     );
   }
 
+  /// Silgi seçiliyken kalem havada ya da değerken yarıçap dairesini gösterir
+  /// (olay kesilince [_cursorTimer] ile söner; hover çıkış olayı yoktur).
+  void _showCursor(Offset local) {
+    final s = widget.session;
+    if (s.brush.tool != InkTool.eraser || s.lassoMode || s.selecting) return;
+    _cursor.value = local;
+    _cursorTimer?.cancel();
+    _cursorTimer = Timer(const Duration(milliseconds: 500), () => _cursor.value = null);
+  }
+
+  /// Kalem havada (PdfInkInput çağırır).
+  void pointerHover(PointerHoverEvent e) {
+    if (_box == null) return;
+    _showCursor(_box!.globalToLocal(e.position));
+  }
+
+  double get _eraseViewRadius => math.max(8.0, widget.session.brush.width * 2);
+
   void pointerDown(PointerDownEvent e) {
     if (_pointer != null || _box == null) return;
     if (widget.session.lassoMode) {
       _lassoDown(e);
+      return;
+    }
+    _showCursor(_box!.globalToLocal(e.position));
+    final tool = widget.session.shapeTool;
+    if (tool != null &&
+        !widget.session.selecting &&
+        widget.session.brush.tool != InkTool.eraser &&
+        e.kind != PointerDeviceKind.invertedStylus) {
+      _pointer = e.pointer;
+      _shapeDrag = true;
+      _shapeP0 = _shapePoint(e);
+      _shapeBrush = widget.session.brush;
+      _last = _shapeP0;
       return;
     }
     _pointer = e.pointer;
@@ -164,11 +212,54 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
       return;
     }
     _last = _point(e);
-    _ctl.beginStroke(
-      _last!,
-      eraser: e.kind == PointerDeviceKind.invertedStylus,
-    );
+    _ctl.beginStroke(_last!, eraser: e.kind == PointerDeviceKind.invertedStylus);
     _holdStart(e.kind == PointerDeviceKind.invertedStylus);
+  }
+
+  // --- doğrudan şekil aracı ---
+
+  /// Şekil noktası: baskı sabit 0.5 (şekil kalınlığı kalemin baskısına bağlı olmasın).
+  InkPoint _shapePoint(PointerEvent e) {
+    final l = _box!.globalToLocal(e.position);
+    return InkPoint(x: l.dx, y: l.dy, tMs: e.timeStamp.inMicroseconds / 1000);
+  }
+
+  List<InkPoint> _stamped(List<InkPoint> pts, double t0, double t1) {
+    final n = pts.length;
+    return [
+      for (var i = 0; i < n; i++)
+        InkPoint(
+          x: pts[i].x,
+          y: pts[i].y,
+          pressure: pts[i].pressure,
+          tilt: pts[i].tilt,
+          tMs: n < 2 ? t0 : t0 + (t1 - t0) * i / (n - 1),
+        ),
+    ];
+  }
+
+  void _shapeMove(PointerEvent e) {
+    final p0 = _shapeP0, tool = widget.session.shapeTool;
+    if (p0 == null || tool == null) return;
+    _last = _shapePoint(e);
+    final pts = buildShape(tool, p0, _last!);
+    _shape.value = pts.isEmpty ? null : _stamped(pts, p0.tMs, _last!.tMs);
+  }
+
+  void _shapeUp(PointerEvent e) {
+    final p0 = _shapeP0, tool = widget.session.shapeTool, b = _shapeBrush, c = _coords;
+    _shapeDrag = false;
+    _shapeP0 = null;
+    if (p0 == null || tool == null || b == null || c == null) {
+      _shape.value = null;
+      return;
+    }
+    final p1 = _shapePoint(e);
+    final pts = buildShape(tool, p0, p1);
+    _shape.value = null;
+    // Dokunuş/titreme şekil sayılmaz.
+    if (pts.isEmpty || (p1.x - p0.x).abs() + (p1.y - p0.y).abs() < 6) return;
+    widget.session.addStroke(widget.page, b, _stamped(pts, p0.tMs, p1.tMs), c);
   }
 
   // --- şekil düzeltme ---
@@ -176,6 +267,9 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
   void _holdStop() {
     _holdTimer?.cancel();
     _holdTimer = null;
+    _settleTimer?.cancel();
+    _settleTimer = null;
+    _settling = false;
   }
 
   void _holdStart(bool inverted) {
@@ -186,8 +280,12 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
     if (!widget.session.shapeSnap || inverted || b == null || b.tool == InkTool.eraser) return;
     _hold = HoldDetector(holdMs: widget.session.holdMs, tolerance: widget.session.holdTolerancePx);
     _raw.add(_last!);
+    _anchorIdx = 0;
     _hold.start(_last!.x, _last!.y, 0);
     _armHold();
+    // Çizginin ilk 150 ms'sinde hareket zamanlayıcıyı sıfırlamaz (çapa noktayı izler).
+    _settling = true;
+    _settleTimer = Timer(const Duration(milliseconds: shapeHoldSettleMs), () => _settling = false);
   }
 
   void _armHold() {
@@ -201,21 +299,10 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
     if (_pointer == null || _shape.value != null || _selDrag) return;
     final brush = _ctl.liveBrush;
     if (brush == null || !widget.session.shapeSnap || _raw.length < 5) return;
-    final r = recognizeShape(_raw);
+    final r = recognizeShape(_raw.sublist(0, _anchorIdx + 1));
     if (r == null) return;
-    final t0 = _raw.first.tMs, t1 = _raw.last.tMs;
-    final n = r.points.length;
     _shapeBrush = brush;
-    _shape.value = [
-      for (var i = 0; i < n; i++)
-        InkPoint(
-          x: r.points[i].x,
-          y: r.points[i].y,
-          pressure: r.points[i].pressure,
-          tilt: r.points[i].tilt,
-          tMs: n < 2 ? t0 : t0 + (t1 - t0) * i / (n - 1),
-        ),
-    ];
+    _shape.value = _stamped(r.points, _raw.first.tMs, _raw.last.tMs);
     _ctl.cancelStroke(); // serbest çizgi önizlemeden kalkar; kaydedilmez
   }
 
@@ -294,12 +381,20 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
       if (s != null) _sel.value = (s.$1, _box!.globalToLocal(e.position));
       return;
     }
+    if (_shapeDrag) {
+      _shapeMove(e);
+      return;
+    }
+    _showCursor(_box!.globalToLocal(e.position));
     _last = _point(e);
     if (_shape.value != null) return; // şekil sabitlendi; kalem kalkana dek bekler
     _ctl.addPoint(_last!);
     if (_holdTimer != null) {
       _raw.add(_last!);
-      if (_hold.onPoint(_last!.x, _last!.y, 0)) _armHold();
+      if (_hold.onPoint(_last!.x, _last!.y, 0)) {
+        _anchorIdx = _raw.length - 1;
+        if (!_settling) _armHold();
+      }
     }
   }
 
@@ -311,6 +406,10 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
       return;
     }
     _holdStop();
+    if (_shapeDrag) {
+      _shapeUp(e);
+      return;
+    }
     final shape = _shape.value;
     if (shape != null) {
       _shape.value = null;
@@ -346,6 +445,11 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
     }
     _holdStop();
     _shape.value = null;
+    if (_shapeDrag) {
+      _shapeDrag = false;
+      _shapeP0 = null;
+      return;
+    }
     if (_selDrag) {
       _selDrag = false;
       _sel.value = null;
@@ -356,8 +460,9 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
 
   // --- silgi ---
 
-  double _eraseRadiusPage(InkBrush b) =>
-      math.max(8.0, b.width * 2) * (_coords?.pageUnitsPerViewPx ?? 1);
+  /// Silgi yarıçapı (sayfa birimi): fırça kalınlığının iki katı (en az 8 görünüm pikseli).
+  /// Defter araç çubuğu `width = yarıçap / 2` verir.
+  double _eraseRadiusPage(InkBrush b) => math.max(8.0, b.width * 2) * (_coords?.pageUnitsPerViewPx ?? 1);
 
   Offset? _lastErase;
 
@@ -439,17 +544,11 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
             children: [
               // Kayıtlı çizgiler: yalnız sayfa çizgileri değişince ya da boyut değişince boyanır.
               RepaintBoundary(
-                child: CustomPaint(
-                  painter: _SavedPainter(_pen, coords),
-                  size: Size.infinite,
-                ),
+                child: CustomPaint(painter: _SavedPainter(_pen, coords), size: Size.infinite),
               ),
               // Süren çizgi: küçük ve ayrı katman.
               RepaintBoundary(
-                child: CustomPaint(
-                  painter: _LivePainter(_ctl),
-                  size: Size.infinite,
-                ),
+                child: CustomPaint(painter: _LivePainter(_ctl), size: Size.infinite),
               ),
               // Şekil düzeltme önizlemesi.
               ValueListenableBuilder<List<InkPoint>?>(
@@ -463,6 +562,12 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
                           size: Size.infinite,
                         ),
                       ),
+              ),
+              // Silgi imleci: yarıçap dairesi.
+              CustomPaint(
+                key: const Key('ink-eraser-cursor'),
+                painter: _CursorPainter(_cursor, () => _eraseViewRadius),
+                size: Size.infinite,
               ),
               // Kement yolu ve seçim çerçevesi (8 tutamak + döndürme).
               CustomPaint(
@@ -487,6 +592,31 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
       ),
     );
   }
+}
+
+class _CursorPainter extends CustomPainter {
+  _CursorPainter(this.pos, this.radius) : super(repaint: pos);
+  final ValueListenable<Offset?> pos;
+  final double Function() radius;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = pos.value;
+    if (c == null) return;
+    final r = radius();
+    canvas.drawCircle(c, r, Paint()..color = const Color(0x22000000));
+    canvas.drawCircle(
+      c,
+      r,
+      Paint()
+        ..color = const Color(0xFF455A64)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_CursorPainter old) => old.pos != pos;
 }
 
 class _ShapePainter extends CustomPainter {

@@ -8,7 +8,11 @@ import '../../anlik/domain/anlik.dart';
 import '../../anlik/domain/tag_tree.dart';
 import '../domain/ink_notebook.dart';
 import '../domain/notebook_filter.dart';
+import '../domain/page_size.dart';
+import '../domain/page_template.dart';
 import '../notes_providers.dart';
+import 'ink_notebook_screen.dart' show PageSizePicker;
+import 'page_template_painter.dart';
 
 /// Defter kapağı renkleri (ARGB).
 const notebookCoverColors = <int>[
@@ -49,19 +53,27 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
   }
 
   Future<void> _create() async {
-    final res = await showDialog<({String title, int color})>(
+    final res = await showDialog<NotebookDialogResult>(
       context: context,
       builder: (_) => const _NotebookDialog(),
     );
     if (res == null || !mounted) return;
     final repo = ref.read(inkNotebookRepositoryProvider);
-    final id = await repo.createNotebook(title: res.title, coverColor: res.color);
+    final media = MediaQuery.sizeOf(context);
+    final dim = pageDimensions(res.size, aspect: screenAspect(media.width, media.height));
+    final id = await repo.createNotebook(
+      title: res.title,
+      coverColor: res.color,
+      defaultTemplate: res.template,
+      pageWidth: dim.width,
+      pageHeight: dim.height,
+    );
     final n = await repo.findNotebook(id);
     if (n != null && mounted) _open(n);
   }
 
   Future<void> _rename(InkNotebookRecord n) async {
-    final res = await showDialog<({String title, int color})>(
+    final res = await showDialog<NotebookDialogResult>(
       context: context,
       builder: (_) => _NotebookDialog(initial: n),
     );
@@ -77,9 +89,14 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Defter silinsin mi?'),
-        content: Text('"${_name(n)}" listeden kalkar. Çizgileri silinmez; Silinenler\'den geri getirebilirsin.'),
+        content: Text(
+          '"${_name(n)}" listeden kalkar. Çizgileri silinmez; Silinenler\'den geri getirebilirsin.',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Vazgeç')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Vazgeç'),
+          ),
           FilledButton(
             key: const Key('notebook-delete-confirm'),
             onPressed: () => Navigator.pop(ctx, true),
@@ -96,7 +113,10 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
       ..showSnackBar(
         SnackBar(
           content: Text('"${_name(n)}" silindi.'),
-          action: SnackBarAction(label: 'Geri al', onPressed: () => repo.restoreNotebook(n.id)),
+          action: SnackBarAction(
+            label: 'Geri al',
+            onPressed: () => repo.restoreNotebook(n.id),
+          ),
         ),
       );
   }
@@ -106,13 +126,20 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
 
   /// [shown] süzülmüş (etiket) liste olabilir; yeni sıra TÜM silinmemiş defterlere yazılır:
   /// süzülmüş defterler kendi yerlerini, süzülmeyenler yerlerini korur.
-  Future<void> _reorder(List<InkNotebookRecord> aliveAll, List<InkNotebookRecord> shown, int from, int to) async {
+  Future<void> _reorder(
+    List<InkNotebookRecord> aliveAll,
+    List<InkNotebookRecord> shown,
+    int from,
+    int to,
+  ) async {
     if (from < 0 || from >= shown.length) return;
     final moved = [for (final n in shown) n.id];
     moved.insert(to.clamp(0, moved.length - 1), moved.removeAt(from));
     final inShown = moved.toSet();
     var k = 0;
-    final ids = [for (final n in aliveAll) inShown.contains(n.id) ? moved[k++] : n.id];
+    final ids = [
+      for (final n in aliveAll) inShown.contains(n.id) ? moved[k++] : n.id,
+    ];
     setState(() => _order = ids);
     try {
       await ref.read(inkNotebookRepositoryProvider).reorderNotebooks(ids);
@@ -132,7 +159,10 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
   }
 
   Widget _subtitle(InkNotebookRecord n, Set<String> tagIds, List<Tag> allTags) {
-    final mine = [for (final t in allTags) if (tagIds.contains(t.id)) t];
+    final mine = [
+      for (final t in allTags)
+        if (tagIds.contains(t.id)) t,
+    ];
     if (mine.isEmpty) return Text('${n.pageCount} sayfa');
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -147,7 +177,10 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
                 key: Key('notebook-chip-${n.id}-${t.id}'),
                 visualDensity: VisualDensity.compact,
                 materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                label: Text(tagPathLabel(allTags, t.id), style: Theme.of(context).textTheme.labelSmall),
+                label: Text(
+                  tagPathLabel(allTags, t.id),
+                  style: Theme.of(context).textTheme.labelSmall,
+                ),
               ),
           ],
         ),
@@ -155,7 +188,8 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
     );
   }
 
-  static String _name(InkNotebookRecord n) => n.title.isEmpty ? 'Adsız defter' : n.title;
+  static String _name(InkNotebookRecord n) =>
+      n.title.isEmpty ? 'Adsız defter' : n.title;
 
   @override
   Widget build(BuildContext context) {
@@ -164,23 +198,41 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => Center(child: Text('Defterler okunamadı: $e')),
       data: (list) {
-        final tagsOf = ref.watch(inkNotebookTagMapProvider).value ?? const <String, Set<String>>{};
+        final tagsOf =
+            ref.watch(inkNotebookTagMapProvider).value ??
+            const <String, Set<String>>{};
         final allTags = ref.watch(tagsProvider).value ?? const <Tag>[];
-        var aliveAll = [for (final n in list) if (!n.deleted) n];
+        var aliveAll = [
+          for (final n in list)
+            if (!n.deleted) n,
+        ];
         final order = _order;
         if (order != null) {
           final byId = {for (final n in aliveAll) n.id: n};
-          final sameSet = order.length == aliveAll.length && order.every(byId.containsKey);
-          if (!sameSet || [for (final n in aliveAll) n.id].join('|') == order.join('|')) {
+          final sameSet =
+              order.length == aliveAll.length && order.every(byId.containsKey);
+          if (!sameSet ||
+              [for (final n in aliveAll) n.id].join('|') == order.join('|')) {
             _order = null;
           } else {
             aliveAll = [for (final id in order) byId[id]!];
           }
         }
-        final usedTagIds = {for (final n in aliveAll) ...(tagsOf[n.id] ?? const <String>{})};
-        final filtering = _tagFilter != null && allTags.any((t) => t.id == _tagFilter);
-        final alive = filterNotebooksByTag(aliveAll, tagsOf, allTags, filtering ? _tagFilter : null);
-        final deleted = [for (final n in list) if (n.deleted) n];
+        final usedTagIds = {
+          for (final n in aliveAll) ...(tagsOf[n.id] ?? const <String>{}),
+        };
+        final filtering =
+            _tagFilter != null && allTags.any((t) => t.id == _tagFilter);
+        final alive = filterNotebooksByTag(
+          aliveAll,
+          tagsOf,
+          allTags,
+          filtering ? _tagFilter : null,
+        );
+        final deleted = [
+          for (final n in list)
+            if (n.deleted) n,
+        ];
         return ListView(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 88),
           children: [
@@ -202,13 +254,16 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
                   spacing: 8,
                   runSpacing: 4,
                   children: [
-                    for (final t in allTags.where((t) => usedTagIds.contains(t.id)))
+                    for (final t in allTags.where(
+                      (t) => usedTagIds.contains(t.id),
+                    ))
                       FilterChip(
                         key: Key('notebook-filter-${t.id}'),
                         avatar: const Icon(Icons.sell_outlined, size: 16),
                         label: Text(tagPathLabel(allTags, t.id)),
                         selected: _tagFilter == t.id,
-                        onSelected: (on) => setState(() => _tagFilter = on ? t.id : null),
+                        onSelected: (on) =>
+                            setState(() => _tagFilter = on ? t.id : null),
                       ),
                   ],
                 ),
@@ -217,7 +272,11 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
               Padding(
                 padding: const EdgeInsets.all(32),
                 child: Center(
-                  child: Text(filtering ? 'Bu etikette defter yok.' : 'Henüz defter yok. "Yeni defter" ile başla.'),
+                  child: Text(
+                    filtering
+                        ? 'Bu etikette defter yok.'
+                        : 'Henüz defter yok. "Yeni defter" ile başla.',
+                  ),
                 ),
               ),
             ReorderableListView.builder(
@@ -254,7 +313,10 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
                         ),
                         ReorderableDragStartListener(
                           index: i,
-                          child: const Padding(padding: EdgeInsets.all(8), child: Icon(Icons.drag_handle)),
+                          child: const Padding(
+                            padding: EdgeInsets.all(8),
+                            child: Icon(Icons.drag_handle),
+                          ),
                         ),
                       ],
                     ),
@@ -265,9 +327,13 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
             if (_showDeleted) ...[
               Padding(
                 padding: const EdgeInsets.fromLTRB(4, 16, 4, 4),
-                child: Text('Silinenler', style: Theme.of(context).textTheme.titleSmall),
+                child: Text(
+                  'Silinenler',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
               ),
-              if (deleted.isEmpty) const ListTile(title: Text('Silinen defter yok.')),
+              if (deleted.isEmpty)
+                const ListTile(title: Text('Silinen defter yok.')),
               for (final n in deleted)
                 Card(
                   key: ValueKey('del-${n.id}'),
@@ -277,7 +343,9 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
                     subtitle: Text('${n.pageCount} sayfa'),
                     trailing: TextButton(
                       key: Key('notebook-restore-${n.id}'),
-                      onPressed: () => ref.read(inkNotebookRepositoryProvider).restoreNotebook(n.id),
+                      onPressed: () => ref
+                          .read(inkNotebookRepositoryProvider)
+                          .restoreNotebook(n.id),
                       child: const Text('Geri getir'),
                     ),
                   ),
@@ -295,7 +363,12 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
       onPressed: () => setState(() => _showDeleted = !_showDeleted),
     );
     if (widget.embedded) {
-      return Stack(children: [body, Positioned(right: 8, top: 0, child: deletedToggle)]);
+      return Stack(
+        children: [
+          body,
+          Positioned(right: 8, top: 0, child: deletedToggle),
+        ],
+      );
     }
     return Scaffold(
       appBar: AppBar(title: const Text('Defterler'), actions: [deletedToggle]),
@@ -318,10 +391,15 @@ class _Cover extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     width: 36,
     height: 48,
-    decoration: BoxDecoration(color: Color(color), borderRadius: BorderRadius.circular(4)),
+    decoration: BoxDecoration(
+      color: Color(color),
+      borderRadius: BorderRadius.circular(4),
+    ),
     child: const Icon(Icons.menu_book, color: Colors.white70, size: 20),
   );
 }
+
+typedef NotebookDialogResult = ({String title, int color, PageTemplate template, PageSizeKind size});
 
 /// Yeni defter / yeniden adlandırma: başlık ve kapak rengi.
 class _NotebookDialog extends StatefulWidget {
@@ -335,6 +413,8 @@ class _NotebookDialog extends StatefulWidget {
 class _NotebookDialogState extends State<_NotebookDialog> {
   late final _title = TextEditingController(text: widget.initial?.title ?? '');
   late int _color = widget.initial?.coverColor ?? notebookCoverColors.first;
+  late PageTemplate _template = widget.initial?.defaultTemplate ?? PageTemplate.ruled;
+  PageSizeKind _size = PageSizeKind.a4;
 
   @override
   void dispose() {
@@ -342,46 +422,72 @@ class _NotebookDialogState extends State<_NotebookDialog> {
     super.dispose();
   }
 
+  NotebookDialogResult get _result =>
+      (title: _title.text.trim(), color: _color, template: _template, size: _size);
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text(widget.initial == null ? 'Yeni defter' : 'Defteri düzenle'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          TextField(
-            key: const Key('notebook-title-field'),
-            controller: _title,
-            autofocus: true,
-            textCapitalization: TextCapitalization.sentences,
-            decoration: const InputDecoration(labelText: 'Defter adı'),
-            onSubmitted: (_) => Navigator.pop(context, (title: _title.text.trim(), color: _color)),
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            children: [
-              for (final c in notebookCoverColors)
-                InkWell(
-                  key: Key('notebook-color-${c.toRadixString(16)}'),
-                  customBorder: const CircleBorder(),
-                  onTap: () => setState(() => _color = c),
-                  child: CircleAvatar(
-                    radius: 14,
-                    backgroundColor: Color(c),
-                    child: _color == c ? const Icon(Icons.check, size: 16, color: Colors.white) : null,
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              key: const Key('notebook-title-field'),
+              controller: _title,
+              autofocus: true,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(labelText: 'Defter adı'),
+              onSubmitted: (_) => Navigator.pop(context, _result),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              children: [
+                for (final c in notebookCoverColors)
+                  InkWell(
+                    key: Key('notebook-color-${c.toRadixString(16)}'),
+                    customBorder: const CircleBorder(),
+                    onTap: () => setState(() => _color = c),
+                    child: CircleAvatar(
+                      radius: 14,
+                      backgroundColor: Color(c),
+                      child: _color == c ? const Icon(Icons.check, size: 16, color: Colors.white) : null,
+                    ),
                   ),
-                ),
+              ],
+            ),
+            if (widget.initial == null) ...[
+              const SizedBox(height: 16),
+              const Text('Sayfa şablonu'),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 8,
+                children: [
+                  for (final t in PageTemplate.values)
+                    ChoiceChip(
+                      key: Key('notebook-template-${t.key}'),
+                      avatar: Icon(templateIcon(t), size: 18),
+                      label: Text(templateLabel(t)),
+                      selected: _template == t,
+                      onSelected: (_) => setState(() => _template = t),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              const Text('Sayfa boyutu'),
+              PageSizePicker(kind: _size, onChanged: (k) => setState(() => _size = k)),
             ],
-          ),
-        ],
+          ],
+        ),
       ),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('Vazgeç')),
         FilledButton(
           key: const Key('notebook-dialog-ok'),
-          onPressed: () => Navigator.pop(context, (title: _title.text.trim(), color: _color)),
+          onPressed: () => Navigator.pop(context, _result),
           child: const Text('Tamam'),
         ),
       ],

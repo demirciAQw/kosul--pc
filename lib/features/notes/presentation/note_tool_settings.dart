@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../../ink/domain/ink_models.dart';
 import '../../ink/domain/ink_object.dart';
 import '../../ink/domain/pen_profiles.dart';
+import '../../ink/domain/shape_recognizer.dart' show ShapeTool;
 import '../../pdf/presentation/pdf_ink_session.dart';
 
 /// Defter araç durumu (kalem türü, renk, kalınlık, sertlik, silgi). Sayfa değişince
@@ -27,8 +28,10 @@ class NoteToolSettings extends ChangeNotifier {
     PenKind.ballpoint: 3,
     PenKind.fountain: 3,
     PenKind.pencil: 3,
-    PenKind.highlighter: 16,
+    PenKind.highlighter: highlighterDefaultWidth,
   };
+  double _eraserRadius = eraserRadiusDefault;
+  ShapeTool? _shapeTool;
 
   PenKind get kind => _kind;
   bool get eraser => _eraser;
@@ -43,25 +46,86 @@ class NoteToolSettings extends ChangeNotifier {
   List<int> get palette => _kind == PenKind.highlighter ? highlighterPalette : penPalette;
   List<double> get widthLevels => _kind == PenKind.highlighter ? highlighterWidthLevels : penWidthLevels;
 
-  /// Silgi kalınlığı (görünüm pikseli; silgi yarıçapı bunun iki katı, en az 8).
-  static const eraserWidth = 8.0;
+  /// Silgi yarıçapı (görünüm pikseli; [eraserRadiusMin]..[eraserRadiusMax]).
+  double get eraserRadius => _eraserRadius;
+
+  /// Seçili doğrudan şekil aracı (null: yok). Kalem seçiliyken çalışır.
+  ShapeTool? get shapeTool => _shapeTool;
+
+  /// Fırça kalınlığı olarak silgi: oturum yarıçapı `max(8, kalınlık * 2)` hesaplar.
+  static double eraserBrushWidth(double radius) => clampEraserRadius(radius) / 2;
+
+  /// Geçerli aracın boyutu: silgide yarıçap, kalemde kalınlık.
+  double get size => _eraser ? _eraserRadius : width;
+  double get sizeMin => _eraser ? eraserRadiusMin : (_kind == PenKind.highlighter ? highlighterWidthMin : penWidthMin);
+  double get sizeMax => _eraser ? eraserRadiusMax : (_kind == PenKind.highlighter ? highlighterWidthMax : penWidthMax);
+  List<double> get sizeLevels => _eraser ? eraserRadiusLevels : widthLevels;
+
+  /// Geçerli aracın boyutunu sınırlar içinde ayarlar.
+  void setSize(double v) {
+    if (!v.isFinite) return;
+    final c = v.clamp(sizeMin, sizeMax).toDouble();
+    if (_eraser) {
+      _eraserRadius = c;
+    } else {
+      _width[_kind] = c;
+    }
+    notifyListeners();
+  }
+
+  /// Araç boyutlarını kalıcı saklamak için (ayarlar katmanı yazar/okur).
+  Map<String, double> toSizes() => {
+    for (final k in PenKind.values) 'width.${k.name}': _width[k]!,
+    'eraser': _eraserRadius,
+  };
+
+  void restoreSizes(Map<String, Object?> m) {
+    for (final k in PenKind.values) {
+      final v = m['width.${k.name}'];
+      if (v is num && v.isFinite) {
+        final hi = k == PenKind.highlighter ? highlighterWidthMax : penWidthMax;
+        final lo = k == PenKind.highlighter ? highlighterWidthMin : penWidthMin;
+        _width[k] = v.toDouble().clamp(lo, hi).toDouble();
+      }
+    }
+    final e = m['eraser'];
+    if (e is num) _eraserRadius = clampEraserRadius(e.toDouble());
+    notifyListeners();
+  }
+
+  /// Doğrudan şekil aracını seçer (aynı araca yeniden dokunmak kapatır); kalem moduna döner.
+  void setShapeTool(ShapeTool? t) {
+    _shapeTool = _shapeTool == t ? null : t;
+    if (_shapeTool != null) {
+      _eraser = false;
+      _lasso = false;
+    }
+    notifyListeners();
+  }
 
   void setKind(PenKind k) {
     _kind = k;
     _eraser = false;
     _lasso = false;
+    _shapeTool = null;
     notifyListeners();
   }
 
   void setEraser(bool on) {
     _eraser = on;
-    if (on) _lasso = false;
+    if (on) {
+      _lasso = false;
+      _shapeTool = null;
+    }
     notifyListeners();
   }
 
   void setLasso(bool on) {
     _lasso = on;
-    if (on) _eraser = false;
+    if (on) {
+      _eraser = false;
+      _shapeTool = null;
+    }
     notifyListeners();
   }
 
@@ -74,6 +138,7 @@ class NoteToolSettings extends ChangeNotifier {
     _eraseMode = m;
     _eraser = true;
     _lasso = false;
+    _shapeTool = null;
     notifyListeners();
   }
 
@@ -93,7 +158,7 @@ class NoteToolSettings extends ChangeNotifier {
   }
 
   InkBrush get brush => _eraser
-      ? const InkBrush(tool: InkTool.eraser, width: eraserWidth)
+      ? InkBrush(tool: InkTool.eraser, width: eraserBrushWidth(_eraserRadius))
       : InkBrush(
           tool: _kind == PenKind.highlighter ? InkTool.highlighter : InkTool.pen,
           color: color,
@@ -106,6 +171,7 @@ class NoteToolSettings extends ChangeNotifier {
     s.setEraseMode(_eraseMode);
     s.setShapeSnap(_shapeSnap);
     s.setLassoMode(_lasso);
+    s.setShapeTool(_eraser || _lasso ? null : _shapeTool);
     s.setBrush(brush);
   }
 }

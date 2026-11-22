@@ -2,10 +2,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:kocum/features/ink/domain/hold_detector.dart';
 
 void main() {
-  test('varsayılanlar: 600 ms, 6 px', () {
+  test('varsayılanlar: 600 ms, 10 px', () {
     final d = HoldDetector();
     expect(d.holdMs, 600);
-    expect(d.tolerance, 6);
+    expect(d.tolerance, 10);
   });
 
   test('hareketsiz kalınca süre dolunca basılı sayılır (sahte zaman)', () {

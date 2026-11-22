@@ -29,12 +29,7 @@ const double palmRadiusMajor = 24;
 /// [stylusOnly]: telefon/tablette yalnızca kalem çizer; masaüstünde (fare)
 /// fare de çizer. Varsayılan `!isDesktop`.
 class PdfInkInput extends StatefulWidget {
-  const PdfInkInput({
-    super.key,
-    required this.session,
-    required this.child,
-    this.stylusOnlyOverride,
-  });
+  const PdfInkInput({super.key, required this.session, required this.child, this.stylusOnlyOverride});
   final PdfInkSession session;
   final Widget child;
   final bool? stylusOnlyOverride;
@@ -59,21 +54,19 @@ class _PdfInkInputState extends State<PdfInkInput> {
   }
 
   void _hover(PointerHoverEvent e) {
-    if (e.kind != PointerDeviceKind.stylus &&
-        e.kind != PointerDeviceKind.invertedStylus) {
+    if (e.kind != PointerDeviceKind.stylus && e.kind != PointerDeviceKind.invertedStylus) {
       return;
     }
-    widget.session.penHover(
-      overPage: widget.session.layerAt(e.position) != null,
-    );
+    final layer = widget.session.layerAt(e.position);
+    widget.session.penHover(overPage: layer != null);
+    layer?.pointerHover(e);
   }
 
   void _move(PointerMoveEvent e) => _routes[e.pointer]?.pointerMove(e);
 
   void _up(PointerUpEvent e) => _routes.remove(e.pointer)?.pointerUp(e);
 
-  void _cancel(PointerCancelEvent e) =>
-      _routes.remove(e.pointer)?.pointerCancel(e);
+  void _cancel(PointerCancelEvent e) => _routes.remove(e.pointer)?.pointerCancel(e);
 
   @override
   Widget build(BuildContext context) {

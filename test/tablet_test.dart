@@ -231,10 +231,10 @@ void main() {
           find.byKey(const Key('note-more')),
           wide ? findsNothing : findsOneWidget,
         );
-        expect(
-          find.byKey(const Key('note-shape-snap')),
-          wide ? findsOneWidget : findsNothing,
-        );
+        // Şekil ve Boyut her genişlikte görünür; yalnız sertlik "…" menüsüne iner.
+        expect(find.byKey(const Key('note-shape')), findsOneWidget);
+        expect(find.byKey(const Key('note-size')), findsOneWidget);
+        expect(find.byKey(const Key('note-pen-highlighter')), findsOneWidget);
       });
 
       testWidgets('PdfInkToolbar ${size.width.toInt()}', (t) async {
@@ -303,7 +303,7 @@ void main() {
         const Size(412, 915),
       );
       expect(find.byKey(const Key('note-more')), findsNothing);
-      expect(find.byKey(const Key('note-shape-snap')), findsOneWidget);
+      expect(find.byKey(const Key('note-shape')), findsOneWidget);
     });
   });
 
@@ -498,8 +498,12 @@ void main() {
       expect(find.byKey(const Key('note-hardness')), findsOneWidget);
     });
 
-    testWidgets('şekil düzelt işareti değeri değiştirir', (t) async {
+    testWidgets('Şekil penceresindeki anahtar değeri değiştirir', (t) async {
       final tools = await open(t);
+      await t.tapAt(const Offset(1, 1)); // "…" menüsünü kapat
+      await t.pumpAndSettle();
+      await t.tap(find.byKey(const Key('note-shape')));
+      await t.pumpAndSettle();
       final was = tools.shapeSnap;
       await t.tap(find.byKey(const Key('note-shape-snap')));
       await t.pumpAndSettle();

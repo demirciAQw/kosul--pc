@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 
 import '../domain/page_template.dart';
@@ -26,6 +28,20 @@ class PageTemplatePainter extends CustomPainter {
     final paint = Paint()
       ..color = const Color(0xFF90A4AE).withValues(alpha: 0.55)
       ..strokeWidth = (sx * 1.2).clamp(0.5, 3.0);
+    if (template == PageTemplate.dots) {
+      final dots = [
+        for (final y in lines.horizontal)
+          for (final x in lines.vertical) Offset(x * sx, y * sy),
+      ];
+      canvas.drawPoints(
+        ui.PointMode.points,
+        dots,
+        paint
+          ..strokeCap = StrokeCap.round
+          ..strokeWidth = (sx * 4).clamp(1.5, 6.0),
+      );
+      return;
+    }
     for (final y in lines.horizontal) {
       canvas.drawLine(Offset(0, y * sy), Offset(size.width, y * sy), paint);
     }
@@ -47,10 +63,12 @@ String templateLabel(PageTemplate t) => switch (t) {
   PageTemplate.plain => 'Düz',
   PageTemplate.ruled => 'Çizgili',
   PageTemplate.grid => 'Kareli',
+  PageTemplate.dots => 'Noktalı',
 };
 
 IconData templateIcon(PageTemplate t) => switch (t) {
   PageTemplate.plain => Icons.crop_portrait_outlined,
   PageTemplate.ruled => Icons.format_align_justify,
   PageTemplate.grid => Icons.grid_4x4,
+  PageTemplate.dots => Icons.grid_on,
 };

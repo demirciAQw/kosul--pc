@@ -104,8 +104,7 @@ double _meanDistToPolygon(List<_P> pts, List<_P> poly) {
   return sum / pts.length;
 }
 
-InkPoint _ip(double x, double y, double pressure) =>
-    InkPoint(x: x, y: y, pressure: pressure);
+InkPoint _ip(double x, double y, double pressure) => InkPoint(x: x, y: y, pressure: pressure);
 
 /// Titreme (nokta başına gürültü) yol uzunluğunu şişirmesin: 5'li hareketli
 /// ortalama, uçlar sabit.
@@ -147,8 +146,7 @@ ShapeResult? recognizeShape(List<InkPoint> raw) {
     total += _d(_P(points[i - 1].x, points[i - 1].y), _P(points[i].x, points[i].y));
   }
   if (total <= 0) return null;
-  final pressure =
-      points.fold<double>(0, (s, p) => s + p.pressure) / points.length;
+  final pressure = points.fold<double>(0, (s, p) => s + p.pressure) / points.length;
   const n = 64;
   final rs = _resample(points, n, total);
   final gap = _d(rs.first, rs.last);
@@ -156,9 +154,7 @@ ShapeResult? recognizeShape(List<InkPoint> raw) {
 
   ShapeResult? best;
   void consider(ShapeResult? r) {
-    if (r != null &&
-        r.confidence >= shapeMinConfidence &&
-        (best == null || r.confidence > best!.confidence)) {
+    if (r != null && r.confidence >= shapeMinConfidence && (best == null || r.confidence > best!.confidence)) {
       best = r;
     }
   }
@@ -285,8 +281,7 @@ List<_P> _mergeCorners(List<_P> v, double near) {
 }
 
 bool _cross4(_P a, _P b, _P c, _P d) {
-  double cr(_P o, _P p, _P q) =>
-      (p.x - o.x) * (q.y - o.y) - (p.y - o.y) * (q.x - o.x);
+  double cr(_P o, _P p, _P q) => (p.x - o.x) * (q.y - o.y) - (p.y - o.y) * (q.x - o.x);
   final d1 = cr(c, d, a), d2 = cr(c, d, b);
   final d3 = cr(a, b, c), d4 = cr(a, b, d);
   return d1 * d2 < 0 && d3 * d4 < 0;
@@ -318,8 +313,7 @@ ShapeResult? _polygon(List<_P> rs, double total, double pressure) {
     for (var i = 0; i < v.length; i++) {
       final prev = v[(i - 1 + v.length) % v.length];
       final next = v[(i + 1) % v.length];
-      if (_angleAt(prev, v[i], next) > 150 * math.pi / 180 ||
-          _d(prev, v[i]) < 0.06 * total) {
+      if (_angleAt(prev, v[i], next) > 150 * math.pi / 180 || _d(prev, v[i]) < 0.06 * total) {
         v = [...v.sublist(0, i), ...v.sublist(i + 1)];
         changed = true;
         break;
@@ -328,8 +322,7 @@ ShapeResult? _polygon(List<_P> rs, double total, double pressure) {
   }
   if (v.length != 3 && v.length != 4) return null;
   // Kendini kesen dörtgen (sekiz, kelebek) şekil sayılmaz.
-  if (v.length == 4 &&
-      (_cross4(v[0], v[1], v[2], v[3]) || _cross4(v[1], v[2], v[3], v[0]))) {
+  if (v.length == 4 && (_cross4(v[0], v[1], v[2], v[3]) || _cross4(v[1], v[2], v[3], v[0]))) {
     return null;
   }
   final err = _meanDistToPolygon(rs, v) / total;
@@ -380,3 +373,56 @@ ShapeResult? _polygon(List<_P> rs, double total, double pressure) {
   final keys = [for (final p in corners) _ip(p.x, p.y, pressure)];
   return ShapeResult(type, keys, conf, [...keys, keys.first]);
 }
+
+/// Doğrudan çizilen şekil araçları (sürükle, bırakınca mükemmel şekil).
+enum ShapeTool { line, arrow, circle, ellipse, rectangle, triangle }
+
+/// [p0] (basılan nokta) ile [p1] (şimdiki nokta) köşegen olarak verilen şekli üretir.
+/// Çizgi/ok: p0'dan p1'e. Daire: kutunun kısa kenarına sığan daire (kutunun ortasında).
+/// Elips/dikdörtgen: kutu. Üçgen: tepesi kutunun üst ortasında, tabanı alt kenarda.
+/// Kapalı şekillerde ilk nokta = son nokta. Dejenere (aynı nokta) girdide boş liste.
+List<InkPoint> buildShape(ShapeTool type, InkPoint p0, InkPoint p1) {
+  final dx = p1.x - p0.x, dy = p1.y - p0.y;
+  if (!dx.isFinite || !dy.isFinite) return const [];
+  final pr = (p0.pressure + p1.pressure) / 2;
+  InkPoint ip(double x, double y) => InkPoint(x: x, y: y, pressure: pr);
+  final len = math.sqrt(dx * dx + dy * dy);
+  if (len < 1e-6) return const [];
+  final l = math.min(p0.x, p1.x), r = math.max(p0.x, p1.x);
+  final t = math.min(p0.y, p1.y), b = math.max(p0.y, p1.y);
+  final cx = (l + r) / 2, cy = (t + b) / 2;
+  switch (type) {
+    case ShapeTool.line:
+      return [ip(p0.x, p0.y), ip(p1.x, p1.y)];
+    case ShapeTool.arrow:
+      final head = math.min(math.max(14.0, len * 0.2), len * 0.5);
+      final ang = math.atan2(dy, dx);
+      const wing = 0.45; // ~26 derece
+      InkPoint w(double a) => ip(p1.x - head * math.cos(ang + a), p1.y - head * math.sin(ang + a));
+      return [ip(p0.x, p0.y), ip(p1.x, p1.y), w(wing), ip(p1.x, p1.y), w(-wing)];
+    case ShapeTool.circle:
+    case ShapeTool.ellipse:
+      final a = type == ShapeTool.circle ? math.min(r - l, b - t) / 2 : (r - l) / 2;
+      final c = type == ShapeTool.circle ? a : (b - t) / 2;
+      if (a < 1e-6 || c < 1e-6) return const [];
+      const n = 48;
+      return [
+        for (var i = 0; i <= n; i++) ip(cx + a * math.cos(2 * math.pi * i / n), cy + c * math.sin(2 * math.pi * i / n)),
+      ];
+    case ShapeTool.rectangle:
+      if (r - l < 1e-6 || b - t < 1e-6) return const [];
+      return [ip(l, t), ip(r, t), ip(r, b), ip(l, b), ip(l, t)];
+    case ShapeTool.triangle:
+      if (r - l < 1e-6 || b - t < 1e-6) return const [];
+      return [ip(cx, t), ip(r, b), ip(l, b), ip(cx, t)];
+  }
+}
+
+String shapeToolLabel(ShapeTool t) => switch (t) {
+  ShapeTool.line => 'Düz çizgi',
+  ShapeTool.arrow => 'Ok',
+  ShapeTool.circle => 'Daire',
+  ShapeTool.ellipse => 'Elips',
+  ShapeTool.rectangle => 'Dikdörtgen',
+  ShapeTool.triangle => 'Üçgen',
+};
