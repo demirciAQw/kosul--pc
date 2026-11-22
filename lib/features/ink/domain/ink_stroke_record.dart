@@ -3,7 +3,7 @@ library;
 
 import 'stroke_codec.dart';
 
-/// Çizginin sahibi: PDF sayfası ya da not sayfası (ikisinden biri).
+/// Çizginin sahibi: PDF sayfası, not sayfası ya da fotoğraflı soru kartı.
 sealed class StrokeOwner {
   const StrokeOwner();
 }
@@ -18,6 +18,14 @@ class NotePageOwner extends StrokeOwner {
   const NotePageOwner(this.noteId, this.page);
   final String noteId;
   final int page;
+}
+
+/// Fotoğraflı (PDF'siz) soru kartının çözüm çizgisi: `pdfDocumentId`, `pdfPage`,
+/// `noteId` boş; sahibi yalnızca `questionId`. Koordinat: görüntü genişliği 1000
+/// birim olacak biçimde normalleştirilmiş görüntü uzayı (bkz. `photoUnitWidth`).
+class QuestionImageOwner extends StrokeOwner {
+  const QuestionImageOwner(this.questionId);
+  final String questionId;
 }
 
 class InkStroke {

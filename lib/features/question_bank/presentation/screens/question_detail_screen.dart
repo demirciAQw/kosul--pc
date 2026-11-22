@@ -4,10 +4,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../app/routes.dart';
+import '../../../../app/tablet.dart' show isTabletContext;
 import '../../../../core/text/turkish_text.dart';
 import '../../../../core/utils/formatters.dart';
 import '../../../curriculum/curriculum_providers.dart';
 import '../../../curriculum/domain/curriculum.dart';
+import '../../../pdf/domain/solve.dart';
 import '../../../pdf/pdf_providers.dart';
 import '../../../pdf/presentation/solve_time_section.dart';
 import '../../domain/question_card.dart';
@@ -52,6 +54,8 @@ class _QuestionDetailScreenState extends ConsumerState<QuestionDetailScreen> {
 
     Widget meta(String text) => Chip(label: Text(text), visualDensity: VisualDensity.compact);
 
+    final canSolve = solveSpaceOf(hasPdfAnchor: card.hasPdfAnchor, hasImage: card.questionImage != null) !=
+        SolveSpace.none;
     return Scaffold(
       appBar: AppBar(
         title: Text(card.status.label),
@@ -75,11 +79,13 @@ class _QuestionDetailScreenState extends ConsumerState<QuestionDetailScreen> {
               },
               icon: const Icon(Icons.picture_as_pdf_outlined),
             ),
-          if (card.hasPdfAnchor && (ref.watch(pdfAvailableProvider(card.pdfDocumentId!)).value ?? false))
+          // Çiz / Çöz: fotoğraflı ve PDF'li kartlarda. Telefonda da açılır; yalnız kalem çizer
+          // (parmak kaydırır/yakınlaştırır), kalemi olmayan telefonda yalnızca görüntü gezilir.
+          if (canSolve)
             IconButton(
               key: const Key('detail-solve'),
-              tooltip: 'Çöz',
-              onPressed: () => context.push(AppRoutes.pdfSolve(card.pdfDocumentId!, card.id)),
+              tooltip: 'Çiz / Çöz',
+              onPressed: () => context.push(AppRoutes.questionSolve(card.id)),
               icon: const Icon(Icons.draw_outlined),
             ),
           IconButton(
@@ -114,6 +120,19 @@ class _QuestionDetailScreenState extends ConsumerState<QuestionDetailScreen> {
                 onTap: () => context.push(AppRoutes.editQuestion(card.id)),
               ),
             ),
+          if (canSolve && isTabletContext(context))
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: FilledButton.tonalIcon(
+                  key: const Key('detail-solve-big'),
+                  onPressed: () => context.push(AppRoutes.questionSolve(card.id)),
+                  icon: const Icon(Icons.draw_outlined),
+                  label: const Text('Çiz / Çöz'),
+                ),
+              ),
+            ),
           const SizedBox(height: 12),
           Wrap(
             spacing: 8,
@@ -134,7 +153,7 @@ class _QuestionDetailScreenState extends ConsumerState<QuestionDetailScreen> {
           ),
           const SizedBox(height: 12),
           CardTagsSection(cardId: card.id),
-          if (card.hasPdfAnchor) SolveTimeSection(questionId: card.id),
+          SolveTimeSection(questionId: card.id),
           const SizedBox(height: 16),
           if (!card.hasSolution)
             OutlinedButton.icon(

@@ -38,6 +38,10 @@ final pdfImportServiceProvider = FutureProvider<PdfImportService>((ref) async {
 final solveAttemptsProvider = StreamProvider.autoDispose.family<List<SolveAttempt>, String>(
     (ref, questionId) => ref.watch(inkStrokeRepositoryProvider).watchSolveTimes(questionId).map(solveAttempts));
 
+/// Galeri işareti için tüm soruların çözüm özeti (tek sorgu).
+final solveSummariesProvider = StreamProvider<Map<String, SolveSummary>>(
+    (ref) => ref.watch(inkStrokeRepositoryProvider).watchAllSolveTimes().map(solveSummaries));
+
 final inkStrokeRepositoryProvider =
     Provider((ref) => InkStrokeRepository(ref.watch(appDatabaseProvider), clock: ref.watch(clockProvider)));
 

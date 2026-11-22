@@ -43,6 +43,16 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
   bool _showDeleted = false;
   String? _tagFilter;
 
+  /// İyimser silme: silinen defter, akış güncellenmeden önce de listeden kalkar
+  /// (akış "silindi" deyince ya da geri alınınca/hata olunca düşer).
+  final Set<String> _hidden = {};
+
+  Future<void> _restore(String id) async {
+    final repo = ref.read(inkNotebookRepositoryProvider);
+    setState(() => _hidden.remove(id));
+    await repo.restoreNotebook(id);
+  }
+
   void _open(InkNotebookRecord n) {
     final f = widget.onOpen;
     if (f != null) {
@@ -107,7 +117,16 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
     );
     if (ok != true) return;
     final repo = ref.read(inkNotebookRepositoryProvider);
-    await repo.deleteNotebook(n.id);
+    setState(() => _hidden.add(n.id));
+    try {
+      await repo.deleteNotebook(n.id);
+    } catch (_) {
+      if (mounted) setState(() => _hidden.remove(n.id));
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('Defter silinemedi.')));
+      return;
+    }
     messenger
       ..hideCurrentSnackBar()
       ..showSnackBar(
@@ -115,7 +134,7 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
           content: Text('"${_name(n)}" silindi.'),
           action: SnackBarAction(
             label: 'Geri al',
-            onPressed: () => repo.restoreNotebook(n.id),
+            onPressed: () => _restore(n.id),
           ),
         ),
       );
@@ -204,8 +223,10 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
         final allTags = ref.watch(tagsProvider).value ?? const <Tag>[];
         var aliveAll = [
           for (final n in list)
-            if (!n.deleted) n,
+            if (!n.deleted && !_hidden.contains(n.id)) n,
         ];
+        // Akış silmeyi doğruladıysa iyimser gizleme gereksiz.
+        _hidden.removeWhere((id) => list.any((n) => n.id == id && n.deleted));
         final order = _order;
         if (order != null) {
           final byId = {for (final n in aliveAll) n.id: n};
@@ -231,7 +252,7 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
         );
         final deleted = [
           for (final n in list)
-            if (n.deleted) n,
+            if (n.deleted || _hidden.contains(n.id)) n,
         ];
         return ListView(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 88),
@@ -343,9 +364,7 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
                     subtitle: Text('${n.pageCount} sayfa'),
                     trailing: TextButton(
                       key: Key('notebook-restore-${n.id}'),
-                      onPressed: () => ref
-                          .read(inkNotebookRepositoryProvider)
-                          .restoreNotebook(n.id),
+                      onPressed: () => _restore(n.id),
                       child: const Text('Geri getir'),
                     ),
                   ),

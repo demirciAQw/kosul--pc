@@ -13,11 +13,21 @@ import 'package:kocum/core/database/app_database.dart';
 import 'package:kocum/features/ink/data/ink_stroke_repository.dart';
 import 'package:kocum/features/ink/domain/ink_models.dart';
 import 'package:kocum/features/notes/domain/page_template.dart';
-import 'package:kocum/features/notes/presentation/note_ink_toolbar.dart';
+import 'package:kocum/features/notes/presentation/note_tool_dock.dart';
 import 'package:kocum/features/notes/presentation/note_tool_settings.dart';
 import 'package:kocum/features/pdf/presentation/pdf_ink_session.dart';
 import 'package:kocum/features/pdf/presentation/pdf_reader_page.dart';
 import 'package:kocum/features/question_bank/question_bank_providers.dart';
+
+PageStyleControl _styleCtl() => PageStyleControl(
+  template: PageTemplate.values.first,
+  background: 0xFFFFFFFF,
+  spacing: 1,
+  onTemplate: (_) {},
+  onTemplateAll: (_) {},
+  onBackground: (_) {},
+  onSpacing: (_) {},
+);
 
 Widget _page(String t) => Scaffold(
   appBar: AppBar(title: Text(t)),
@@ -196,13 +206,13 @@ void main() {
     });
   });
 
-  group('araç çubuğu tek satır, taşma yok', () {
+  group('araç yuvası ve çubuklar: taşma yok', () {
     for (final size in const [
       Size(1280, 800),
       Size(800, 1280),
       Size(600, 1024),
     ]) {
-      testWidgets('NoteInkToolbar ${size.width.toInt()}', (t) async {
+      testWidgets('NoteToolDock ${size.width.toInt()}', (t) async {
         final tools = NoteToolSettings();
         addTearDown(tools.dispose);
         await _pump(
@@ -211,13 +221,7 @@ void main() {
             home: Scaffold(
               body: Column(
                 children: [
-                  NoteInkToolbar(
-                    tools: tools,
-                    session: null,
-                    template: PageTemplate.values.first,
-                    onTemplate: (_) {},
-                    onTemplateAll: (_) {},
-                  ),
+                  NoteToolDock(tools: tools, session: null, page: _styleCtl()),
                 ],
               ),
             ),
@@ -225,16 +229,14 @@ void main() {
           size,
         );
         expect(t.takeException(), isNull);
-        expect(t.getSize(find.byType(NoteInkToolbar)).height, lessThan(64));
-        final wide = size.width >= kToolbarCompactWidth;
-        expect(
-          find.byKey(const Key('note-more')),
-          wide ? findsNothing : findsOneWidget,
-        );
-        // Şekil ve Boyut her genişlikte görünür; yalnız sertlik "…" menüsüne iner.
-        expect(find.byKey(const Key('note-shape')), findsOneWidget);
-        expect(find.byKey(const Key('note-size')), findsOneWidget);
-        expect(find.byKey(const Key('note-pen-highlighter')), findsOneWidget);
+        // Yuva tek satır, ekrana sığar; araçlar ve yan düğmeler görünür.
+        expect(t.getSize(find.byKey(const Key('note-dock'))).height, lessThan(72));
+        expect(t.getSize(find.byKey(const Key('note-dock'))).width, lessThanOrEqualTo(size.width));
+        for (final k in ['note-pen', 'note-pen-highlighter', 'note-eraser', 'note-lasso', 'note-shape', 'note-undo', 'note-redo', 'note-template', 'note-dock-move']) {
+          expect(find.byKey(Key(k)), findsOneWidget, reason: k);
+        }
+        // Tablette araç düğmeleri en az 48 dp.
+        expect(t.getSize(find.byKey(const Key('note-eraser'))).shortestSide, greaterThanOrEqualTo(48));
       });
 
       testWidgets('PdfInkToolbar ${size.width.toInt()}', (t) async {
@@ -280,29 +282,21 @@ void main() {
       });
     }
 
-    testWidgets('telefonda araç çubuğu eskisi gibi (… menüsü yok)', (t) async {
+    testWidgets('telefonda yuva sığar ve kullanılır (kayar, taşma yok)', (t) async {
       final tools = NoteToolSettings();
       addTearDown(tools.dispose);
       await _pump(
         t,
         MaterialApp(
-          home: Scaffold(
-            body: Column(
-              children: [
-                NoteInkToolbar(
-                  tools: tools,
-                  session: null,
-                  template: PageTemplate.values.first,
-                  onTemplate: (_) {},
-                  onTemplateAll: (_) {},
-                ),
-              ],
-            ),
-          ),
+          home: Scaffold(body: Column(children: [NoteToolDock(tools: tools, session: null, page: _styleCtl())])),
         ),
         const Size(412, 915),
       );
-      expect(find.byKey(const Key('note-more')), findsNothing);
+      expect(t.takeException(), isNull);
+      expect(t.getSize(find.byKey(const Key('note-dock'))).width, lessThanOrEqualTo(412));
+      await t.tap(find.byKey(const Key('note-eraser')));
+      await t.pump();
+      expect(tools.eraser, isTrue);
       expect(find.byKey(const Key('note-shape')), findsOneWidget);
     });
   });
@@ -458,7 +452,7 @@ void main() {
     });
   });
 
-  group('"…" menüsü gerçekten değer değiştirir', () {
+  group('ayar penceresi gerçekten değer değiştirir', () {
     Future<NoteToolSettings> open(WidgetTester t) async {
       final tools = NoteToolSettings();
       addTearDown(tools.dispose);
@@ -466,23 +460,17 @@ void main() {
         t,
         MaterialApp(
           home: Scaffold(
-            body: NoteInkToolbar(
-              tools: tools,
-              session: null,
-              template: PageTemplate.values.first,
-              onTemplate: (_) {},
-              onTemplateAll: (_) {},
-            ),
+            body: NoteToolDock(tools: tools, session: null, page: _styleCtl()),
           ),
         ),
         const Size(800, 1280),
       );
-      await t.tap(find.byKey(const Key('note-more')));
+      await t.tap(find.byKey(const Key('note-pen'))); // seçili kaleme yeniden dokun: ayar penceresi
       await t.pumpAndSettle();
       return tools;
     }
 
-    testWidgets('sertlik sürgüsü etkin, değeri değiştirir, menü açık kalır', (
+    testWidgets('sertlik sürgüsü etkin, değeri değiştirir, pencere açık kalır', (
       t,
     ) async {
       final tools = await open(t);
@@ -500,7 +488,7 @@ void main() {
 
     testWidgets('Şekil penceresindeki anahtar değeri değiştirir', (t) async {
       final tools = await open(t);
-      await t.tapAt(const Offset(1, 1)); // "…" menüsünü kapat
+      await t.tapAt(const Offset(1, 1)); // pencereyi kapat
       await t.pumpAndSettle();
       await t.tap(find.byKey(const Key('note-shape')));
       await t.pumpAndSettle();

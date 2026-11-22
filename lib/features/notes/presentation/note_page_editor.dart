@@ -12,7 +12,8 @@ import '../../pdf/presentation/pdf_ink_session.dart';
 import '../../pdf/presentation/pdf_page_ink_layer.dart';
 import '../domain/ink_notebook.dart';
 import '../domain/page_template.dart';
-import 'note_ink_toolbar.dart';
+import '../../../app/tablet.dart';
+import 'note_tool_dock.dart';
 import 'note_tool_settings.dart';
 import 'page_template_painter.dart';
 
@@ -29,6 +30,9 @@ class NotePageEditor extends ConsumerStatefulWidget {
     required this.tools,
     required this.onTemplate,
     required this.onTemplateAll,
+    required this.onBackground,
+    this.spacing = 1,
+    required this.onSpacing,
     this.stylusOnlyOverride,
   });
 
@@ -38,6 +42,11 @@ class NotePageEditor extends ConsumerStatefulWidget {
 
   final ValueChanged<PageTemplate> onTemplate;
   final ValueChanged<PageTemplate> onTemplateAll;
+  final ValueChanged<int> onBackground;
+
+  /// Çizgi aralığı çarpanı (yalnızca oturumda; sayfa kaydına yazılmaz).
+  final double spacing;
+  final ValueChanged<double> onSpacing;
 
   final InkNotePageRecord page;
   final NoteToolSettings tools;
@@ -68,6 +77,7 @@ class NotePageEditorState extends ConsumerState<NotePageEditor> {
       penKinds: true,
     );
     widget.tools.apply(session);
+    _dockTopSeen = widget.tools.dockAtTop;
     widget.tools.addListener(_applyTools);
     _errorSub = session.errors.listen((m) {
       if (!mounted) return;
@@ -83,7 +93,15 @@ class NotePageEditorState extends ConsumerState<NotePageEditor> {
     );
   }
 
-  void _applyTools() => widget.tools.apply(session);
+  bool _dockTopSeen = false;
+
+  void _applyTools() {
+    widget.tools.apply(session);
+    // Yuva alta/üste geçince yerleşim yenilenir (diğer ayar değişimlerinde gerekmez).
+    if (_dockTopSeen != widget.tools.dockAtTop && mounted) {
+      setState(() => _dockTopSeen = widget.tools.dockAtTop);
+    }
+  }
 
   /// Bekleyen kayıtların bitmesini bekler (sayfa çoğaltma, kapanış).
   Future<void> flush() => session.flush();
@@ -135,6 +153,9 @@ class NotePageEditorState extends ConsumerState<NotePageEditor> {
   Widget build(BuildContext context) {
     final page = widget.page;
     final cs = Theme.of(context).colorScheme;
+    final focus = TabletFocus.maybeOf(context)?.value ?? false;
+    final dockTop = widget.tools.dockAtTop;
+    _dockTopSeen = dockTop;
     final viewer = ColoredBox(
       color: cs.surfaceContainerHighest,
       child: LayoutBuilder(
@@ -192,6 +213,7 @@ class NotePageEditorState extends ConsumerState<NotePageEditor> {
                                     background: page.background,
                                     pageWidth: page.width,
                                     pageHeight: page.height,
+                                    spacingFactor: widget.spacing,
                                   ),
                                 ),
                               ),
@@ -210,9 +232,12 @@ class NotePageEditorState extends ConsumerState<NotePageEditor> {
                   ),
                 ),
               ),
+              // Yuva sayfanın üstünde yüzer (sayfa alanı küçülmez); boş yerlerinde
+              // dokunuşlar sayfaya geçer. Zum göstergesi yuvanın karşı kenarında.
               Positioned(
                 right: 8,
-                bottom: 8,
+                top: dockTop ? null : 8,
+                bottom: dockTop ? 8 : null,
                 child: Material(
                   color: cs.surface.withValues(alpha: 0.9),
                   elevation: 2,
@@ -238,23 +263,33 @@ class NotePageEditorState extends ConsumerState<NotePageEditor> {
                   ),
                 ),
               ),
+              Positioned.fill(
+                child: Align(
+                  alignment: dockTop ? Alignment.topCenter : Alignment.bottomCenter,
+                  child: Padding(
+                    padding: const EdgeInsets.all(10),
+                    child: NoteToolDock(
+                      tools: widget.tools,
+                      session: session,
+                      small: focus,
+                      page: PageStyleControl(
+                        template: page.template,
+                        background: page.background,
+                        spacing: widget.spacing,
+                        onTemplate: widget.onTemplate,
+                        onTemplateAll: widget.onTemplateAll,
+                        onBackground: widget.onBackground,
+                        onSpacing: widget.onSpacing,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             ],
           );
         },
       ),
     );
-    return Column(
-      children: [
-        NoteInkToolbar(
-          tools: widget.tools,
-          session: session,
-          template: page.template,
-          onTemplate: widget.onTemplate,
-          onTemplateAll: widget.onTemplateAll,
-        ),
-        const Divider(height: 1),
-        Expanded(child: viewer),
-      ],
-    );
+    return viewer;
   }
 }

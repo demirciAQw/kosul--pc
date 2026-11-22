@@ -1,13 +1,24 @@
+import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kocum/app/tablet.dart';
+import 'package:kocum/core/database/app_database.dart';
 import 'package:kocum/features/ink/domain/pen_profiles.dart';
 import 'package:kocum/features/ink/domain/shape_recognizer.dart';
+import 'package:kocum/features/notes/data/note_tool_prefs_store.dart';
 import 'package:kocum/features/notes/domain/page_template.dart';
-import 'package:kocum/features/notes/presentation/note_ink_toolbar.dart';
+import 'package:kocum/features/notes/presentation/note_tool_dock.dart';
 import 'package:kocum/features/notes/presentation/note_tool_settings.dart';
+import 'package:kocum/features/pdf/presentation/pdf_ink_session.dart' show EraseMode;
 
-Future<NoteToolSettings> _open(WidgetTester t, Size size) async {
+class _Style {
+  PageTemplate? template;
+  PageTemplate? all;
+  int? background;
+  double? spacing;
+}
+
+Future<NoteToolSettings> _open(WidgetTester t, Size size, {_Style? style, bool small = false}) async {
   debugAndroidOverride = true;
   addTearDown(() => debugAndroidOverride = null);
   t.view.physicalSize = size;
@@ -15,15 +26,26 @@ Future<NoteToolSettings> _open(WidgetTester t, Size size) async {
   addTearDown(t.view.reset);
   final tools = NoteToolSettings();
   addTearDown(tools.dispose);
+  final st = style ?? _Style();
   await t.pumpWidget(
     MaterialApp(
       home: Scaffold(
-        body: NoteInkToolbar(
-          tools: tools,
-          session: null,
-          template: PageTemplate.values.first,
-          onTemplate: (_) {},
-          onTemplateAll: (_) {},
+        body: Align(
+          alignment: Alignment.bottomCenter,
+          child: NoteToolDock(
+            tools: tools,
+            session: null,
+            small: small,
+            page: PageStyleControl(
+              template: PageTemplate.plain,
+              background: 0xFFFFFFFF,
+              spacing: 1,
+              onTemplate: (v) => st.template = v,
+              onTemplateAll: (v) => st.all = v,
+              onBackground: (v) => st.background = v,
+              onSpacing: (v) => st.spacing = v,
+            ),
+          ),
         ),
       ),
     ),
@@ -32,35 +54,85 @@ Future<NoteToolSettings> _open(WidgetTester t, Size size) async {
   return tools;
 }
 
+String _name(WidgetTester t) => t.widget<Text>(find.byKey(const Key('note-tool-name'))).data!;
+
 void main() {
   const narrow = Size(800, 1280);
 
-  testWidgets('seçili aracın adı görünür; fosforlu paleti ve varsayılan kalınlık', (t) async {
+  testWidgets('dokunuş aracı seçer; seçili araca ikinci dokunuş ayar penceresi açar', (t) async {
     final tools = await _open(t, narrow);
-    String name() => t.widget<Text>(find.byKey(const Key('note-tool-name'))).data!;
-    expect(name(), 'Tükenmez');
+    expect(find.byKey(const Key('note-popover')), findsNothing);
+    // Kalem zaten seçili: ilk dokunuş pencere açar.
+    await t.tap(find.byKey(const Key('note-pen')));
+    await t.pumpAndSettle();
+    expect(_name(t), 'Tükenmez');
+    expect(find.byKey(const Key('note-pen-kind-fountain')), findsOneWidget);
+    await t.tapAt(const Offset(2, 2)); // dışına dokun: kapanır
+    await t.pumpAndSettle();
+    expect(find.byKey(const Key('note-popover')), findsNothing);
+
+    // Fosforlu: ilk dokunuş seçer (pencere yok), ikincisi açar.
     await t.tap(find.byKey(const Key('note-pen-highlighter')));
-    await t.pump();
-    expect(name(), 'Fosforlu');
+    await t.pumpAndSettle();
+    expect(tools.kind, PenKind.highlighter);
     expect(tools.width, highlighterDefaultWidth);
+    expect(find.byKey(const Key('note-popover')), findsNothing);
+    await t.tap(find.byKey(const Key('note-pen-highlighter')));
+    await t.pumpAndSettle();
+    expect(_name(t), 'Fosforlu');
     for (final c in highlighterPalette) {
       expect(find.byKey(Key('note-color-${c.toRadixString(16)}')), findsOneWidget);
     }
     expect(find.byKey(Key('note-color-${penPalette.first.toRadixString(16)}')), findsNothing);
+    await t.tapAt(const Offset(2, 2));
+    await t.pumpAndSettle();
+
     await t.tap(find.byKey(const Key('note-eraser')));
-    await t.pump();
-    expect(name(), 'Silgi');
+    await t.pumpAndSettle();
+    expect(tools.eraser, isTrue);
+    expect(find.byKey(const Key('note-popover')), findsNothing);
+    await t.tap(find.byKey(const Key('note-eraser')));
+    await t.pumpAndSettle();
+    expect(_name(t), 'Silgi');
+    expect(find.byKey(const Key('note-erase-mode')), findsOneWidget);
+    await t.tapAt(const Offset(2, 2));
+    await t.pumpAndSettle();
+
+    // Kement: seçer; ikinci dokunuş kaleme döner.
     await t.tap(find.byKey(const Key('note-lasso')));
     await t.pump();
-    expect(name(), 'Kement');
-    for (final k in PenKind.values) {
-      expect(find.byKey(Key('note-pen-${k.name}')), findsOneWidget);
-    }
+    expect(tools.lasso, isTrue);
+    await t.tap(find.byKey(const Key('note-lasso')));
+    await t.pump();
+    expect(tools.lasso, isFalse);
+    expect(tools.kind, PenKind.ballpoint);
   });
 
-  testWidgets('Boyut paneli: kalem kalınlığı sürgü ve çiple değişir, ön izleme var', (t) async {
+  testWidgets('kalem penceresi: tür seçimi, renk, sertlik; kalem düğmesi son kalemi hatırlar', (t) async {
     final tools = await _open(t, narrow);
-    await t.tap(find.byKey(const Key('note-size')));
+    await t.tap(find.byKey(const Key('note-pen')));
+    await t.pumpAndSettle();
+    await t.tap(find.byKey(const Key('note-pen-kind-pencil')));
+    await t.pumpAndSettle();
+    expect(tools.kind, PenKind.pencil);
+    final c = penPalette[3];
+    await t.tap(find.byKey(Key('note-color-${c.toRadixString(16)}')));
+    await t.pumpAndSettle();
+    expect(tools.color, c);
+    expect(find.byKey(const Key('note-hardness')), findsOneWidget);
+    await t.tapAt(const Offset(2, 2));
+    await t.pumpAndSettle();
+    // Fosforluya geç, kaleme dön: kurşun kalem geri gelir.
+    await t.tap(find.byKey(const Key('note-pen-highlighter')));
+    await t.pump();
+    await t.tap(find.byKey(const Key('note-pen')));
+    await t.pump();
+    expect(tools.kind, PenKind.pencil);
+  });
+
+  testWidgets('Boyut: kalem kalınlığı sürgü ve çiple değişir, ön izleme var', (t) async {
+    final tools = await _open(t, narrow);
+    await t.tap(find.byKey(const Key('note-pen')));
     await t.pumpAndSettle();
     expect(find.byKey(const Key('note-size-preview')), findsOneWidget);
     final before = tools.width;
@@ -73,24 +145,24 @@ void main() {
     expect(tools.brush.width, 8);
   });
 
-  testWidgets('Boyut paneli silgide yarıçapı ayarlar; kalem boyutuna dokunmaz', (t) async {
+  testWidgets('Silgi penceresi yarıçapı ve modu ayarlar; kalem boyutuna dokunmaz', (t) async {
     final tools = await _open(t, narrow);
     final penWidth = tools.width;
     await t.tap(find.byKey(const Key('note-eraser')));
     await t.pump();
-    await t.tap(find.byKey(const Key('note-size')));
+    await t.tap(find.byKey(const Key('note-eraser')));
     await t.pumpAndSettle();
     await t.tap(find.byKey(const Key('note-size-chip-44')));
     await t.pumpAndSettle();
     expect(tools.eraserRadius, 44);
     expect(tools.brush.width * 2, 44);
     expect(tools.width, penWidth);
-    await t.tapAt(const Offset(2, 2));
+    await t.tap(find.text('Alan'));
     await t.pumpAndSettle();
-    expect(find.text('Boyut 44'), findsOneWidget);
+    expect(tools.eraseMode, EraseMode.area);
   });
 
-  testWidgets('Şekil penceresi: anahtar + şekil araçları; seçince ad görünür ve pencere kapanır', (t) async {
+  testWidgets('Şekil penceresi: anahtar + şekil araçları; seçince yuvada simge değişir ve pencere kapanır', (t) async {
     final tools = await _open(t, narrow);
     await t.tap(find.byKey(const Key('note-shape')));
     await t.pumpAndSettle();
@@ -102,15 +174,62 @@ void main() {
     await t.pumpAndSettle();
     expect(tools.shapeTool, ShapeTool.triangle);
     expect(find.byKey(const Key('note-shape-snap')), findsNothing);
-    expect(t.widget<Text>(find.byKey(const Key('note-tool-name'))).data, 'Üçgen');
     // Silgiye geçince şekil aracı kapanır.
     await t.tap(find.byKey(const Key('note-eraser')));
     await t.pump();
     expect(tools.shapeTool, isNull);
   });
 
-  for (final size in const [Size(800, 1280), Size(600, 1024), Size(1280, 800), Size(412, 915)]) {
-    testWidgets('taşma yok ve tek satır (${size.width.toInt()}), her araçta', (t) async {
+  testWidgets('Sayfa penceresi: hızlı şablon, tüm sayfalar, arka plan, çizgi aralığı', (t) async {
+    final st = _Style();
+    await _open(t, narrow, style: st);
+    await t.tap(find.byKey(const Key('note-template')));
+    await t.pumpAndSettle();
+    await t.tap(find.byKey(const Key('note-template-grid')));
+    await t.pumpAndSettle();
+    expect(st.template, PageTemplate.grid);
+    await t.tap(find.byKey(const Key('note-template-all-dots')));
+    await t.pumpAndSettle();
+    expect(st.all, PageTemplate.dots);
+    await t.tap(find.byKey(const Key('note-bg-cream')));
+    await t.pumpAndSettle();
+    expect(st.background, 0xFFFFF8E1);
+    await t.tap(find.byKey(const Key('note-bg-dark')));
+    await t.pumpAndSettle();
+    expect(st.background, 0xFF263238);
+    await t.tap(find.byKey(const Key('note-spacing-wide')));
+    await t.pumpAndSettle();
+    expect(st.spacing, 1.5);
+    expect(t.takeException(), isNull);
+  });
+
+  testWidgets('yuva alta/üste taşınır (⇅) ve konum araç ayarında tutulur', (t) async {
+    final tools = await _open(t, narrow);
+    expect(tools.dockAtTop, isFalse);
+    await t.tap(find.byKey(const Key('note-dock-move')));
+    await t.pump();
+    expect(tools.dockAtTop, isTrue);
+    expect(tools.toPrefs()['dock.top'], true);
+  });
+
+  testWidgets('odak modunda yuva küçülür: Sayfa ve ⇅ gizli, araçlar durur', (t) async {
+    await _open(t, narrow, small: true);
+    expect(find.byKey(const Key('note-template')), findsNothing);
+    expect(find.byKey(const Key('note-dock-move')), findsNothing);
+    expect(find.byKey(const Key('note-pen')), findsOneWidget);
+    expect(t.getSize(find.byKey(const Key('note-eraser'))).shortestSide, 44);
+  });
+
+  testWidgets('kement seçiliyken seçim eylemleri yoktur oturum yoksa; kalemde yoktur', (t) async {
+    final tools = await _open(t, narrow);
+    expect(find.byKey(const Key('note-sel-delete')), findsNothing);
+    tools.setLasso(true); // session null: eylem çubuğu gelmez, taşma da olmaz
+    await t.pump();
+    expect(t.takeException(), isNull);
+  });
+
+  for (final size in const [Size(1250, 2000), Size(2000, 1250), Size(800, 1280), Size(600, 1024), Size(412, 915), Size(360, 740)]) {
+    testWidgets('taşma yok, tek satır (${size.width.toInt()}x${size.height.toInt()}), her araçta ve her pencerede', (t) async {
       final tools = await _open(t, size);
       expect(t.takeException(), isNull);
       for (final act in <void Function()>[
@@ -122,9 +241,66 @@ void main() {
         act();
         await t.pump();
         expect(t.takeException(), isNull);
-        expect(t.getSize(find.byType(NoteInkToolbar)).height, lessThan(64));
+        final dock = t.getSize(find.byKey(const Key('note-dock')));
+        expect(dock.height, lessThan(72));
+        expect(dock.width, lessThanOrEqualTo(size.width));
         expect(find.byKey(const Key('note-shape')), findsOneWidget);
+      }
+      // Pencereler dar ekranda da taşmaz.
+      for (final k in const ['note-pen', 'note-pen-highlighter', 'note-eraser', 'note-shape', 'note-template']) {
+        await t.ensureVisible(find.byKey(Key(k)));
+        await t.tap(find.byKey(Key(k)));
+        await t.pumpAndSettle();
+        if (find.byKey(const Key('note-popover')).evaluate().isEmpty) {
+          // İlk dokunuş yalnız seçti; ikincisi pencere açar.
+          await t.tap(find.byKey(Key(k)));
+          await t.pumpAndSettle();
+        }
+        expect(t.takeException(), isNull, reason: k);
+        await t.tapAt(const Offset(1, 1));
+        await t.pumpAndSettle();
       }
     });
   }
+
+  group('boyut kalıcılığı', () {
+    testWidgets('kaydet -> yeni oturumda geri gelir; bozuk kayıt yok sayılır', (t) async {
+      late AppDatabase db;
+      late NoteToolPrefsStore store;
+      await t.runAsync(() async {
+        db = AppDatabase(NativeDatabase.memory());
+        await db.customSelect('SELECT 1').get();
+        store = NoteToolPrefsStore(db);
+      });
+      addTearDown(() => t.runAsync(db.close));
+
+      final a = NoteToolSettings()
+        ..setKind(PenKind.fountain)
+        ..setSize(9)
+        ..setKind(PenKind.highlighter)
+        ..setSize(30)
+        ..setEraser(true)
+        ..setSize(44)
+        ..setDockAtTop(true);
+      addTearDown(a.dispose);
+      await t.runAsync(() => store.save(a.toPrefs()));
+
+      final b = NoteToolSettings();
+      addTearDown(b.dispose);
+      await t.runAsync(() async => b.restoreSizes(await store.load()));
+      b.setKind(PenKind.fountain);
+      expect(b.width, 9);
+      b.setKind(PenKind.highlighter);
+      expect(b.width, 30);
+      expect(b.eraserRadius, 44);
+      expect(b.dockAtTop, isTrue);
+
+      // Boş/bozuk değerler varsayılanı bozmaz.
+      final c = NoteToolSettings();
+      addTearDown(c.dispose);
+      c.restoreSizes({'width.ballpoint': 'x', 'eraser': null, 'dock.top': 5});
+      expect(c.width, 3);
+      expect(c.dockAtTop, isFalse);
+    });
+  });
 }

@@ -218,12 +218,12 @@ void main() {
     final p = TestPointer(77, PointerDeviceKind.touch);
     final b = GestureBinding.instance;
     b.handlePointerEvent(PointerDownEvent(
-      pointer: 77, position: const Offset(300, 450), radiusMajor: 60,
+      pointer: 77, position: const Offset(300, 450), radiusMajor: 400,
     ));
     for (var i = 1; i <= 6; i++) {
       b.handlePointerEvent(PointerMoveEvent(
         pointer: 77, position: Offset(300, 450 - i * 20.0),
-        delta: const Offset(0, -20), radiusMajor: 60,
+        delta: const Offset(0, -20), radiusMajor: 400,
       ));
     }
     b.handlePointerEvent(PointerUpEvent(pointer: 77, position: const Offset(300, 330)));

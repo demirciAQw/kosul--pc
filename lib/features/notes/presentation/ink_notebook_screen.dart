@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart' show mapEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -11,11 +12,13 @@ import '../../ink/domain/ink_stroke_record.dart';
 import '../../ink/domain/pen_profiles.dart';
 import '../../pdf/pdf_providers.dart';
 import '../data/ink_notebook_repository.dart';
+import '../data/note_tool_prefs_store.dart';
 import '../domain/ink_notebook.dart';
 import '../domain/page_size.dart';
 import '../notes_providers.dart';
 import 'ink_tags_panel.dart';
 import 'note_page_editor.dart';
+import 'note_tool_dock.dart';
 import 'note_tool_settings.dart';
 import 'page_template_painter.dart';
 
@@ -51,13 +54,56 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
   /// Şeritte iyimser yerel sıra (kayıt sürerken); akış aynı sırayı getirince ya da hata olunca düşer.
   List<String>? _order;
   Object? _openError;
-  bool _strip = true;
-  bool _stripInit = false;
+
+  /// Sayfa şeridi varsayılan kapalı (çizim alanı geniş kalsın); üstteki düğmeyle açılır.
+  bool _strip = false;
+
+  /// Çizgi aralığı çarpanı: yalnızca bu oturumda (sayfa kaydına yazılmaz).
+  double _spacing = 1;
+
+  late final NoteToolPrefsStore _prefsStore;
+  Timer? _saveTimer;
+  Map<String, Object?>? _savedPrefs;
+  bool _prefsLoaded = false;
 
   @override
   void initState() {
     super.initState();
+    _prefsStore = ref.read(noteToolPrefsStoreProvider);
+    _tools.addListener(_prefsChanged);
+    _loadPrefs();
     _open();
+  }
+
+  /// Kayıtlı kalem/silgi boyutları ve yuva konumu açılışta geri gelir.
+  Future<void> _loadPrefs() async {
+    try {
+      final m = await _prefsStore.load();
+      if (!mounted) return;
+      _tools.restoreSizes(m);
+      _savedPrefs = _tools.toPrefs();
+    } catch (_) {
+      // Okunamazsa varsayılanlarla devam; ayar yalnızca kolaylıktır.
+    }
+    _prefsLoaded = true;
+  }
+
+  /// Değişince kısa gecikmeyle kaydeder (sürgü sürüklenirken her karede yazmaz).
+  void _prefsChanged() {
+    if (!_prefsLoaded) return;
+    final now = _tools.toPrefs();
+    if (_savedPrefs != null && mapEquals(_savedPrefs, now)) return;
+    _saveTimer?.cancel();
+    _saveTimer = Timer(const Duration(milliseconds: 500), _savePrefs);
+  }
+
+  void _savePrefs() {
+    _saveTimer?.cancel();
+    _saveTimer = null;
+    final now = _tools.toPrefs();
+    if (mapEquals(_savedPrefs, now)) return;
+    _savedPrefs = now;
+    _prefsStore.save(now).catchError((_) {});
   }
 
   Future<void> _open() async {
@@ -73,6 +119,9 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
 
   @override
   void dispose() {
+    _tools.removeListener(_prefsChanged);
+    if (_prefsLoaded) _savePrefs();
+    _saveTimer?.cancel();
     _tools.dispose();
     super.dispose();
   }
@@ -242,10 +291,6 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
         .firstOrNull;
     final pagesAsync = ref.watch(inkNotebookPagesProvider(widget.notebookId));
     final pages = pagesAsync.value ?? const <InkNotePageRecord>[];
-    if (!_stripInit) {
-      _stripInit = true;
-      _strip = MediaQuery.sizeOf(context).width >= 600;
-    }
     // Açık sayfa listeden düştüyse (başka cihazda silindi) en yakın sayfaya geç.
     if (_pendingId != null && pages.any((p) => p.id == _pendingId)) {
       _pageId = _pendingId;
@@ -283,34 +328,48 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
       _editorKey = GlobalKey<NotePageEditorState>();
     }
     final title = nb == null || nb.title.isEmpty ? 'Adsız defter' : nb.title;
+    final wide = MediaQuery.sizeOf(context).width >= 600;
+    final i = current == null ? -1 : pages.indexOf(current);
     return Scaffold(
       appBar: AppBar(
+        toolbarHeight: 52,
+        titleSpacing: 0,
         title: Text(title, overflow: TextOverflow.ellipsis),
         actions: [
+          _PagePill(
+            index: i,
+            count: pages.length,
+            onPrev: i > 0 ? () => setState(() => _pageId = pages[i - 1].id) : null,
+            // Son sayfada ileri oku yeni sayfa ekler.
+            onNext: i < 0
+                ? null
+                : i < pages.length - 1
+                ? () => setState(() => _pageId = pages[i + 1].id)
+                : () => _add(pages, afterCurrent: false),
+            isLast: i == pages.length - 1,
+            onAdd: current == null ? null : () => _add(pages, afterCurrent: true),
+          ),
           const FocusModeButton(),
-          IconButton(
-            key: const Key('note-tags-btn'),
-            tooltip: 'Etiketler ve kişiler',
-            icon: const Icon(Icons.sell_outlined),
-            onPressed: () => showInkTagsPanel(
-              context,
-              notebookId: widget.notebookId,
-              pageId: current?.id,
+          if (wide) ...[
+            IconButton(
+              key: const Key('note-tags-btn'),
+              tooltip: 'Etiketler ve kişiler',
+              icon: const Icon(Icons.sell_outlined),
+              onPressed: () => _tagsPanel(current),
             ),
-          ),
-          IconButton(
-            key: const Key('note-strip-toggle'),
-            tooltip: 'Sayfalar',
-            icon: Icon(
-              _strip ? Icons.view_sidebar : Icons.view_sidebar_outlined,
+            IconButton(
+              key: const Key('note-strip-toggle'),
+              tooltip: _strip ? 'Sayfa şeridini gizle' : 'Sayfa şeridini göster',
+              icon: Icon(_strip ? Icons.view_sidebar : Icons.view_sidebar_outlined),
+              onPressed: () => setState(() => _strip = !_strip),
             ),
-            onPressed: () => setState(() => _strip = !_strip),
-          ),
+          ],
           PopupMenuButton<String>(
             key: const Key('note-page-menu'),
             tooltip: 'Sayfa işlemleri',
             enabled: current != null,
             onSelected: (v) => switch (v) {
+              'style' => _pageStyle(current!),
               'add' => _add(pages, afterCurrent: false),
               'insert' => _add(pages, afterCurrent: true),
               'dup' => _duplicate(),
@@ -318,41 +377,61 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
               'up' => _move(pages, -1),
               'down' => _move(pages, 1),
               'size' => _pageSize(current!),
+              'tags' => _tagsPanel(current),
+              'strip' => setState(() => _strip = !_strip),
               _ => null,
             },
-            itemBuilder: (_) => const [
-              PopupMenuItem(
+            itemBuilder: (_) => [
+              const PopupMenuItem(
+                value: 'style',
+                key: Key('note-page-style'),
+                child: Text('Şablon ve arka plan…'),
+              ),
+              if (!wide) ...[
+                const PopupMenuItem(
+                  value: 'tags',
+                  key: Key('note-tags-menu'),
+                  child: Text('Etiketler ve kişiler'),
+                ),
+                PopupMenuItem(
+                  value: 'strip',
+                  key: const Key('note-strip-menu'),
+                  child: Text(_strip ? 'Sayfa şeridini gizle' : 'Sayfa şeridini göster'),
+                ),
+              ],
+              const PopupMenuDivider(),
+              const PopupMenuItem(
                 value: 'add',
                 key: Key('note-page-add'),
                 child: Text('Sona sayfa ekle'),
               ),
-              PopupMenuItem(
+              const PopupMenuItem(
                 value: 'insert',
                 key: Key('note-page-insert'),
                 child: Text('Bundan sonra sayfa ekle'),
               ),
-              PopupMenuItem(
+              const PopupMenuItem(
                 value: 'dup',
                 key: Key('note-page-dup'),
                 child: Text('Sayfayı çoğalt'),
               ),
-              PopupMenuItem(
+              const PopupMenuItem(
                 value: 'up',
                 key: Key('note-page-up'),
                 child: Text('Sayfayı öne al'),
               ),
-              PopupMenuItem(
+              const PopupMenuItem(
                 value: 'down',
                 key: Key('note-page-down'),
                 child: Text('Sayfayı arkaya al'),
               ),
-              PopupMenuItem(
+              const PopupMenuItem(
                 value: 'size',
                 key: Key('note-page-size'),
                 child: Text('Sayfa boyutu…'),
               ),
-              PopupMenuDivider(),
-              PopupMenuItem(
+              const PopupMenuDivider(),
+              const PopupMenuItem(
                 value: 'del',
                 key: Key('note-page-del'),
                 child: Text('Sayfayı sil'),
@@ -369,59 +448,35 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
               builder: (context, focus, _) {
                 final showStrip =
                     _strip && !focus; // odak modu şeridi de gizler
-                final i = pages.indexOf(current!);
                 return Row(
                   children: [
                     if (showStrip)
                       _PageStrip(
                         pages: shown,
-                        currentId: current.id,
+                        currentId: current!.id,
                         onTap: (p) => setState(() => _pageId = p.id),
                         onAdd: () => _add(pages, afterCurrent: false),
                         onReorder: (from, to) => _reorderStrip(shown, from, to),
                       ),
                     if (showStrip) const VerticalDivider(width: 1),
                     Expanded(
-                      child: Stack(
-                        children: [
-                          NotePageEditor(
-                            key: _editorKey,
-                            page: current,
-                            tools: _tools,
-                            stylusOnlyOverride: widget.stylusOnlyOverride,
-                            onTemplate: (t) => _guard(
-                              () => _repo.setPageTemplate(current!.id, t),
-                            ),
-                            onTemplateAll: (t) => _guard(
-                              () => _repo.setNotebookPagesTemplate(
-                                widget.notebookId,
-                                t,
-                              ),
-                            ),
+                      child: NotePageEditor(
+                        key: _editorKey,
+                        page: current!,
+                        tools: _tools,
+                        stylusOnlyOverride: widget.stylusOnlyOverride,
+                        spacing: _spacing,
+                        onSpacing: (f) => setState(() => _spacing = f),
+                        onBackground: (c) =>
+                            _guard(() => _repo.setPageBackground(current!.id, c)),
+                        onTemplate: (t) =>
+                            _guard(() => _repo.setPageTemplate(current!.id, t)),
+                        onTemplateAll: (t) => _guard(
+                          () => _repo.setNotebookPagesTemplate(
+                            widget.notebookId,
+                            t,
                           ),
-                          Positioned(
-                            left: 8,
-                            bottom: 8,
-                            child: _PagePill(
-                              index: i,
-                              count: pages.length,
-                              onPrev: i > 0
-                                  ? () => setState(
-                                      () => _pageId = pages[i - 1].id,
-                                    )
-                                  : null,
-                              // Son sayfada ileri oku yeni sayfa ekler.
-                              onNext: i < 0
-                                  ? null
-                                  : i < pages.length - 1
-                                  ? () => setState(
-                                      () => _pageId = pages[i + 1].id,
-                                    )
-                                  : () => _add(pages, afterCurrent: false),
-                              isLast: i == pages.length - 1,
-                            ),
-                          ),
-                        ],
+                        ),
                       ),
                     ),
                   ],
@@ -430,6 +485,35 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
             ),
     );
   }
+
+  void _tagsPanel(InkNotePageRecord? current) => showInkTagsPanel(
+    context,
+    notebookId: widget.notebookId,
+    pageId: current?.id,
+  );
+
+  /// Sayfa menüsünden: yuvadaki "Sayfa" penceresinin aynısı, ortada pencere olarak.
+  Future<void> _pageStyle(InkNotePageRecord p) => showDialog<void>(
+    context: context,
+    builder: (ctx) => Dialog(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: PageStylePanel(
+          control: PageStyleControl(
+            template: p.template,
+            background: p.background,
+            spacing: _spacing,
+            onTemplate: (t) => _guard(() => _repo.setPageTemplate(p.id, t)),
+            onTemplateAll: (t) => _guard(
+              () => _repo.setNotebookPagesTemplate(widget.notebookId, t),
+            ),
+            onBackground: (c) => _guard(() => _repo.setPageBackground(p.id, c)),
+            onSpacing: (f) => setState(() => _spacing = f),
+          ),
+        ),
+      ),
+    ),
+  );
 
   /// Sayfa boyutu diyalogu; küçültme çizgi kırpacaksa depo engeller (mesaj gösterilir).
   Future<void> _pageSize(InkNotePageRecord p) async {
@@ -451,7 +535,8 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
   }
 }
 
-/// Alt solda: önceki / "2 / 5" / sonraki. Son sayfada sonraki oku "yeni sayfa" olur.
+/// Üst çubukta: önceki / "2 / 5" / sonraki ve "+" (sayfa ekle). Son sayfada sonraki oku
+/// "yeni sayfa" olur.
 class _PagePill extends StatelessWidget {
   const _PagePill({
     required this.index,
@@ -459,38 +544,44 @@ class _PagePill extends StatelessWidget {
     required this.onPrev,
     required this.onNext,
     required this.isLast,
+    required this.onAdd,
   });
   final int index;
   final int count;
   final VoidCallback? onPrev;
   final VoidCallback? onNext;
   final bool isLast;
+  final VoidCallback? onAdd;
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Material(
-      color: cs.surface.withValues(alpha: 0.9),
-      elevation: 2,
-      borderRadius: BorderRadius.circular(20),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          IconButton(
-            key: const Key('note-page-prev'),
-            tooltip: 'Önceki sayfa',
-            icon: const Icon(Icons.chevron_left),
-            onPressed: onPrev,
-          ),
-          Text('${index + 1} / $count', key: const Key('note-page-indicator')),
-          IconButton(
-            key: const Key('note-page-next'),
-            tooltip: isLast ? 'Yeni sayfa ekle' : 'Sonraki sayfa',
-            icon: Icon(isLast ? Icons.note_add_outlined : Icons.chevron_right),
-            onPressed: onNext,
-          ),
-        ],
-      ),
+    const dense = VisualDensity(horizontal: -2, vertical: -2);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          key: const Key('note-page-prev'),
+          visualDensity: dense,
+          tooltip: 'Önceki sayfa',
+          icon: const Icon(Icons.chevron_left),
+          onPressed: onPrev,
+        ),
+        Text('${index + 1} / $count', key: const Key('note-page-indicator')),
+        IconButton(
+          key: const Key('note-page-next'),
+          visualDensity: dense,
+          tooltip: isLast ? 'Yeni sayfa ekle' : 'Sonraki sayfa',
+          icon: Icon(isLast ? Icons.note_add_outlined : Icons.chevron_right),
+          onPressed: onNext,
+        ),
+        IconButton(
+          key: const Key('note-page-add-top'),
+          visualDensity: dense,
+          tooltip: 'Bundan sonra yeni sayfa ekle',
+          icon: const Icon(Icons.add),
+          onPressed: onAdd,
+        ),
+      ],
     );
   }
 }

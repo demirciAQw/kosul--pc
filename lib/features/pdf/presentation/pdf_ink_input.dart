@@ -6,10 +6,13 @@ import '../../../app/platform.dart';
 import 'pdf_ink_session.dart';
 import 'pdf_page_ink_layer.dart';
 
-/// Bu yarıçaptan (mantıksal piksel) büyük dokunuş avuçtur: görünüme gitmez,
-/// yutulur. Parmak ucu ~8-14, avuç 25+ (cihaz bildirmezse 0 gelir: eşik işlemez,
-/// "kalem yaklaşınca kilit" yedeği devreye girer).
-const double palmRadiusMajor = 24;
+/// Bu yarıçaptan (`PointerEvent.radiusMajor`) büyük dokunuş avuçtur: görünüme
+/// gitmez, yutulur. Casper PAD H10'da ölçüm: parmak ~75-143 (birimi cihaz
+/// bildirir, mantıksal pikselle uyuşmaz). Bu yüzden eşik parmağın çok üstünde
+/// (260). Asıl avuç koruması boyut değil KALEM YAKINLIĞIDIR (havada ya da
+/// çizerken her temas yutulur); boyut yalnız çok büyük temaslar içindir.
+/// Gerçek avuç boyutu ölçülünce ayarlanır. Cihaz bildirmezse 0 gelir (işlemez).
+const double palmRadiusMajor = 260;
 
 /// Görünümü (PDF kaydırıcıyı) saran kalem girişi.
 ///
@@ -118,7 +121,7 @@ class InkPointerClaim extends OneSequenceGestureRecognizer {
   bool isPointerAllowed(PointerDownEvent event) {
     if (event.kind == PointerDeviceKind.touch) {
       // Avuç: kalem çiziyorsa ya da temas büyükse yut.
-      return session.penActive || event.radiusMajor >= palmRadiusMajor;
+      return session.penActive || session.penNear || event.radiusMajor >= palmRadiusMajor;
     }
     if (!inkPointerDraws(event.kind, stylusOnly: stylusOnly)) return false;
     // Sayfa dışında (sayfalar arası boşluk) arenayı alma: görünüm kayabilsin.

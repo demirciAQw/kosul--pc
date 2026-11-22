@@ -183,7 +183,7 @@ class PdfInkSession extends ChangeNotifier {
     this.questionId,
     this.layer = 0,
     this.retryDelays = const [Duration(milliseconds: 300), Duration(seconds: 1), Duration(seconds: 3)],
-    this.hoverHold = const Duration(milliseconds: 800),
+    this.hoverHold = const Duration(milliseconds: 500),
     this.ownerOf,
     this.penKinds = false,
     this.holdMs = shapeHoldMs,
@@ -559,6 +559,9 @@ class PdfInkSession extends ChangeNotifier {
 
   // --- kalem teması: kalem çizerken ikinci temas görünümü oynatmaz ---
   bool get penActive => _activePens.isNotEmpty;
+
+  /// Kalem bir sayfanın üstünde havada (hover zaman aşımına kadar).
+  bool get penNear => _near;
   void penDown(int pointer) {
     _activePens.add(pointer);
     _updateLock();

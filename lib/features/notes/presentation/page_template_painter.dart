@@ -12,6 +12,7 @@ class PageTemplatePainter extends CustomPainter {
     required this.background,
     required this.pageWidth,
     required this.pageHeight,
+    this.spacingFactor = 1,
   });
 
   final PageTemplate template;
@@ -19,10 +20,19 @@ class PageTemplatePainter extends CustomPainter {
   final double pageWidth;
   final double pageHeight;
 
+  /// Çizgi/kare aralığı çarpanı (1 = varsayılan). Yalnızca oturumda tutulur,
+  /// sayfa kaydına yazılmaz.
+  final double spacingFactor;
+
   @override
   void paint(Canvas canvas, Size size) {
     canvas.drawRect(Offset.zero & size, Paint()..color = Color(background));
-    final lines = templateLines(template, pageWidth, pageHeight);
+    final lines = templateLines(
+      template,
+      pageWidth,
+      pageHeight,
+      spacing: defaultTemplateSpacing(pageWidth) * spacingFactor,
+    );
     if (lines.isEmpty) return;
     final sx = size.width / pageWidth, sy = size.height / pageHeight;
     final paint = Paint()
@@ -55,7 +65,8 @@ class PageTemplatePainter extends CustomPainter {
       old.template != template ||
       old.background != background ||
       old.pageWidth != pageWidth ||
-      old.pageHeight != pageHeight;
+      old.pageHeight != pageHeight ||
+      old.spacingFactor != spacingFactor;
 }
 
 /// Şablon adı (arayüz metni).
@@ -72,3 +83,17 @@ IconData templateIcon(PageTemplate t) => switch (t) {
   PageTemplate.grid => Icons.grid_4x4,
   PageTemplate.dots => Icons.grid_on,
 };
+
+/// Arka plan seçenekleri (argb): beyaz, krem, koyu.
+const pageBackgrounds = <(String, String, int)>[
+  ('white', 'Beyaz', 0xFFFFFFFF),
+  ('cream', 'Krem', 0xFFFFF8E1),
+  ('dark', 'Koyu', 0xFF263238),
+];
+
+/// Çizgi aralığı seçenekleri: anahtar, ad, çarpan. Yalnızca oturumda tutulur.
+const pageSpacings = <(String, String, double)>[
+  ('dense', 'Sık', 0.7),
+  ('normal', 'Normal', 1.0),
+  ('wide', 'Seyrek', 1.5),
+];

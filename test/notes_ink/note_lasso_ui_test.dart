@@ -33,7 +33,7 @@ Future<_H> _db(WidgetTester t) async {
     await t.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
     await t.runAsync(h.db.close);
   });
-  t.view.physicalSize = const Size(1200, 900);
+  t.view.physicalSize = const Size(1200, 2000); // sayfa tam görünsün (alttaki yuva çizim noktalarını örtmesin)
   t.view.devicePixelRatio = 1;
   addTearDown(t.view.reset);
   return h;

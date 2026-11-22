@@ -142,6 +142,8 @@ class InkStrokeRepository {
             switch (owner) {
               PdfPageOwner o => s.pdfDocumentId.equals(o.documentId) & s.pdfPage.equals(o.page),
               NotePageOwner o => s.noteId.equals(o.noteId) & s.notePage.equals(o.page),
+              QuestionImageOwner o =>
+                s.questionId.equals(o.questionId) & s.pdfDocumentId.isNull() & s.noteId.isNull(),
             };
         if (attemptNo != null) w = w & s.attemptNo.equals(attemptNo);
         if (layer != null) w = w & s.layer.equals(layer);
@@ -197,6 +199,27 @@ class InkStrokeRepository {
     );
   }
 
+  /// Tüm soruların (silinmemiş) çizgi zamanları, soru kimliğine göre; galeri işareti için.
+  Stream<Map<String, List<StrokeTime>>> watchAllSolveTimes() {
+    final t = _db.inkStrokes;
+    final q = _db.selectOnly(t)
+      ..addColumns([t.questionId, t.attemptNo, t.startedAtMs, t.durationMs])
+      ..where(t.questionId.isNotNull() & t.deleted.equals(false));
+    return q.watch().map((rows) {
+      final out = <String, List<StrokeTime>>{};
+      for (final r in rows) {
+        out
+            .putIfAbsent(r.read(t.questionId)!, () => [])
+            .add(StrokeTime(
+              attemptNo: r.read(t.attemptNo)!,
+              startedAtMs: r.read(t.startedAtMs)!,
+              durationMs: r.read(t.durationMs)!,
+            ));
+      }
+      return out;
+    });
+  }
+
   final Set<String> _corruptIds = {};
 
   /// Çözülemeyen (bozuk blob) çizgilerin kimlikleri. Satırlara dokunulmaz,
@@ -237,6 +260,8 @@ class InkStrokeRepository {
     id: r.id,
     owner: r.pdfDocumentId != null
         ? PdfPageOwner(r.pdfDocumentId!, r.pdfPage ?? 0)
+        : r.noteId == null && r.questionId != null
+        ? QuestionImageOwner(r.questionId!)
         : NotePageOwner(r.noteId ?? '', r.notePage ?? 0),
     points: StrokeCodec.decode(r.points),
     startedAtMs: r.startedAtMs,

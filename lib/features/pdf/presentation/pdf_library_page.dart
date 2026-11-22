@@ -26,6 +26,9 @@ class PdfLibraryPage extends ConsumerStatefulWidget {
 class _PdfLibraryPageState extends ConsumerState<PdfLibraryPage> {
   bool _busy = false;
 
+  /// İyimser kaldırma: akış güncellenmeden önce de listeden kalkar.
+  final Set<String> _hidden = {};
+
   Future<void> _import() async {
     final messenger = ScaffoldMessenger.of(context);
     final file = await ref.read(pdfPickerProvider)();
@@ -106,7 +109,14 @@ class _PdfLibraryPageState extends ConsumerState<PdfLibraryPage> {
         ],
       ),
     );
-    if (ok == true) await repo.softDelete(d.id);
+    if (ok != true) return;
+    if (mounted) setState(() => _hidden.add(d.id));
+    try {
+      await repo.softDelete(d.id);
+    } catch (_) {
+      if (mounted) setState(() => _hidden.remove(d.id));
+      rethrow;
+    }
   }
 
   void _open(PdfDocumentRecord d) {
@@ -138,38 +148,46 @@ class _PdfLibraryPageState extends ConsumerState<PdfLibraryPage> {
       body: docs.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('Liste okunamadı: $e')),
-        data: (list) => list.isEmpty
-            ? const Center(
-                child: Padding(
-                  padding: EdgeInsets.all(24),
-                  child: Text('Henüz PDF yok. "PDF ekle" ile bir PDF seç.'),
-                ),
-              )
-            : ListView.builder(
-                padding: const EdgeInsets.only(bottom: 88),
-                itemCount: list.length,
-                itemBuilder: (_, i) {
-                  final d = list[i];
-                  return ListTile(
-                    key: Key('pdf-item-${d.id}'),
-                    leading: const Icon(Icons.picture_as_pdf_outlined),
-                    title: Text(d.title),
-                    subtitle: Text(
-                      '${d.pageCount} sayfa${d.bookId != null ? ' · kitaba bağlı' : ''}',
-                    ),
-                    onTap: () => _open(d),
-                    trailing: PopupMenuButton<String>(
-                      onSelected: (_) => _remove(d),
-                      itemBuilder: (_) => const [
-                        PopupMenuItem(
-                          value: 'kaldir',
-                          child: Text('Listeden kaldır'),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
+        data: (all) {
+          // Akış kaldırmayı doğruladıysa gizleme gereksiz.
+          _hidden.removeWhere((id) => !all.any((d) => d.id == id));
+          final list = [
+            for (final d in all)
+              if (!_hidden.contains(d.id)) d,
+          ];
+          return list.isEmpty
+              ? const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Text('Henüz PDF yok. "PDF ekle" ile bir PDF seç.'),
+                  ),
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.only(bottom: 88),
+                  itemCount: list.length,
+                  itemBuilder: (_, i) {
+                    final d = list[i];
+                    return ListTile(
+                      key: Key('pdf-item-${d.id}'),
+                      leading: const Icon(Icons.picture_as_pdf_outlined),
+                      title: Text(d.title),
+                      subtitle: Text(
+                        '${d.pageCount} sayfa${d.bookId != null ? ' · kitaba bağlı' : ''}',
+                      ),
+                      onTap: () => _open(d),
+                      trailing: PopupMenuButton<String>(
+                        onSelected: (_) => _remove(d),
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(
+                            value: 'kaldir',
+                            child: Text('Listeden kaldır'),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                );
+        },
       ),
     );
   }

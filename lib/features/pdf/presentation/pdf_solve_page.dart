@@ -15,9 +15,11 @@ import 'pdf_ink_input.dart';
 import 'pdf_ink_session.dart';
 import 'pdf_page_ink_layer.dart';
 import 'pdf_reader_page.dart' show PdfInkToolbar;
+import 'solve_background.dart';
 
 /// Çözüm ekranı (`/pdf/:id/soru/:questionId`): sorunun PDF kutusu çevresiyle
-/// açılır; her çözüm denemesi ayrı katmandır.
+/// açılır; her çözüm denemesi ayrı katmandır. PDF bu cihazda yoksa kartın
+/// önizlemesiyle açılır ([QuestionSolvePage]).
 class PdfSolvePage extends ConsumerWidget {
   const PdfSolvePage({super.key, required this.documentId, required this.questionId});
   final String documentId;
@@ -34,14 +36,129 @@ class PdfSolvePage extends ConsumerWidget {
     final c = card.value;
     final i = info.value;
     if (c == null) return msg('Soru bulunamadı.');
-    if (i == null) return msg('Bu PDF bulunamadı.');
-    if (i.path == null) return msg('Bu PDF dosyası bu cihazda yok.');
     if (!c.hasPdfAnchor || c.pdfDocumentId != documentId) return msg('Bu soru bu PDF\'e bağlı değil.');
+    if (i == null || i.path == null) return QuestionSolvePage(questionId: questionId);
     return PdfSolveView(info: i, questionId: questionId, page: c.pdfPage!, box: c.pdfBox!);
   }
 }
 
-class PdfSolveView extends ConsumerStatefulWidget {
+/// Soru kartı kimliğiyle çözüm ekranı (`/soru/:questionId/coz`): karttan türetir.
+/// PDF'li kart + PDF bu cihazda: PDF sayfası (PDF birimi). PDF'li kart, PDF yok:
+/// önizleme resmi kutunun yerinde (yine PDF birimi). Fotoğraflı kart: soru
+/// fotoğrafı (`photoUnitWidth` uzayı, `QuestionImageOwner`). Resim de yoksa ileti.
+class QuestionSolvePage extends ConsumerWidget {
+  const QuestionSolvePage({super.key, required this.questionId});
+  final String questionId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    Widget msg(String t) => Scaffold(appBar: AppBar(title: const Text('Soru çözümü')), body: Center(child: Text(t)));
+    final card = ref.watch(questionByIdProvider(questionId));
+    final c = card.value;
+    if (card.isLoading) return Scaffold(appBar: AppBar(), body: const Center(child: CircularProgressIndicator()));
+    if (c == null) return msg('Soru bulunamadı.');
+    if (c.hasPdfAnchor) {
+      final info = ref.watch(pdfOpenInfoProvider(c.pdfDocumentId!));
+      if (info.isLoading) return Scaffold(appBar: AppBar(), body: const Center(child: CircularProgressIndicator()));
+      final i = info.value;
+      if (i != null && i.path != null) {
+        return PdfSolveView(info: i, questionId: questionId, page: c.pdfPage!, box: c.pdfBox!);
+      }
+    }
+    final image = c.questionImage;
+    switch (solveSpaceOf(hasPdfAnchor: c.hasPdfAnchor, hasImage: image != null)) {
+      case SolveSpace.none:
+        return msg('Bu sorunun görüntüsü yok; çizim için önce fotoğraf ekle.');
+      case SolveSpace.pdf:
+        return SolveView(
+          questionId: questionId,
+          loadBackground: (ref) => loadPreviewBackground(
+            ref,
+            image: image!,
+            documentId: c.pdfDocumentId!,
+            page: c.pdfPage!,
+            box: c.pdfBox!,
+          ),
+        );
+      case SolveSpace.photo:
+        return SolveView(questionId: questionId, loadBackground: (ref) => loadPhotoBackground(ref, questionId, image!));
+    }
+  }
+}
+
+/// PDF sayfasını çizer; arka plan olarak döner.
+Future<SolveBackground> loadPdfBackground(WidgetRef ref, PdfOpenInfo info, int pageNo, PdfBox box) async {
+  final engine = ref.read(pdfEngineProvider);
+  final doc = await engine.openFile(info.path!);
+  try {
+    final size = await doc.pageSize(pageNo);
+    final region = solveRegion(box, size);
+    if (region == null) throw StateError('Soru kutusu geçersiz');
+    // Not: motor yalnızca tam sayfa çizer (bölge-only API yok); 3x A4 ~4,4 Mpx
+    // (~17 MB) olur ve aşağıdaki döngü maxRenderPixels*0.9 sınırını korur.
+    // Bölge genişliği ~1600 piksel olsun (en çok 3x); belge sınırını aşma.
+    var scale = math.min<double>(3, 1600 / region.width);
+    while (size.width * scale * size.height * scale > maxRenderPixels * 0.9) {
+      scale *= 0.8;
+    }
+    final w = math.max<int>(1, (size.width * scale).round());
+    final h = math.max<int>(1, (size.height * scale).round());
+    final img = await doc.renderPage(pageNo, width: w, height: h);
+    final c = Completer<ui.Image>();
+    ui.decodeImageFromPixels(
+      img.bytes,
+      img.width,
+      img.height,
+      img.format == PdfPixelFormat.bgra ? ui.PixelFormat.bgra8888 : ui.PixelFormat.rgba8888,
+      c.complete,
+    );
+    final decoded = await c.future;
+    return PdfPageBackground(
+      documentId: info.record.id,
+      page: pageNo,
+      region: region,
+      box: box,
+      pageSize: size,
+      image: decoded,
+      imageScale: img.width / size.width,
+    );
+  } finally {
+    await doc.close();
+  }
+}
+
+/// Fotoğraflı kart: görüntü tam genişlikte, altında yazı payı.
+Future<SolveBackground> loadPhotoBackground(WidgetRef ref, String questionId, String mediaPath) async {
+  final file = ref.read(mediaStorageProvider).resolve(mediaPath);
+  final d = await decodeSolveImage(file);
+  final bg = ImageBackground.photo(questionId: questionId, image: d.image, pixelWidth: d.width, pixelHeight: d.height);
+  if (bg == null) {
+    d.image.dispose();
+    throw StateError('Görüntü boyutu geçersiz');
+  }
+  return bg;
+}
+
+/// PDF'li kart, PDF bu cihazda yok: önizleme kutunun yerine oturur (PDF birimi).
+Future<SolveBackground> loadPreviewBackground(
+  WidgetRef ref, {
+  required String image,
+  required String documentId,
+  required int page,
+  required PdfBox box,
+}) async {
+  final file = ref.read(mediaStorageProvider).resolve(image);
+  final d = await decodeSolveImage(file);
+  final bg = ImageBackground.pdfPreview(documentId: documentId, page: page, box: box, image: d.image);
+  if (bg == null) {
+    d.image.dispose();
+    throw StateError('Soru kutusu geçersiz');
+  }
+  return bg;
+}
+
+/// PDF bu cihazdayken çözüm ekranı (PDF sayfası arka plan).
+class PdfSolveView extends StatelessWidget {
   const PdfSolveView({super.key, required this.info, required this.questionId, required this.page, required this.box});
   final PdfOpenInfo info;
   final String questionId;
@@ -51,10 +168,24 @@ class PdfSolveView extends ConsumerStatefulWidget {
   final PdfBox box;
 
   @override
-  ConsumerState<PdfSolveView> createState() => _PdfSolveViewState();
+  Widget build(BuildContext context) => SolveView(
+    questionId: questionId,
+    loadBackground: (ref) => loadPdfBackground(ref, info, page, box),
+  );
 }
 
-class _PdfSolveViewState extends ConsumerState<PdfSolveView> {
+/// Ortak çözüm ekranı: arka planı [loadBackground] verir (PDF sayfası ya da
+/// görüntü); denemeler, eski çözüm, süre, kayıt hepsi için aynıdır.
+class SolveView extends ConsumerStatefulWidget {
+  const SolveView({super.key, required this.questionId, required this.loadBackground});
+  final String questionId;
+  final Future<SolveBackground> Function(WidgetRef ref) loadBackground;
+
+  @override
+  ConsumerState<SolveView> createState() => _SolveViewState();
+}
+
+class _SolveViewState extends ConsumerState<SolveView> {
   final Map<int, PdfInkSession> _sessions = {};
   final List<StreamSubscription<String>> _errorSubs = [];
   late final AppLifecycleListener _lifecycle;
@@ -70,18 +201,16 @@ class _PdfSolveViewState extends ConsumerState<PdfSolveView> {
   int _color = 0xFF1B1B1F;
   double _width = 4;
 
-  // Sayfa resmi ve bölge.
-  PdfBox? _region;
-  PdfPageSize? _pageSize;
-  ui.Image? _image;
-  double _imageScale = 1;
+  // Arka plan (PDF sayfası ya da görüntü).
+  SolveBackground? _bg;
+  bool _disposed = false;
   String? _loadError;
 
   @override
   void initState() {
     super.initState();
     _lifecycle = AppLifecycleListener(onInactive: _flush, onHide: _flush, onPause: _flush);
-    unawaited(_loadPage());
+    unawaited(_loadBackground());
   }
 
   void _flush() {
@@ -92,7 +221,8 @@ class _PdfSolveViewState extends ConsumerState<PdfSolveView> {
 
   PdfInkSession _sessionFor(int attempt) => _sessions.putIfAbsent(attempt, () {
     final s = PdfInkSession(
-      documentId: widget.info.record.id,
+      documentId: _bg!.documentId,
+      ownerOf: _bg!.ownerOf,
       repository: ref.read(inkStrokeRepositoryProvider),
       clock: ref.read(clockProvider),
       attemptNo: attempt,
@@ -107,58 +237,27 @@ class _PdfSolveViewState extends ConsumerState<PdfSolveView> {
     return s;
   });
 
-  Future<void> _loadPage() async {
+  Future<void> _loadBackground() async {
     try {
-      final engine = ref.read(pdfEngineProvider);
-      final doc = await engine.openFile(widget.info.path!);
-      try {
-        final size = await doc.pageSize(widget.page);
-        final region = solveRegion(widget.box, size);
-        if (region == null) throw StateError('Soru kutusu geçersiz');
-        // Not: motor yalnızca tam sayfa çizer (bölge-only API yok); 3x A4 ~4,4 Mpx
-        // (~17 MB) olur ve aşağıdaki döngü maxRenderPixels*0.9 sınırını korur.
-        // Bölge genişliği ~1600 piksel olsun (en çok 3x); belge sınırını aşma.
-        var scale = math.min<double>(3, 1600 / region.width);
-        while (size.width * scale * size.height * scale > maxRenderPixels * 0.9) {
-          scale *= 0.8;
-        }
-        final w = math.max<int>(1, (size.width * scale).round());
-        final h = math.max<int>(1, (size.height * scale).round());
-        final img = await doc.renderPage(widget.page, width: w, height: h);
-        final c = Completer<ui.Image>();
-        ui.decodeImageFromPixels(
-          img.bytes,
-          img.width,
-          img.height,
-          img.format == PdfPixelFormat.bgra ? ui.PixelFormat.bgra8888 : ui.PixelFormat.rgba8888,
-          c.complete,
-        );
-        final decoded = await c.future;
-        if (!mounted) {
-          decoded.dispose();
-          return;
-        }
-        setState(() {
-          _region = region;
-          _pageSize = size;
-          _image = decoded;
-          _imageScale = img.width / size.width;
-        });
-      } finally {
-        await doc.close();
+      final bg = await widget.loadBackground(ref);
+      if (_disposed) {
+        bg.dispose();
+        return;
       }
+      setState(() => _bg = bg);
     } catch (e) {
-      if (mounted) setState(() => _loadError = 'Sayfa açılamadı: $e');
+      if (mounted) setState(() => _loadError = 'Soru açılamadı: $e');
     }
   }
 
   @override
   void dispose() {
+    _disposed = true;
     _lifecycle.dispose();
     for (final s in _errorSubs) {
       s.cancel();
     }
-    _image?.dispose();
+    _bg?.dispose();
     // Kuyruk bitmeden oturum kapanmasın: kayıtlar tamamlanınca kapat.
     for (final s in _sessions.values) {
       unawaited(s.flush().whenComplete(s.dispose));
@@ -168,8 +267,8 @@ class _PdfSolveViewState extends ConsumerState<PdfSolveView> {
 
   void _applyBrush() {
     final cur = _current;
-    if (cur == null) return;
-    final w = _tool == InkTool.highlighter ? _width * 4 : _width;
+    if (cur == null || _bg == null) return;
+    final w = (_tool == InkTool.highlighter ? _width * 4 : _width) * (_bg?.brushScale ?? 1);
     _sessionFor(cur).setBrush(InkBrush(tool: _tool, color: _color, width: w));
   }
 
@@ -199,7 +298,7 @@ class _PdfSolveViewState extends ConsumerState<PdfSolveView> {
     final list = attemptsAsync.value ?? const <SolveAttempt>[];
     final nos = [for (final a in list) a.no];
     final waiting = !attemptsAsync.hasValue && !attemptsAsync.hasError;
-    if (!waiting && _current == null) {
+    if (!waiting && _current == null && _bg != null) {
       _current = currentAttemptNo(nos);
       _applyBrush();
     }
@@ -208,7 +307,9 @@ class _PdfSolveViewState extends ConsumerState<PdfSolveView> {
 
     return Scaffold(
       appBar: AppBar(title: Text('Soru çözümü', overflow: TextOverflow.ellipsis)),
-      body: cur == null
+      body: _loadError != null
+          ? Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(_loadError!)))
+          : cur == null
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
@@ -323,12 +424,9 @@ class _PdfSolveViewState extends ConsumerState<PdfSolveView> {
   );
 
   Widget _canvas(List<int> nos, int cur) {
-    final region = _region;
-    final size = _pageSize;
-    if (_loadError != null) return Center(child: Text(_loadError!));
-    if (region == null || size == null || _image == null) {
-      return const Center(child: CircularProgressIndicator());
-    }
+    final bg = _bg;
+    if (bg == null) return const Center(child: CircularProgressIndicator());
+    final region = bg.region;
     final specs = planSolveLayers(
       current: cur,
       existing: nos,
@@ -342,7 +440,7 @@ class _PdfSolveViewState extends ConsumerState<PdfSolveView> {
       Widget w = PdfPageInkLayer(
         key: ValueKey('solve-ink-${spec.attemptNo}'),
         session: _sessionFor(spec.attemptNo),
-        page: widget.page,
+        page: bg.page,
         pageWidth: region.width,
         pageHeight: region.height,
         originX: region.left,
@@ -380,7 +478,7 @@ class _PdfSolveViewState extends ConsumerState<PdfSolveView> {
                   children: [
                     CustomPaint(
                       key: const Key('solve-page'),
-                      painter: _RegionPainter(_image!, _imageScale, region, size, widget.box),
+                      painter: bg.painter(),
                     ),
                     for (final s in specs) layer(s),
                   ],
@@ -394,46 +492,4 @@ class _PdfSolveViewState extends ConsumerState<PdfSolveView> {
       },
     );
   }
-}
-
-/// Sayfa resminin bölgeye düşen kısmını çizer; bölge sayfanın altından taşarsa
-/// taşan yer beyazdır. Soru kutusu ince bir çerçeveyle işaretlenir.
-class _RegionPainter extends CustomPainter {
-  _RegionPainter(this.image, this.scale, this.region, this.page, this.box);
-  final ui.Image image;
-  final double scale;
-  final PdfBox region;
-  final PdfPageSize page;
-  final PdfBox box;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    canvas.drawRect(Offset.zero & size, Paint()..color = Colors.white);
-    final sx = size.width / region.width, sy = size.height / region.height;
-    final r = math.min<double>(region.right, page.width);
-    final b = math.min<double>(region.bottom, page.height);
-    if (r > region.left && b > region.top) {
-      canvas.drawImageRect(
-        image,
-        Rect.fromLTRB(region.left * scale, region.top * scale, r * scale, b * scale),
-        Rect.fromLTRB(0, 0, (r - region.left) * sx, (b - region.top) * sy),
-        Paint()..filterQuality = FilterQuality.medium,
-      );
-    }
-    canvas.drawRect(
-      Rect.fromLTRB(
-        (box.left - region.left) * sx,
-        (box.top - region.top) * sy,
-        (box.right - region.left) * sx,
-        (box.bottom - region.top) * sy,
-      ),
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.5
-        ..color = const Color(0x991565C0),
-    );
-  }
-
-  @override
-  bool shouldRepaint(_RegionPainter o) => o.image != image || o.region != region;
 }

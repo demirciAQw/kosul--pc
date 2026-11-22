@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../app/routes.dart';
+import '../../../../app/tablet.dart' show isTabletContext;
 import '../../../../core/text/turkish_text.dart';
+import '../../../pdf/domain/solve.dart';
 import '../../domain/question_card.dart';
 import '../../../pdf/pdf_providers.dart';
 import '../../question_bank_providers.dart';
@@ -41,6 +43,11 @@ class QuestionTile extends ConsumerWidget {
             context.push(AppRoutes.pdfReaderAt(pdfId, card.pdfPage!, b.left, b.top, b.right, b.bottom));
           }
         : null;
+    // Tablette köşede kalem simgesi: soruyu (fotoğraflı ya da PDF'li) çiz/çöz ekranında açar.
+    final canSolve = solveSpaceOf(hasPdfAnchor: card.hasPdfAnchor, hasImage: card.questionImage != null) !=
+        SolveSpace.none;
+    final showSolve = canSolve && isTabletContext(context);
+    final solved = ref.watch(solveSummariesProvider).value?[card.id];
     return Material(
       color: scheme.surfaceContainerHighest,
       clipBehavior: Clip.antiAlias,
@@ -91,6 +98,15 @@ class QuestionTile extends ConsumerWidget {
                           style: onImage,
                         ),
                       ),
+                      if (solved != null) ...[
+                        Icon(Icons.edit_rounded, size: 12, color: Colors.white, key: const Key('tile-solved-mark')),
+                        const SizedBox(width: 2),
+                        Text(
+                          '${solved.attempts} · ${formatSolveDuration(solved.lastDuration)}',
+                          style: onImage,
+                        ),
+                        const SizedBox(width: 8),
+                      ],
                       Text('Z${card.difficulty}', style: onImage),
                     ],
                   ),
@@ -123,6 +139,19 @@ class QuestionTile extends ConsumerWidget {
                   style: IconButton.styleFrom(backgroundColor: Colors.black38),
                   onPressed: openPdf,
                   icon: const Icon(Icons.picture_as_pdf_outlined, color: Colors.white, size: 20),
+                ),
+              ),
+            if (showSolve && !selecting)
+              Positioned(
+                top: 4,
+                left: openPdf != null ? 44 : 4,
+                child: IconButton(
+                  key: const Key('tile-open-solve'),
+                  tooltip: 'Çiz / Çöz',
+                  visualDensity: VisualDensity.compact,
+                  style: IconButton.styleFrom(backgroundColor: Colors.black38),
+                  onPressed: () => context.push(AppRoutes.questionSolve(card.id)),
+                  icon: const Icon(Icons.draw_outlined, color: Colors.white, size: 20),
                 ),
               ),
             if (selecting)

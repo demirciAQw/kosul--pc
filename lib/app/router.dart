@@ -154,6 +154,10 @@ final routerProvider = Provider<GoRouter>((ref) {
           ),
         ],
       ),
+      GoRoute(
+        path: '/soru/:questionId/coz',
+        builder: (context, state) => QuestionSolvePage(questionId: state.pathParameters['questionId']!),
+      ),
       GoRoute(path: AppRoutes.sendToComputer, builder: (context, state) => const SendToComputerScreen()),
       GoRoute(
         path: AppRoutes.newNote,

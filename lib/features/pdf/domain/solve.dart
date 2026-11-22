@@ -28,6 +28,23 @@ List<SolveAttempt> solveAttempts(Iterable<StrokeTime> strokes, {Duration maxGap 
   return [for (final n in nos) SolveAttempt(n, by[n]!.length, solveDuration(by[n]!, maxGap: maxGap))];
 }
 
+/// Bir sorunun çözüm özeti (galeri işareti): deneme sayısı ve SON denemenin süresi.
+class SolveSummary {
+  const SolveSummary(this.attempts, this.lastDuration);
+  final int attempts;
+  final Duration lastDuration;
+}
+
+/// Soru başına özet; çizgisi olmayan (ya da yalnız bozuk numaralı) soru listede yoktur.
+Map<String, SolveSummary> solveSummaries(Map<String, List<StrokeTime>> byQuestion) {
+  final out = <String, SolveSummary>{};
+  byQuestion.forEach((id, times) {
+    final a = solveAttempts(times);
+    if (a.isNotEmpty) out[id] = SolveSummary(a.length, a.last.duration);
+  });
+  return out;
+}
+
 /// "Yeniden çöz": mevcut en büyük numaranın bir fazlası (hiç yoksa 1).
 int nextAttemptNo(Iterable<int> existing) {
   var m = 0;
@@ -118,6 +135,48 @@ PdfBox? solveRegion(
   if (r <= l) return null;
   return PdfBox(l, t, r, b);
 }
+
+/// Fotoğraflı kartın çizim uzayı: görüntü genişliği HER ZAMAN bu kadar birim,
+/// yükseklik orantılı (`1000 * h / w`). Çizgiler piksel değil bu birimde
+/// saklanır; böylece görüntü başka çözünürlükte olsa da (oran aynıysa) çizgi
+/// yerinde kalır ve kalınlık PDF sayfasındakine yakın görünür.
+const double photoUnitWidth = 1000;
+
+/// Fotoğraf çizgi kalınlığının PDF sayfa birimine oranı (612 birim = A4 genişliği).
+const double photoBrushScale = photoUnitWidth / 612;
+
+/// Görüntünün çizim uzayındaki boyutu; boyut geçersizse null.
+({double width, double height})? photoUnitSize(int pixelWidth, int pixelHeight) {
+  if (pixelWidth <= 0 || pixelHeight <= 0) return null;
+  return (width: photoUnitWidth, height: photoUnitWidth * pixelHeight / pixelWidth);
+}
+
+/// Fotoğraflı kartın çözüm bölgesi (çizim uzayı): görüntü tam genişlikte üstte,
+/// altında yazı payı (beyaz). Sağda pay yok: görüntü tam genişliğe oturur.
+PdfBox? photoSolveRegion(int pixelWidth, int pixelHeight, {double below = 0.8, double minBelow = 300}) {
+  final u = photoUnitSize(pixelWidth, pixelHeight);
+  if (u == null) return null;
+  return PdfBox(0, 0, u.width, u.height + math.max<double>(minBelow, u.height * below));
+}
+
+/// PDF'li kartın PDF'i bu cihazda yokken çözüm bölgesi: [solveRegion] gibi ama sayfa
+/// boyutu bilinmediği için sağdan kırpılmaz. Koordinat yine PDF sayfa birimidir.
+PdfBox? previewSolveRegion(PdfBox box) => solveRegion(box, const PdfPageSize(1e6, 1e6));
+
+/// Çözümün hangi koordinat uzayında çalışacağı (karttan türetilir).
+enum SolveSpace {
+  /// PDF sayfa birimi (PDF'li kart; arka plan PDF sayfası ya da kart önizlemesi).
+  pdf,
+
+  /// Fotoğraf çizim uzayı (`photoUnitWidth`).
+  photo,
+
+  /// Çözülemez: ne PDF bağı ne de görüntü var.
+  none,
+}
+
+SolveSpace solveSpaceOf({required bool hasPdfAnchor, required bool hasImage}) =>
+    hasPdfAnchor ? SolveSpace.pdf : (hasImage ? SolveSpace.photo : SolveSpace.none);
 
 /// Ekrana çizilecek bir katman.
 class SolveLayerSpec {

@@ -216,6 +216,9 @@ void main() {
       await t.runAsync(() async => nb = await InkNotebookRepository(db).createNotebook(title: 'Bir'));
       await _mount(t, db, nb);
       expect(_indicator(t), '1 / 1');
+      expect(find.text('Yeni sayfa'), findsNothing); // şerit varsayılan kapalı
+      await t.tap(find.byKey(const Key('note-strip-toggle')));
+      await t.pumpAndSettle();
       expect(find.text('Yeni sayfa'), findsOneWidget);
       await t.tap(find.byKey(const Key('note-strip-add')));
       await _wait(t);
@@ -245,6 +248,9 @@ void main() {
       await t.runAsync(() async => nb = await InkNotebookRepository(db).createNotebook(title: 'Bir'));
       final focus = ValueNotifier(false);
       await _mount(t, db, nb, focus: focus);
+      expect(find.byKey(const Key('note-page-strip')), findsNothing); // varsayılan kapalı
+      await t.tap(find.byKey(const Key('note-strip-toggle')));
+      await t.pumpAndSettle();
       expect(find.byKey(const Key('note-page-strip')), findsOneWidget);
       focus.value = true;
       await t.pump();
@@ -259,8 +265,6 @@ void main() {
       late String nb;
       await t.runAsync(() async => nb = await InkNotebookRepository(db).createNotebook(title: 'Bir'));
       await _mount(t, db, nb);
-      await t.tap(find.byKey(const Key('note-strip-toggle')));
-      await t.pumpAndSettle();
       final paper = t.getRect(find.byKey(const Key('note-page-ink')));
       final view = t.getRect(find.byType(InteractiveViewer));
       expect(paper.width, closeTo(view.width, 0.5));
@@ -344,6 +348,133 @@ void main() {
       expect(await height(), freePageHeight);
       await choose('page-size-a4');
       expect(await height(), 1984);
+    });
+  });
+
+  group('araç yuvası ve üst çubuk (ekran)', () {
+    Future<(AppDatabase, String)> setup(WidgetTester t, Size size) async {
+      final db = await _db(t);
+      t.view.physicalSize = size;
+      late String nb;
+      await t.runAsync(() async => nb = await InkNotebookRepository(db).createNotebook(title: 'Bir'));
+      await _mount(t, db, nb);
+      return (db, nb);
+    }
+
+    for (final size in const [Size(1250, 2000), Size(2000, 1250), Size(412, 915)]) {
+      testWidgets('taşma yok, şerit kapalı, sayfa tam genişlik, yuva sayfanın üstünde (${size.width.toInt()})', (t) async {
+        await setup(t, size);
+        expect(t.takeException(), isNull);
+        expect(find.byKey(const Key('note-dock')), findsOneWidget);
+        expect(find.byKey(const Key('note-page-strip')), findsNothing);
+        final paper = t.getRect(find.byKey(const Key('note-page-ink')));
+        final view = t.getRect(find.byType(InteractiveViewer));
+        expect(paper.width, closeTo(view.width, 0.5)); // yuva sayfa alanını daraltmaz
+        final dock = t.getRect(find.byKey(const Key('note-dock')));
+        expect(dock.bottom, lessThanOrEqualTo(view.bottom));
+        expect(dock.width, lessThanOrEqualTo(size.width));
+        // Üst çubukta sayfa göstergesi, oklar ve "+" var.
+        expect(_indicator(t), '1 / 1');
+        for (final k in ['note-page-prev', 'note-page-next', 'note-page-add-top', 'note-page-menu']) {
+          expect(find.byKey(Key(k)), findsOneWidget, reason: k);
+        }
+        // Yuvayı üste al: taşma yok, yuva üst çubuğun altında.
+        await t.tap(find.byKey(const Key('note-dock-move')));
+        await t.pumpAndSettle();
+        expect(t.takeException(), isNull);
+        expect(t.getRect(find.byKey(const Key('note-dock'))).top, lessThan(view.top + 40));
+      });
+    }
+
+    testWidgets('üst çubuktaki "+" sayfa ekler; şerit düğmeyle açılıp kapanır', (t) async {
+      await setup(t, const Size(1250, 2000));
+      await t.tap(find.byKey(const Key('note-page-add-top')));
+      await _wait(t);
+      expect(_indicator(t), '2 / 2');
+      await t.tap(find.byKey(const Key('note-strip-toggle')));
+      await t.pumpAndSettle();
+      expect(find.byKey(const Key('note-page-strip')), findsOneWidget);
+      await t.tap(find.byKey(const Key('note-strip-toggle')));
+      await t.pumpAndSettle();
+      expect(find.byKey(const Key('note-page-strip')), findsNothing);
+    });
+
+    testWidgets('Sayfa düğmesi: şablon, arka plan sayfa kaydını değiştirir; çizgi aralığı yalnız oturumda', (t) async {
+      final (db, nb) = await setup(t, const Size(1250, 2000));
+      PageTemplatePainter paper() =>
+          t.widget<CustomPaint>(find.byKey(const Key('note-page-paper'))).painter! as PageTemplatePainter;
+      expect(paper().template, PageTemplate.ruled);
+      await t.tap(find.byKey(const Key('note-template')));
+      await t.pumpAndSettle();
+      await t.tap(find.byKey(const Key('note-template-dots')));
+      await _wait(t);
+      expect(paper().template, PageTemplate.dots);
+      await t.tap(find.byKey(const Key('note-bg-cream')));
+      await _wait(t);
+      expect(paper().background, 0xFFFFF8E1);
+      await t.tap(find.byKey(const Key('note-spacing-wide')));
+      await _wait(t);
+      expect(paper().spacingFactor, 1.5);
+      late InkNotePageRecord rec;
+      await t.runAsync(() async => rec = (await InkNotebookRepository(db).pages(nb)).single);
+      expect(rec.template, PageTemplate.dots);
+      expect(rec.background, 0xFFFFF8E1);
+      // Sayfa menüsündeki giriş aynı pencereyi açar.
+      await t.tapAt(const Offset(2, 2));
+      await t.pumpAndSettle();
+      await t.tap(find.byKey(const Key('note-page-menu')));
+      await t.pumpAndSettle();
+      await t.tap(find.byKey(const Key('note-page-style')));
+      await t.pumpAndSettle();
+      await t.tap(find.byKey(const Key('note-template-grid')));
+      await _wait(t);
+      expect(paper().template, PageTemplate.grid);
+      expect(paper().spacingFactor, 1.5); // oturum boyunca korunur
+    });
+
+    testWidgets('telefonda: etiket ve şerit sayfa menüsünde, yuva çalışır', (t) async {
+      await setup(t, const Size(412, 915));
+      expect(find.byKey(const Key('note-tags-btn')), findsNothing);
+      expect(find.byKey(const Key('note-strip-toggle')), findsNothing);
+      await t.tap(find.byKey(const Key('note-page-menu')));
+      await t.pumpAndSettle();
+      expect(find.byKey(const Key('note-tags-menu')), findsOneWidget);
+      await t.tap(find.byKey(const Key('note-strip-menu')));
+      await t.pumpAndSettle();
+      expect(find.byKey(const Key('note-page-strip')), findsOneWidget);
+      await t.tap(find.byKey(const Key('note-eraser')));
+      await t.pump();
+      await t.tap(find.byKey(const Key('note-eraser')));
+      await t.pumpAndSettle();
+      expect(find.byKey(const Key('note-erase-mode')), findsOneWidget);
+      expect(t.takeException(), isNull);
+    });
+
+    testWidgets('silgi boyutu ve yuva konumu kalıcı: kapat, yeniden aç, geri gelir', (t) async {
+      final db = await _db(t);
+      late String nb;
+      await t.runAsync(() async => nb = await InkNotebookRepository(db).createNotebook(title: 'Bir'));
+      await _mount(t, db, nb);
+      await t.tap(find.byKey(const Key('note-eraser')));
+      await t.pump();
+      await t.tap(find.byKey(const Key('note-eraser')));
+      await t.pumpAndSettle();
+      await t.tap(find.byKey(const Key('note-size-chip-44')));
+      await t.pumpAndSettle();
+      await t.tapAt(const Offset(2, 2));
+      await t.pumpAndSettle();
+      await t.tap(find.byKey(const Key('note-dock-move')));
+      await _wait(t); // gecikmeli kayıt
+      await t.pumpWidget(const SizedBox());
+      await _wait(t, 3);
+
+      await _mount(t, db, nb);
+      expect(t.state<NotePageEditorState>(find.byType(NotePageEditor)).widget.tools.dockAtTop, isTrue);
+      await t.tap(find.byKey(const Key('note-eraser')));
+      await t.pump();
+      await t.tap(find.byKey(const Key('note-eraser')));
+      await t.pumpAndSettle();
+      expect(t.widget<ChoiceChip>(find.byKey(const Key('note-size-chip-44'))).selected, isTrue);
     });
   });
 }

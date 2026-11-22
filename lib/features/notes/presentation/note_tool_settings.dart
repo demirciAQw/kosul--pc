@@ -10,6 +10,12 @@ import '../../pdf/presentation/pdf_ink_session.dart';
 /// kaybolmaması için ekran tutar; her sayfa oturumuna [apply] ile uygulanır.
 class NoteToolSettings extends ChangeNotifier {
   PenKind _kind = PenKind.ballpoint;
+
+  /// Son seçilen kalem (fosforlu hariç): yuvadaki "Kalem" düğmesi buna döner.
+  PenKind _lastPen = PenKind.ballpoint;
+
+  /// Araç yuvası üstte mi (varsayılan altta).
+  bool _dockTop = false;
   bool _eraser = false;
   bool _lasso = false;
   bool _shapeSnap = true;
@@ -34,6 +40,17 @@ class NoteToolSettings extends ChangeNotifier {
   ShapeTool? _shapeTool;
 
   PenKind get kind => _kind;
+  PenKind get lastPenKind => _lastPen;
+  bool get dockAtTop => _dockTop;
+
+  /// [k] türünün seçili rengi (yuvadaki renk noktası için).
+  int colorFor(PenKind k) => _color[k]!;
+
+  void setDockAtTop(bool top) {
+    if (_dockTop == top) return;
+    _dockTop = top;
+    notifyListeners();
+  }
   bool get eraser => _eraser;
   bool get lasso => _lasso;
 
@@ -79,7 +96,13 @@ class NoteToolSettings extends ChangeNotifier {
     'eraser': _eraserRadius,
   };
 
+  /// Kalıcı saklanacak her şey: boyutlar ve yuva konumu.
+  Map<String, Object?> toPrefs() => {...toSizes(), 'dock.top': _dockTop};
+
+  /// [toPrefs]/[toSizes] çıktısını geri yükler (bilinmeyen/bozuk değerler yok sayılır).
   void restoreSizes(Map<String, Object?> m) {
+    final top = m['dock.top'];
+    if (top is bool) _dockTop = top;
     for (final k in PenKind.values) {
       final v = m['width.${k.name}'];
       if (v is num && v.isFinite) {
@@ -105,6 +128,7 @@ class NoteToolSettings extends ChangeNotifier {
 
   void setKind(PenKind k) {
     _kind = k;
+    if (k != PenKind.highlighter) _lastPen = k;
     _eraser = false;
     _lasso = false;
     _shapeTool = null;

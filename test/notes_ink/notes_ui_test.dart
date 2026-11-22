@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:drift/drift.dart' show TableUpdate, UpdateKind;
 import 'package:drift/native.dart';
 import 'package:flutter/gestures.dart';
@@ -16,6 +18,17 @@ import 'package:kocum/features/notes/presentation/ink_notebook_screen.dart';
 import 'package:kocum/features/notes/presentation/note_page_editor.dart';
 import 'package:kocum/features/notes/presentation/notebooks_screen.dart';
 import 'package:kocum/features/notes/presentation/page_template_painter.dart';
+
+/// Silme yazımı geciken depo: akış güncellenmeden liste yine de hemen kalkmalı.
+class _SlowDeleteRepo extends InkNotebookRepository {
+  _SlowDeleteRepo(super.db);
+  final gate = Completer<void>();
+  @override
+  Future<void> deleteNotebook(String id) async {
+    await gate.future;
+    return super.deleteNotebook(id);
+  }
+}
 
 class _H {
   _H(this.db, this.repo, this.strokes);
@@ -37,7 +50,7 @@ Future<_H> _db(WidgetTester t) async {
     await t.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
     await t.runAsync(h.db.close);
   });
-  t.view.physicalSize = const Size(1200, 900);
+  t.view.physicalSize = const Size(1200, 2000); // sayfa tam görünsün (alttaki yuva çizim noktalarını örtmesin)
   t.view.devicePixelRatio = 1;
   addTearDown(t.view.reset);
   return h;
@@ -119,6 +132,8 @@ void main() {
     await t.tap(find.byKey(const Key('note-template-grid')));
     await _wait(t);
     expect(paper().template, PageTemplate.grid);
+    await t.tapAt(const Offset(2, 2)); // Sayfa penceresini kapat (açıkken sayfaya dokunuş geçmez)
+    await t.pumpAndSettle();
     late List<InkNotePageRecord> pages;
     await t.runAsync(() async => pages = await h.repo.pages(nb));
     expect([for (final p in pages) p.template], [PageTemplate.ruled, PageTemplate.grid]);
@@ -138,6 +153,8 @@ void main() {
     await _wait(t, 3);
     await _mountScreen(t, h, nb);
     expect(t.widget<Text>(find.byKey(const Key('note-page-indicator'))).data, '1 / 2');
+    await t.tap(find.byKey(const Key('note-strip-toggle'))); // şerit varsayılan kapalı
+    await t.pumpAndSettle();
     await t.tap(find.byKey(Key('note-thumb-${pages[1].id}')));
     await _wait(t);
     expect(_editor(t).session.penFor(0).strokes, hasLength(1));
@@ -199,13 +216,13 @@ void main() {
 
     // Avuç (büyük temas): ne çizer ne kaydırır.
     final b = GestureBinding.instance;
-    b.handlePointerEvent(PointerDownEvent(pointer: 90, position: c, radiusMajor: 60));
+    b.handlePointerEvent(PointerDownEvent(pointer: 90, position: c, radiusMajor: 400));
     for (var i = 1; i <= 6; i++) {
       b.handlePointerEvent(PointerMoveEvent(
         pointer: 90,
         position: c + Offset(0, -i * 15.0),
         delta: const Offset(0, -15),
-        radiusMajor: 60,
+        radiusMajor: 400,
       ));
     }
     b.handlePointerEvent(PointerUpEvent(pointer: 90, position: c + const Offset(0, -90)));
@@ -272,7 +289,11 @@ void main() {
     await undo();
 
     // Alan modu.
+    await t.tap(find.byKey(const Key('note-eraser'))); // seçili silgiye yeniden dokun: ayar penceresi
+    await t.pumpAndSettle();
     await t.tap(find.text('Alan'));
+    await t.pumpAndSettle();
+    await t.tapAt(const Offset(2, 2));
     await t.pumpAndSettle();
     await _drag(t, c + const Offset(0, -30), c + const Offset(0, 30), PointerDeviceKind.stylus);
     await _flush(t);
@@ -373,6 +394,8 @@ void main() {
       pages = await h.repo.pages(nb);
     });
     await _mountScreen(t, h, nb);
+    await t.tap(find.byKey(const Key('note-strip-toggle')));
+    await t.pumpAndSettle();
     await t.tap(find.byKey(Key('note-thumb-${pages[2].id}')));
     await _wait(t);
     expect(t.widget<Text>(find.byKey(const Key('note-page-indicator'))).data, '3 / 3');
@@ -470,6 +493,35 @@ void main() {
       await t.tap(find.byKey(Key('notebook-restore-$id')));
       await _wait(t);
       expect(find.byKey(Key('notebook-$id')), findsOneWidget);
+    });
+
+    testWidgets('silinen defter yazım bitmeden listeden kalkar; Geri al ile döner', (t) async {
+      final h = await _db(t);
+      late String id;
+      await t.runAsync(() async => id = await h.repo.createNotebook(title: 'Fizik'));
+      final slow = _SlowDeleteRepo(h.db);
+      await t.pumpWidget(
+        ProviderScope(
+          overrides: [
+            appDatabaseProvider.overrideWithValue(h.db),
+            inkNotebookRepositoryProvider.overrideWithValue(slow),
+          ],
+          child: const MaterialApp(home: NotebooksScreen()),
+        ),
+      );
+      await _wait(t);
+      expect(find.text('Fizik'), findsOneWidget);
+      await t.tap(find.byKey(Key('notebook-del-$id')));
+      await t.pumpAndSettle();
+      await t.tap(find.byKey(const Key('notebook-delete-confirm')));
+      await t.pumpAndSettle();
+      expect(find.text('Fizik'), findsNothing); // veritabanı yazımı henüz bitmedi
+      slow.gate.complete();
+      await _wait(t);
+      expect(find.text('Fizik'), findsNothing);
+      await t.tap(find.text('Geri al'));
+      await _wait(t);
+      expect(find.text('Fizik'), findsOneWidget);
     });
 
     testWidgets('sıra: depodaki sıraya göre listelenir; sürükleyerek yeniden sıralanır', (t) async {
