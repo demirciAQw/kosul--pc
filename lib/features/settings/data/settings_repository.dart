@@ -1,6 +1,5 @@
 import 'dart:convert';
 
-import 'package:drift/drift.dart';
 
 import '../../../core/database/app_database.dart';
 import '../domain/settings.dart';

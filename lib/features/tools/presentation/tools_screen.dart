@@ -196,7 +196,6 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final settings = ref.watch(settingsProvider).value;
     final log = ref.watch(claudeExportLogProvider).value ?? const <ClaudeBatch>[];
     final last = log.isEmpty ? null : log.last;
@@ -271,12 +270,32 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen> {
               ),
               const _Section('Bilgisayar'),
               Card(
-                child: tile(
-                  Icons.computer,
-                  KocumColors.blue,
-                  'Bilgisayara gönder',
-                  'Aynı Wi-Fi\'daki bilgisayardaki Koçum\'a (Linux); yalnızca eksik fotoğraflar gider',
-                  () => context.push(AppRoutes.sendToComputer),
+                child: Column(
+                  children: [
+                    tile(
+                      Icons.computer,
+                      KocumColors.blue,
+                      'Bilgisayarla eşitle',
+                      'Aynı Wi-Fi\'daki bilgisayardaki Koçum\'la (Linux) iki yönlü; ilkinde tam yedek, sonra yalnızca değişiklikler',
+                      () => context.push(AppRoutes.sendToComputer),
+                    ),
+                    const Divider(indent: 72),
+                    tile(
+                      Icons.auto_fix_high_outlined,
+                      KocumColors.green,
+                      'Claude\'un değişiklikleri',
+                      'Oturum oturum; madde ya da oturum başına geri al',
+                      () => context.push(AppRoutes.claudeChanges),
+                    ),
+                    const Divider(indent: 72),
+                    tile(
+                      Icons.merge_type_rounded,
+                      KocumColors.amber,
+                      'Çakışmalar',
+                      'İki cihazda da değişen satırların kaybeden sürümü',
+                      () => context.push(AppRoutes.conflicts),
+                    ),
+                  ],
                 ),
               ),
               const _Section('Dışa aktar'),

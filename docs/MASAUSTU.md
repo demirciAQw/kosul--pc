@@ -2,7 +2,7 @@
 
 Telefondaki Koçum verisinin büyük ekranda görüldüğü ve yönetildiği uygulama. Telefonla **aynı depo, aynı veritabanı şeması, aynı analiz kodu**; yalnızca ekranlar ve giriş noktası ayrı.
 
-> **Durum:** Kod yazıldı ve statik olarak denetlendi, ama henüz **hiç derlenmedi**. Yazıldığı ortamda Flutter yoktu. İlk `flutter test` / `flutter run -d linux` çalıştırmasında derleme hataları çıkabilir.
+> **Durum:** Derlenir ve açılır (`flutter build linux --release`, v8.7'de ilk kez derlendi); testler `flutter test` içindedir. Telefondaki veri girişinin tamamı bilgisayardan da yapılabilir (v8.10) ve iki yönlü senkronla telefona gider ([KABLOSUZ_AKTARIM.md](KABLOSUZ_AKTARIM.md)).
 
 ## Ne yapar?
 
@@ -13,9 +13,17 @@ Telefondaki Koçum verisinin büyük ekranda görüldüğü ve yönetildiği uyg
 | **Ayarlar → İzlenen klasör** | hazır | Syncthing, KDE Connect ya da USB ile bir klasöre düşen yeni yedek, yazılması bitince (3 sn sessizlik) kendiliğinden içe aktarılır. |
 | **Ayarlar → Koç klasörü** | hazır | Her içe aktarmadan sonra fotoğrafsız `Koçum/kocum_yedek.json` bu klasöre (ör. Obsidian kasası) yazılır; yapay zekâ koçu buradan okuyabilir. |
 | **Ayarlar → Telefonda silinenler** | hazır | Telefonda silinip bilgisayarda duran kayıtlar burada listelenir; yalnızca sen silersen silinir. |
-| **Ayarlar → Kablosuz alma** | hazır | Aynı Wi-Fi'daki eşleşmiş telefondan gönderim alır ([KABLOSUZ_AKTARIM.md](KABLOSUZ_AKTARIM.md)). |
+| **Ayarlar → Telefon eşleştirme** | hazır | Aynı Wi-Fi'daki eşleşmiş telefondan gönderim alır ([KABLOSUZ_AKTARIM.md](KABLOSUZ_AKTARIM.md)). |
 | **Ayarlar → Görünüm, İçe aktarma geçmişi** | hazır | Sistem/açık/koyu tema; geçmiş içe aktarmalar. |
-| Kitaplar, Denemeler, Oturumlar, Analiz, Planlar, Notlar | yer tutucu | Gezinmede görünür, içi sonraki aşamalarda dolacak. |
+| **Defter → Soru ekle / Düzenle** | hazır | Soru ve çözüm fotoğrafı: dosya seç ya da pencereye sürükle-bırak; mevcut kırpma ekranıyla kırp (PNG). Ders, MEB konusu, neden, zorluk, şık ya da yazılı cevap, çözüm metni. Ctrl+S kaydeder. Fotoğraftaki yazı telefonda okunur. Seçili soruya etiket ve not bağlanır. |
+| **Kitaplar** | hazır | Elle kitap, şablon dosyası (JSON) ya da hazır şablonlardan ekle; bölüm ve test ağacını düzenle (ekle, yeniden adlandır, sırala, onaylı sil); test sonucu işaretle. |
+| **Optik** | hazır | Kitap testinin cevaplarını klavyeyle gir: A–E (cevap anahtarıyla) ya da D / Y / B; her tuşta sonraki soru. Ok tuşları gezer, Boşluk boş, Geri siler, Tab kip değiştirir, Ctrl+S kaydeder. |
+| **Denemeler** | hazır | Elle deneme (TYT, AYT, YDT, branş), düzenle, onaylı sil; karne PDF'i içe aktar (önizleme, yanlış ve boşları deftere ekle). |
+| **Oturumlar** | hazır | Pencere içi sayaçla çalışma oturumu (kitaptan ya da kitapsız); bitir, sonuç gir, süreyi düzelt, onaylı sil. Telefonun bildirim kronometresine dokunulmaz. |
+| **Planlar** | hazır | Plan oluştur, görev ekle ve işaretle, yapay zekâ programını içe aktar. |
+| **Analiz** | hazır, salt okunur | Telefondaki derin analiz, soru kökü analizi, örüntüler, en çok yanlış ve çalışma süresi. |
+| **Notlar, Kişiler, Etiketler** | hazır | Anlık notlar (Ctrl+N, Ctrl+S, Ctrl+F), kişiler, etiket ağacı (yeniden adlandır, üst etiket, birleştir). |
+| **Claude'un değişiklikleri, Çakışmalar** | hazır | `kocum` aracının yaptığı değişiklikler oturum oturum geri alınır; iki cihazda da değişen satırların kaybeden sürümü ([KOCUM_ARACI.md](KOCUM_ARACI.md)). |
 
 Masaüstünde **olmayanlar**: kamera, fotoğraftan metin okuma (ML Kit), oturum sayacı bildirimi, hatırlatıcılar. Bunlar telefonun işi ve bilgisayarda hiç başlatılmaz.
 
@@ -39,7 +47,11 @@ Masaüstünde **olmayanlar**: kamera, fotoğraftan metin okuma (ML Kit), oturum 
 | `desktop_app.dart` | `MaterialApp` ve tema |
 | `desktop_providers.dart` | Veri klasörü, bölümler (`DesktopSection`), uygulama geneli bildirim |
 | `shell/desktop_shell.dart` | Soldaki kalıcı gezinme (`NavigationRail`) ve sayfalar |
-| `widgets/` | `DesktopPage` iskeleti, yer tutucu, `SettingsCard` |
+| `widgets/` | `DesktopPage` iskeleti, `SettingsCard`, `FileDropZone` (sürükle-bırak; `desktop_drop`) |
+| `entry/` | Veri girişi sayfaları: soru düzenleyici, kitaplar, optik, denemeler, oturumlar, planlar |
+| `anlik/` | Notlar, Kişiler, Etiketler sayfaları |
+| `analysis/` | Salt okunur Analiz |
+| `data/external_change_watcher.dart` | `PRAGMA data_version` ile dış değişikliği fark edip ekranları yeniler |
 | `import/domain/` | Saf Dart: içe aktarma modelleri, hangi tabloların alınacağı, "eski yedek mi", silinenler listesi |
 | `import/data/backup_source.dart` | ZIP ya da klasörden yedek okuma (bağımlılıksız ZIP okuyucu) |
 | `import/data/snapshot_merger.dart` | Satır satır birleştirme |
@@ -108,8 +120,7 @@ sudo ufw allow from 192.168.0.0/16 to any port 47321 proto tcp
 sudo ufw allow from 192.168.0.0/16 to any port 47322 proto udp
 ```
 
-## Sıradaki aşamalar
+## Sıradaki işler
 
-- **3. aşama:** Masaüstünde kitap ekleme ve düzenleme (kitap şablonu JSON sözleşmesi v1). Kitap telefona JSON dosyası ya da ileride bilgisayardan telefona eşitlemeyle gider.
-- Yer tutucu sayfaların doldurulması: Kitaplar, Denemeler, Oturumlar, Analiz, Planlar, Notlar.
-- Sürükle-bırak ile yedek içe aktarma.
+- Soru fotoğrafı için bilgisayarda kırpma ekranı fare ve klavyeyle çalışır ama dokunmatik ekran için ayrı ayarı yoktur.
+- Tablet + PDF modu: [TABLET_PDF.md](TABLET_PDF.md).

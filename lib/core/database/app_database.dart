@@ -1,6 +1,6 @@
 import 'package:drift/drift.dart';
-import 'package:drift_flutter/drift_flutter.dart';
 
+import '../ledger/ledger_service.dart';
 import 'converters.dart';
 import 'tables.dart';
 
@@ -23,11 +23,25 @@ part 'app_database.g.dart';
   NotePhotos,
   OcrResults,
   AppMeta,
-
+  AnlikNotes,
+  Tags,
+  AnlikNoteTags,
+  QuestionCardTags,
+  People,
+  AnlikNotePeople,
+  AnlikLinks,
+  Degisiklikler,
+  Baglam,
+  Cakismalar,
+  EsitlemeDurum,
+  SilmeOnerileri,
 ])
 class AppDatabase extends _$AppDatabase {
   /// Testlerde: `AppDatabase(NativeDatabase.memory())`
-  AppDatabase([QueryExecutor? executor]) : super(executor ?? driftDatabase(name: 'kocum'));
+  AppDatabase(QueryExecutor executor, [this.ledgerSource = 'telefon']) : super(executor);
+
+  /// Bu cihazın değişiklik defterindeki varsayılan kaynağı: `telefon` ya da `pc`.
+  final String ledgerSource;
 
   /// v2: fotoğrafsız/çözümsüz kartlar, soru numarası, kitapsız oturum, denemeler.
   /// v3: testlerin kesin soru sayısı, planların tamamlanma tarihi.
@@ -35,8 +49,11 @@ class AppDatabase extends _$AppDatabase {
   /// v5: kartlarda serbest konu/kazanım adı (karneden içe aktarma).
   /// v6: eski sürümlerden kalan yetim tekrar kayıtlarını temizler.
   /// v7: ders notları (study_notes).
+  /// v12: anlık notlar, ortak etiketler, kişiler ve bağlar.
+  /// v13: değişiklik defteri, bağlam, çakışmalar, senkron imleçleri; tetikleyiciler.
+  /// v14: silme önerileri (Claude silmez, işaretler).
   @override
-  int get schemaVersion => 11;
+  int get schemaVersion => 14;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -48,6 +65,7 @@ class AppDatabase extends _$AppDatabase {
             "ON study_sessions(status) WHERE status = 'running'",
           );
           await _createV2Indexes();
+          await _createLedgerTables(m);
         },
         onUpgrade: (m, from, to) async {
           if (from < 2) {
@@ -116,11 +134,35 @@ class AppDatabase extends _$AppDatabase {
           if (from == 10) {
             await m.addColumn(ocrResults, ocrResults.structureJson);
           }
+          // Anlık notlar ve etiketler (v12). Sıra: bağlananlar önce.
+          if (from < 12) {
+            await m.createTable(anlikNotes);
+            await m.createTable(tags);
+            await m.createTable(anlikNoteTags);
+            await m.createTable(questionCardTags);
+            await m.createTable(people);
+            await m.createTable(anlikNotePeople);
+            await m.createTable(anlikLinks);
+          }
+          if (from < 13) await _createLedgerTables(m);
+          if (from < 14) await m.createTable(silmeOnerileri);
+          // Tablolar yeniden kurulmuş ya da sütun eklenmiş olabilir: tetikleyiciler baştan.
+          await LedgerService(this).installTriggers(rebuild: true);
         },
         beforeOpen: (details) async {
           await customStatement('PRAGMA foreign_keys = ON');
+          await LedgerService(this).ensureReady(defaultSource: ledgerSource);
         },
       );
+
+  Future<void> _createLedgerTables(Migrator m) async {
+    await m.createTable(degisiklikler);
+    await m.createTable(baglam);
+    await m.createTable(cakismalar);
+    await m.createTable(esitlemeDurum);
+    await customStatement('CREATE INDEX IF NOT EXISTS ix_degisiklik_satir ON degisiklikler(tablo, satir_id)');
+    await customStatement('CREATE INDEX IF NOT EXISTS ix_degisiklik_oturum ON degisiklikler(oturum_id)');
+  }
 
   Future<void> _createV2Indexes() async {
     await customStatement(

@@ -10,6 +10,7 @@ import '../domain/progress.dart';
 import '../library_providers.dart';
 import 'library_sheet.dart';
 import 'widgets/progress_widgets.dart';
+import '../../../app/widgets/home_logo_button.dart';
 
 /// Kitaplar sekmesi: her kitabın ne kadarı bitti, ne kadarı duruyor.
 /// Kitap kategorisi: sınav türüne ve yayıncıya göre üç sekme.
@@ -43,6 +44,8 @@ class BooksScreen extends ConsumerWidget {
       length: BookShelf.values.length,
       child: Scaffold(
         appBar: AppBar(
+          leading: const HomeLogoButton(),
+          leadingWidth: HomeLogoButton.width,
           title: const Text('Kitaplarım'),
           bottom: TabBar(
             tabs: [

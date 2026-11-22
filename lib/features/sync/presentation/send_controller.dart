@@ -9,6 +9,8 @@ import '../../../app/platform.dart';
 import '../../../core/di/core_providers.dart';
 import '../../tools/data/full_export.dart';
 import '../../tools/full_backup.dart';
+import '../../../core/ledger/ledger_service.dart';
+import '../data/ledger_sync.dart';
 import '../data/phone_sync_store.dart';
 import '../data/sync_client.dart';
 import '../domain/media_rules.dart';
@@ -95,59 +97,85 @@ class SendController extends Notifier<SendState> {
     try {
       final saved = await _store.computer();
       if (saved == null) throw const SyncException('Önce bir bilgisayarla eşleş.');
-      final temp = await getTemporaryDirectory();
-      zipFile = File(p.join(temp.path, 'kocum_kablosuz.zip'));
-      // Fotoğraf listesi ve veritabanı kopyası aynı anda alınır: birbirini tutar.
-      final backup = await collectFullBackup(
-        ref.read,
-        scratch: File(p.join(temp.path, 'kocum_kablosuz.db')),
-        withDataSets: false,
-      );
-      final database = backup.database;
-      if (database == null) throw SyncException('Veritabanı kopyası alınamadı: ${backup.databaseError}');
+      final ledger = ref.read(ledgerServiceProvider);
+      final db = ref.read(appDatabaseProvider);
       final media = ref.read(mediaStorageProvider);
-      final offered = <MediaEntry>[];
+      // İlk gönderim tam yedekle birleştirilir (bugünkü yol); defter ondan
+      // sonrasını izler. Sonraki gönderimler yalnızca değişiklikleri taşır.
+      final firstTime = await ledger.intState(LedgerService.keyStarted) != 1;
+
+      var offered = <MediaEntry>[];
       var notOnPhone = 0, skipped = 0;
-      for (final path in photoPathsOf(backup.cards, backup.notes)) {
-        if (!isTransferableMediaPath(path)) {
-          skipped++;
-          continue;
+      var snapSeq = 0;
+      if (firstTime) {
+        final temp = await getTemporaryDirectory();
+        zipFile = File(p.join(temp.path, 'kocum_kablosuz.zip'));
+        // Defter sırası yedekten ÖNCE alınır: yedeğe girenler bu sıraya kadardır.
+        snapSeq = await ledger.maxSeq();
+        // Fotoğraf listesi ve veritabanı kopyası aynı anda alınır: birbirini tutar.
+        final backup = await collectFullBackup(
+          ref.read,
+          scratch: File(p.join(temp.path, 'kocum_kablosuz.db')),
+          withDataSets: false,
+        );
+        final database = backup.database;
+        if (database == null) throw SyncException('Veritabanı kopyası alınamadı: ${backup.databaseError}');
+        for (final path in photoPathsOf(backup.cards, backup.notes)) {
+          if (!isTransferableMediaPath(path)) {
+            skipped++;
+            continue;
+          }
+          final stat = await media.resolve(path).stat();
+          if (stat.type != FileSystemEntityType.file) {
+            notOnPhone++;
+            continue;
+          }
+          offered.add(MediaEntry(path, stat.size));
         }
-        final stat = await media.resolve(path).stat();
-        if (stat.type != FileSystemEntityType.file) {
-          notOnPhone++;
-          continue;
-        }
-        offered.add(MediaEntry(path, stat.size));
+        final zip = await buildFullExportZip(
+          data: backup.data,
+          cards: backup.cards,
+          notes: backup.notes,
+          media: media,
+          withPhotos: false,
+          database: database,
+        );
+        await zipFile.writeAsBytes(zip.bytes, flush: true);
       }
-      final zip = await buildFullExportZip(
-        data: backup.data,
-        cards: backup.cards,
-        notes: backup.notes,
-        media: media,
-        withPhotos: false,
-        database: database,
-      );
-      await zipFile.writeAsBytes(zip.bytes, flush: true);
 
       var computer = saved;
       var sent = 0;
-      String summary;
+      var backupSummary = '';
+      var firstDone = !firstTime;
+      LedgerSyncResult? synced;
       for (var attempt = 1;; attempt++) {
         try {
           _set(SendStage.connecting, '${computer.name} ile bağlantı kuruluyor…');
           final phoneId = await _store.phoneId();
           final (found, connection) = await _connect(client, computer, phoneId);
           computer = found;
-          final missing = await client.missingPhotos(connection, offered);
-          final toSend = requestedFromOffer(offered, missing.missing);
-          for (var i = 0; i < toSend.length; i++) {
-            _set(SendStage.photos, 'Fotoğraflar: $i / ${toSend.length}', done: i, total: toSend.length);
-            await client.sendPhoto(connection, toSend[i], media.resolve(toSend[i].path));
-            sent++;
+          if (!firstDone) {
+            final missing = await client.missingPhotos(connection, offered);
+            final toSend = requestedFromOffer(offered, missing.missing);
+            for (var i = 0; i < toSend.length; i++) {
+              _set(SendStage.photos, 'Fotoğraflar: $i / ${toSend.length}', done: i, total: toSend.length);
+              await client.sendPhoto(connection, toSend[i], media.resolve(toSend[i].path));
+              sent++;
+            }
+            _set(SendStage.uploading, 'Veriler gönderildi; bilgisayar içe aktarıyor…');
+            backupSummary = (await client.sendBackup(connection, zipFile!)).summary;
+            await ledger.setIntState(LedgerService.keySentSeq, snapSeq);
+            await ledger.setIntState(LedgerService.keyStarted, 1);
+            firstDone = true;
           }
-          _set(SendStage.uploading, 'Veriler gönderildi; bilgisayar içe aktarıyor…');
-          summary = (await client.sendBackup(connection, zipFile)).summary;
+          _set(SendStage.uploading, 'Değişiklikler eşitleniyor…');
+          synced = await LedgerSync(
+            ledger: ledger,
+            client: client,
+            schemaVersion: db.schemaVersion,
+            mediaFile: media.resolve,
+            onProgress: (m) => _set(SendStage.uploading, m),
+          ).run(connection);
           break;
         } on Object catch (e) {
           if (attempt >= _attempts || !_retryable(e)) rethrow;
@@ -158,8 +186,11 @@ class SendController extends Notifier<SendState> {
       await _store.saveComputer(computer.copyWith(lastSentAt: DateTime.now()));
       ref.invalidate(pairedComputerProvider);
       _set(SendStage.done, [
-        sent == 0 ? 'Yeni fotoğraf yoktu.' : '$sent fotoğraf gönderildi.',
-        'Bilgisayar: $summary',
+        if (backupSummary.isNotEmpty) ...[
+          sent == 0 ? 'Yeni fotoğraf yoktu.' : '$sent fotoğraf gönderildi.',
+          'Bilgisayar: $backupSummary',
+        ],
+        'Eşitleme: ${synced.summary}.',
         if (notOnPhone > 0) '$notOnPhone fotoğraf telefonda bulunamadı.',
         if (skipped > 0) '$skipped fotoğrafın adı kurallara uymadığı için gönderilmedi.',
       ].join(' '));

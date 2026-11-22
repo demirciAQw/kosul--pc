@@ -16,7 +16,15 @@ telefon (konu düzeyi) hem tablet (soru düzeyi) için tarif edilmiştir.
   Domain saf Dart: test edilebilir, Flutter'a bağlı değil.
 - Ortak: `lib/core/` (database, media, export, text, notifications, di).
 - Önemli yerler:
-  - `core/database/` tablolar ve göçler (`schemaVersion` şu an 11)
+  - `core/database/` tablolar ve göçler (`schemaVersion` şu an 14)
+  - `core/ledger/` değişiklik defteri: HLC, SQLite tetikleyicileri, uygulama/çakışma/geri alma
+    (`LedgerService`). Her senkron tablosu tetikleyiciyle deftere yazılır; ayrıntı
+    `docs/KABLOSUZ_AKTARIM.md`
+  - `features/anlik/` anlık notlar, ortak etiketler, kişiler (`((etiket))`, `@kişi`)
+  - `features/ledger/` Claude'un değişiklikleri, çakışmalar, silme önerileri ekranları
+  - `lib/cli/` + `bin/kocum.dart`: Claude'un veriye eli (`docs/KOCUM_ARACI.md`)
+  - `lib/desktop/entry/` bilgisayarda veri girişi sayfaları (soru, kitaplar, optik,
+    denemeler, oturumlar, planlar)
   - `features/question_bank/` soru kartları, defter, optik, akıllı arama
   - `features/ocr/` fotoğraftan okuma (ML Kit), sayfa okuyucu
     (`domain/reader/page_reader.dart`: soru, kök, öncül, şık; konuma göre),
@@ -112,6 +120,20 @@ flutter build linux --release      # build/linux/x64/release/bundle/kocum
 - Uygulama boyutu önemli: model dosyası gömmekten kaçın.
 
 ## Bu projede yaşanmış tuzaklar
+
+- **Drift `references(...)` kuralını SQL'e YAZMIYOR** (bu sürümde; üretimde 0 `REFERENCES`).
+  Eski tablolarda `ON DELETE CASCADE/SET NULL` çalışmaz; silmeyi kod yapmalı.
+  Yeni tablolarda `customConstraint('... REFERENCES t(id) ON DELETE CASCADE')` kullan.
+- Senkron tablosu tek sütunlu birincil anahtar ister (`SnapshotMerger` ve defter `satirId`);
+  bileşik anahtar yerine `id` sütunu + `uniqueKeys`.
+- Tetikleyicinin yazdığı satırı ve `customStatement` ile yazılan tabloyu Drift'in akışları
+  görmez: sonra `notifyUpdates` çağır (`LedgerService._flushTouched`).
+- Dış araç ya da süreç yazacaksa `LedgerService.withSource(...)` içinde yaz (kaynak ve oturum).
+- `AppDatabase(executor, [ledgerSource])`: masaüstü `'pc'`, telefon varsayılan `'telefon'`.
+  `lib/core/database/` saf Dart kalmalı (`drift_flutter` içe aktarma; yoksa `dart run bin/kocum.dart` çalışmaz).
+- Riverpod 3: dinleyicisi olmayan sağlayıcının akışı duraklar; testte `ProviderContainer.read(p.future)`
+  takılabilir, widget ya da `listen` ile test et.
+- Widget testinde Drift akışları gerçek zaman ister: `tester.runAsync(() => Future.delayed(...))`.
 
 - `var y = math.max(0, …)` `num` çıkarabilir; tamsayı bağlamında
   `math.max<int>` / `math.min<int>` yaz.

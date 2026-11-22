@@ -43,16 +43,16 @@ class _WirelessSectionState extends ConsumerState<WirelessSection> {
     final small = theme.textTheme.bodySmall;
     return SettingsCard(
       icon: Icons.wifi,
-      title: 'Kablosuz alma (yerel ağ)',
+      title: 'Telefon eşleştirme (yerel ağ)',
       children: [
         Text(
-          'Telefon aynı Wi-Fi\'dayken Koçum\'da Araçlar → Bilgisayara gönder. İnternet ya da bulut kullanılmaz; '
+          'Telefon aynı Wi-Fi\'dayken Koçum\'da Ayarlar → Araçlar → Bilgisayarla eşitle. İnternet ya da bulut kullanılmaz; '
           'yalnızca eşleşmiş tek telefon kabul edilir ve yalnızca bilgisayarda olmayan fotoğraflar gelir.',
           style: mutedStyle(context),
         ),
         if (!s.supported) ...[
           const SizedBox(height: 12),
-          const Text('Kablosuz alma yalnızca Linux\'ta açılır.'),
+          const Text('Telefon eşleştirme yalnızca Linux\'ta açılır.'),
         ] else ...[
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
@@ -113,7 +113,7 @@ class _WirelessSectionState extends ConsumerState<WirelessSection> {
         title: const Text('Eşleşme kaldırılsın mı?'),
         content: Text(
           '${phone.name} artık bu bilgisayara veri gönderemez. Bilgisayardaki veriler silinmez. '
-          'Telefonda da Bilgisayara gönder → Eşleşmeyi kaldır yap.',
+          'Telefonda da Ayarlar → Araçlar → Bilgisayarla eşitle → Eşleşmeyi kaldır yap.',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Vazgeç')),

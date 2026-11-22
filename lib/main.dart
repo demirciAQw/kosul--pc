@@ -1,3 +1,4 @@
+import 'package:drift_flutter/drift_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -29,7 +30,7 @@ Future<void> main() async {
     systemNavigationBarContrastEnforced: false,
   ));
 
-  final database = AppDatabase();
+  final database = AppDatabase(driftDatabase(name: 'kocum'));
   final media = await LocalMediaStorage.open();
   final chronometer = SessionChronometer();
   final reminders = ReminderService();

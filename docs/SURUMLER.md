@@ -61,3 +61,11 @@ Sürüm numarası `pubspec.yaml` içindedir; her sürüm bir git etiketidir (`v8
 | eşitleme 2 | bilgisayarın yerel ağ sunucusu |
 | eşitleme 3 | telefon istemcisi ve uçtan uca testler |
 | eşitleme 4 | Android ağ izni ve belgeler |
+| v8.7 | 2026-11-20 | Anlık notlar, ortak etiketler, Kişiler, uyku kaydı (Yattım/Kalktım); şema 12 |
+| v8.7.1 | 2026-11-20 | telefonda ve bilgisayarda veri girişi arayüzleri (Notlar, Kişiler, Etiketler, Defter'de etiket) |
+| v8.8 | 2026-11-20 | değişiklik defteri, iki yönlü senkron, çakışmalar, geri alma; şema 13 |
+| v8.9 | 2026-11-20 | kocum aracı (Claude için düzenleme ve geri alma), silme önerileri, dış değişiklik izleme; şema 14 |
+| masaüstü 7–12 | 2026-11-20 | bilgisayarda veri girişi: soru, kitaplar, optik, denemeler, oturumlar, planlar; Analiz salt okunur |
+| v8.10 | 2026-11-20 | bilgisayarda tüm veri girişi |
+| v8.11 | 2026-11-20 | hoş geldin ekranı; alt çubuk 5 sekme (Bugün çubuktan çıktı, logo ana ekrana götürür); Araçlar Ayarlar içine taşındı |
+| v8.12 | 2026-11-20 | bilgisayarda Bugün sayfası (tekrarı gelen sorular, ders ve konuya göre); Kitaplar TYT / AYT / MEB raflarına ayrıldı |

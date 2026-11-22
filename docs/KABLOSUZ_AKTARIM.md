@@ -1,4 +1,4 @@
-# Kablosuz aktarım (telefon → bilgisayar)
+# Kablosuz aktarım ve iki yönlü senkron (telefon ⇄ bilgisayar)
 
 Protokol v1, düz HTTP (`dart:io`). Portlar: TCP **47321**, UDP **47322** (bulma). Kod: `lib/features/sync/` (ortak), `lib/desktop/sync/` (sunucu).
 
@@ -47,3 +47,43 @@ Protokol v1, düz HTTP (`dart:io`). Portlar: TCP **47321**, UDP **47322** (bulma
 - Platform bildirimi taklit edilebilir; asıl kilit koddan türeyen anahtardır.
 - Android 17 hedefinde yerel ağ için çalışma zamanı izni (`ACCESS_LOCAL_NETWORK`) gerekecek; şimdilik INTERNET izni (`tool/network_patch.dart`) yeterli.
 - Güvenlik duvarı: `sudo ufw allow from 192.168.0.0/16 to any port 47321 proto tcp` ve `... port 47322 proto udp`.
+
+## İki yönlü senkron (v8.8)
+
+İlk eşitlemede bugünkü yol çalışır (fotoğraflar + tam yedek, telefon kazanır). Ondan sonra **yedek gitmez**; yalnızca **değişiklik defteri** taşınır.
+
+### Değişiklik defteri
+
+- `degisiklikler` tablosu: `id` (iki cihazda aynı), `yerelSira`, `cihazId`, `kaynak` (`telefon | pc | claude | senkron | geri_al`), `oturumId`, `tablo`, `satirId`, `islem` (`ekle | degistir | sil`), `eski`, `yeni` (satırın tamamı, JSON), `saat` (HLC), `uzak`, `geriAlinan`.
+- **SQLite tetikleyicileri** (`lib/core/ledger/ledger_triggers.dart`) her senkron tablosunda ekleme, güncelleme (yalnızca satır gerçekten değişince) ve silmeyi yazar. Böylece uygulamanın her yeri ve dışarıdan yazan araçlar (`kocum`) kendiliğinden kaydolur.
+- Yazanın kim olduğu işlemden önce tek satırlık `_baglam` tablosuna yazılır (`LedgerService.withSource`). `bastir = 1` tetikleyicileri susturur (yedek birleştirme, karşıdan gelen satırların uygulanması).
+- Senkron dışı tablolar: `app_meta`, `degisiklikler`, `_baglam`, `cakismalar`, `esitleme_durum` ve `curriculum_nodes` (MEB ağacını her cihaz aynı varlıktan kendisi tohumlar). Bunlar bilgisayara ve yedek birleştirmeye girmez.
+- **HLC** (`lib/core/ledger/hlc.dart`): `<ms>-<sayaç>-<cihaz>`. Karşıdan gelen saati gören cihaz kendi saatini onun üstüne taşır; saati geride olsa da gördüğü değişikliğin üstüne yazan kazanır.
+- Defter sonsuz büyümesin diye budama henüz yok (satır başına birkaç yüz bayt).
+
+### Protokol
+
+Mevcut eşleştirme, imza ve sıra numarası aynen kalır; telefon yine istemcidir. İki yeni uç:
+
+| İstek | Ne yapar |
+|---|---|
+| `POST /kocum/v1/degisiklikler` | Telefon kendi satırlarını (`sira > gonderilen`) ve "bilgisayardan şu sıraya kadar aldım" imlecini yollar. Bilgisayar uygular, `onay` döner; cevapta telefonun görmediği kendi satırlarını, başvurdukları fotoğrafların listesini ve `daha` bayrağını verir. En çok 300 satır ve 5 MB; fazlası birkaç turda gider. |
+| `POST /kocum/v1/fotograf-al` | Telefon, bilgisayarın **kendi değişikliklerinde geçen** bir fotoğrafı ister. Başka yol verilmez (genel dosya okuma yoktur). |
+
+- **Yanıtlar imzalıdır** (`x-kocum-yanit-imza`: oturum, sıra, gövde özeti). Telefon imzayı doğrulamadan hiçbir satırı ya da fotoğrafı uygulamaz; ağdaki biri yanıtı değiştirip veri sokamaz.
+- Okuma ya da listeleme ucu eklenmedi. `fotograf-al`, bilgisayarın kendi eklediği fotoğrafı telefona vermenin tek yoludur ve yalnızca defterde geçen yollarla çalışır.
+- Şema sürümü iki tarafta aynı olmalı; değilse açık hata verilir ve hiçbir şey uygulanmaz.
+- **Sıra**: fotoğraflar satırlardan önce taşınır (giden fotoğraf önce yüklenir, gelen önce indirilir). Telefon, gelen kartın fotoğrafını önce aldığı için metin okuma kuyruğu eksik dosyayı "okunamadı" yazmaz; okuma yine telefonda yapılır.
+- **İmleçler** yalnızca uygulama bitince ilerler. Bağlantı yarıda koparsa aynı satırlar yeniden gider; bilgisayar kimliğe bakıp çift kayıt yapmaz.
+
+### Çakışma
+
+Karşıdan gelen değişikliğin `eski` değeri, yereldeki satırla aynıysa doğrudan uygulanır. Değilse (iki taraf da değiştirdi) HLC'si yeni olan kazanır; **kaybeden sürüm `cakismalar` tablosuna düşer**, silinmez, iki uygulamada da görünür ("Kaybedeni geri getir" ya da "Kazanan kalsın"). Silme ile değiştirme çakışması da böyle çözülür.
+
+### Geri alma
+
+`LedgerService.undoChange(id)`: değişikliğin `eski` değerini **yeni bir değişiklik olarak** yazar (`kaynak: geri_al`, `geriAlinan: id`), yani geri alma da geri alınabilir. Satır o arada başkası tarafından değiştiyse üstüne yazılmaz, çakışma olarak gösterilir. `undoSession(oturum)`: oturumun Claude değişikliklerini sondan başa geri alır. Ekran: Araçlar → Claude'un değişiklikleri (telefon), "Claude'un değişiklikleri" bölümü (bilgisayar).
+
+### Testler
+
+`test/ledger_test.dart` (tetikleyiciler, iki cihaz, çakışma, saat farkı, geri alma), `test/sync_ledger_e2e_test.dart` (gerçek sunucu ve istemci 127.0.0.1'de: iki yön, fotoğraf, çift gönderim, çok tur, sürüm farkı), `test/ledger_views_test.dart`.

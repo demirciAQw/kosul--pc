@@ -1,7 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../features/anlik/presentation/anlik_screens.dart';
 import '../features/dashboard/presentation/dashboard_screen.dart';
+import '../features/ledger/presentation/ledger_screens.dart';
 import '../features/home/home_screen.dart';
 import '../features/library/presentation/book_detail_screen.dart';
 import '../features/library/presentation/books_screen.dart';
@@ -41,6 +43,9 @@ final routerProvider = Provider<GoRouter>((ref) {
             GoRoute(path: AppRoutes.home, builder: (context, state) => const HomeScreen()),
           ]),
           StatefulShellBranch(routes: [
+            GoRoute(path: AppRoutes.anlikTab, builder: (context, state) => const AnlikScreen()),
+          ]),
+          StatefulShellBranch(routes: [
             GoRoute(path: AppRoutes.books, builder: (context, state) => const BooksScreen()),
           ]),
           StatefulShellBranch(routes: [
@@ -51,9 +56,6 @@ final routerProvider = Provider<GoRouter>((ref) {
           ]),
           StatefulShellBranch(routes: [
             GoRoute(path: AppRoutes.insights, builder: (context, state) => const DashboardScreen()),
-          ]),
-          StatefulShellBranch(routes: [
-            GoRoute(path: AppRoutes.tools, builder: (context, state) => const ToolsScreen()),
           ]),
         ],
       ),
@@ -81,11 +83,25 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/questions/:id',
         builder: (context, state) => QuestionDetailScreen(cardId: state.pathParameters['id']!),
       ),
+      GoRoute(path: AppRoutes.newAnlik, builder: (context, state) => const AnlikEditorScreen()),
+      GoRoute(
+        path: '/anlik/not/:id',
+        builder: (context, state) => AnlikEditorScreen(noteId: state.pathParameters['id']!),
+      ),
+      GoRoute(path: AppRoutes.people, builder: (context, state) => const PeopleScreen()),
+      GoRoute(
+        path: '/kisiler/:id',
+        builder: (context, state) => PersonNotesScreen(personId: state.pathParameters['id']!),
+      ),
+      GoRoute(path: AppRoutes.tags, builder: (context, state) => const TagsScreen()),
       GoRoute(path: AppRoutes.plan, builder: (context, state) => const PlanScreen()),
       GoRoute(path: AppRoutes.newPlan, builder: (context, state) => const CreatePlanScreen()),
       GoRoute(path: AppRoutes.sessions, builder: (context, state) => const SessionHistoryScreen()),
       GoRoute(path: AppRoutes.settings, builder: (context, state) => const SettingsScreen()),
+      GoRoute(path: AppRoutes.tools, builder: (context, state) => const ToolsScreen()),
       GoRoute(path: AppRoutes.practiceTest, builder: (context, state) => const PracticeTestScreen()),
+      GoRoute(path: AppRoutes.claudeChanges, builder: (context, state) => const ClaudeChangesScreen()),
+      GoRoute(path: AppRoutes.conflicts, builder: (context, state) => const ConflictsScreen()),
       GoRoute(path: AppRoutes.sendToComputer, builder: (context, state) => const SendToComputerScreen()),
       GoRoute(
         path: AppRoutes.newNote,

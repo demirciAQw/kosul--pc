@@ -12,6 +12,7 @@ import '../features/settings/domain/settings.dart';
 import '../features/settings/settings_providers.dart';
 import '../features/study_session/domain/study_session.dart';
 import '../features/study_session/study_session_providers.dart';
+import '../features/welcome/welcome_screen.dart';
 import 'router.dart';
 import 'theme.dart';
 
@@ -136,6 +137,7 @@ class _KocumAppState extends ConsumerState<KocumApp> {
       supportedLocales: const [Locale('tr', 'TR')],
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
       routerConfig: ref.watch(routerProvider),
+      builder: (context, child) => WelcomeGate(child: child ?? const SizedBox.shrink()),
     );
   }
 }

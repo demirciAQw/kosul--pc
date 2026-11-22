@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../app/palette.dart';
+import '../../../app/routes.dart';
 import '../../../app/widgets/tone_icon.dart';
 import '../../ocr/data/genai_describer.dart';
 import '../../ocr/ocr_providers.dart';
 import '../domain/settings.dart';
+import '../../welcome/welcome_providers.dart';
 import '../settings_providers.dart';
 
 /// Ayarlar: hatırlatıcılar ve görünüm.
@@ -60,6 +63,17 @@ class _SettingsBody extends ConsumerWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
       children: [
+        _Section('Araçlar'),
+        Card(
+          child: ListTile(
+            key: const Key('settings-tools'),
+            leading: ToneIcon(Icons.handyman_outlined, color: KocumColors.blue),
+            title: const Text('Araçlar'),
+            subtitle: const Text('Dışa aktarma, Claude paketleri, test oluşturma, bilgisayarla eşitleme, Claude\'un değişiklikleri'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => context.push(AppRoutes.tools),
+          ),
+        ),
         _Section('Hatırlatıcılar'),
         Card(
           child: Column(
@@ -200,7 +214,18 @@ class _SettingsBody extends ConsumerWidget {
               child: Image.asset('assets/icon/logo.png', width: 36, height: 36),
             ),
             title: const Text('Koçum'),
-            subtitle: const Text('Sürüm 6.5. Tüm veriler bu telefonda saklanır.'),
+            subtitle: const Text('Tüm veriler bu telefonda saklanır.'),
+          ),
+        ),
+        Card(
+          child: ListTile(
+            key: const Key('settings-welcome'),
+            leading: const Icon(Icons.waving_hand_outlined),
+            title: const Text('Hoş geldin ekranını tekrar göster'),
+            onTap: () {
+              context.go(AppRoutes.home);
+              ref.read(welcomeSeenProvider.notifier).reset();
+            },
           ),
         ),
       ],

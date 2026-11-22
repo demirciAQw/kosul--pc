@@ -349,3 +349,226 @@ class AppMeta extends Table {
   @override
   Set<Column> get primaryKey => {metaKey};
 }
+
+// ───────────── Anlık notlar, ortak etiketler, kişiler (v12) ─────────────
+
+/// Anlık not (v12): bir kelimeden bir sayfaya. Ders notundan (StudyNotes)
+/// ayrıdır. `kind`: anlik | uyku_yattim | uyku_kalktim.
+@DataClassName('AnlikNoteRow')
+class AnlikNotes extends Table {
+  TextColumn get id => text()();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+  TextColumn get body => text()();
+  TextColumn get kind => text().withDefault(const Constant('anlik'))();
+  IntColumn get mood => integer().nullable()(); // 1–5
+  TextColumn get searchText => text().withDefault(const Constant(''))(); // normalizeTr
+  TextColumn get subject => text().nullable()();
+  TextColumn get mebNodeId => text().nullable()();
+  TextColumn get topicText => text().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// Not: bu Drift sürümü `references(...)` kuralını SQL'e yazmıyor; v12 tablolarında
+/// yabancı anahtar `customConstraint` ile açıkça verilir (CASCADE çalışsın).
+/// Ortak etiket (v12): notlarda ve soru kartlarında. `name` normalizeTr ile
+/// benzersiz anahtardır, `label` görünen addır. `parentId`: üst etiket.
+/// `source`: ben | claude | otomatik.
+@DataClassName('TagRow')
+class Tags extends Table {
+  TextColumn get id => text()();
+  TextColumn get name => text().unique()();
+  TextColumn get label => text()();
+  TextColumn get parentId => text().nullable().customConstraint('REFERENCES tags(id) ON DELETE SET NULL')();
+  TextColumn get source => text().withDefault(const Constant('ben'))();
+  DateTimeColumn get createdAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+@DataClassName('AnlikNoteTagRow')
+class AnlikNoteTags extends Table {
+  /// "<noteId>:<tagId>": tek sütunlu anahtar (birleştirme ve defter için).
+  TextColumn get id => text()();
+  TextColumn get noteId => text().customConstraint('NOT NULL REFERENCES anlik_notes(id) ON DELETE CASCADE')();
+  TextColumn get tagId => text().customConstraint('NOT NULL REFERENCES tags(id) ON DELETE CASCADE')();
+  TextColumn get source => text().withDefault(const Constant('ben'))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  @override
+  List<Set<Column>> get uniqueKeys => [
+        {noteId, tagId},
+      ];
+}
+
+@DataClassName('QuestionCardTagRow')
+class QuestionCardTags extends Table {
+  /// "<cardId>:<tagId>": tek sütunlu anahtar (birleştirme ve defter için).
+  TextColumn get id => text()();
+  TextColumn get cardId => text().customConstraint('NOT NULL REFERENCES question_cards(id) ON DELETE CASCADE')();
+  TextColumn get tagId => text().customConstraint('NOT NULL REFERENCES tags(id) ON DELETE CASCADE')();
+  TextColumn get source => text().withDefault(const Constant('ben'))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  @override
+  List<Set<Column>> get uniqueKeys => [
+        {cardId, tagId},
+      ];
+}
+
+/// Kişiler (v12). `aliases`: aynı kişinin diğer adları (JSON listesi).
+@DataClassName('PersonRow')
+class People extends Table {
+  TextColumn get id => text()();
+  TextColumn get name => text()();
+  TextColumn get aliases => text().withDefault(const Constant('[]')).map(const StringListConverter())();
+  TextColumn get about => text().withDefault(const Constant(''))(); // "sınıf arkadaşı"
+  TextColumn get source => text().withDefault(const Constant('ben'))(); // ben | claude
+  DateTimeColumn get createdAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+@DataClassName('AnlikNotePersonRow')
+class AnlikNotePeople extends Table {
+  /// "<noteId>:<personId>": tek sütunlu anahtar (birleştirme ve defter için).
+  TextColumn get id => text()();
+  TextColumn get noteId => text().customConstraint('NOT NULL REFERENCES anlik_notes(id) ON DELETE CASCADE')();
+  TextColumn get personId => text().customConstraint('NOT NULL REFERENCES people(id) ON DELETE CASCADE')();
+  TextColumn get source => text().withDefault(const Constant('ben'))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  @override
+  List<Set<Column>> get uniqueKeys => [
+        {noteId, personId},
+      ];
+}
+
+/// Nottan nota ya da soru kartına bağ (v12). Biri dolu, öbürü boş.
+@DataClassName('AnlikLinkRow')
+class AnlikLinks extends Table {
+  TextColumn get id => text()();
+  TextColumn get fromNoteId => text().customConstraint('NOT NULL REFERENCES anlik_notes(id) ON DELETE CASCADE')();
+  TextColumn get toNoteId => text().nullable().customConstraint('REFERENCES anlik_notes(id) ON DELETE CASCADE')();
+  TextColumn get toCardId => text().nullable().customConstraint('REFERENCES question_cards(id) ON DELETE CASCADE')();
+  TextColumn get source => text().withDefault(const Constant('ben'))();
+  DateTimeColumn get createdAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+// ───────────── Değişiklik defteri ve senkron (v13) ─────────────
+
+/// Her kullanıcı verisi değişikliği, SQLite tetikleyicileriyle buraya yazılır.
+/// Telefon ve bilgisayar birbirinin satırlarını alır; Claude'un değişiklikleri
+/// geri alınabilir. `eski` ve `yeni`: satırın tamamı (JSON); biri boş olabilir.
+@DataClassName('DegisiklikRow')
+class Degisiklikler extends Table {
+  /// Yerel sıra: bu cihazdaki ekleniş sırası (karşıya "gördüğüm son sıra" için).
+  IntColumn get yerelSira => integer().autoIncrement()();
+  TextColumn get id => text().unique()(); // uuid benzeri; iki cihazda aynıdır
+  TextColumn get cihazId => text()(); // değişikliği yapan cihaz
+  /// telefon | pc | claude | senkron | geri_al
+  TextColumn get kaynak => text()();
+  TextColumn get oturumId => text().nullable()();
+  TextColumn get tablo => text()();
+  TextColumn get satirId => text()();
+  TextColumn get islem => text()(); // ekle | degistir | sil
+  TextColumn get eski => text().nullable()();
+  TextColumn get yeni => text().nullable()();
+  /// Hibrit mantıksal saat (bkz. core/ledger/hlc.dart).
+  TextColumn get saat => text()();
+
+  /// Karşı cihazdan geldi: geri gönderilmez.
+  BoolColumn get uzak => boolean().withDefault(const Constant(false))();
+
+  /// Bu değişikliği geri alan değişikliğin kimliği (geri alma kaydında dolu:
+  /// "şu değişiklik geri alındı" bilgisi).
+  TextColumn get geriAlinan => text().nullable()();
+
+}
+
+/// Tek satırlık bağlam: tetikleyiciler yazanın kim olduğunu ve saati buradan
+/// alır. Dışarıdan yazan araçlar (kocum aracı) işlemden önce burayı doldurur.
+@DataClassName('BaglamRow')
+class Baglam extends Table {
+  @override
+  String get tableName => '_baglam';
+
+  IntColumn get id => integer().withDefault(const Constant(1))();
+  TextColumn get cihazId => text()();
+  TextColumn get kaynak => text().withDefault(const Constant('telefon'))();
+  TextColumn get varsayilan => text().withDefault(const Constant('telefon'))();
+  TextColumn get oturumId => text().nullable()();
+
+  /// 1: tetikleyiciler yazmaz (senkron uygulaması, yedek birleştirme).
+  IntColumn get bastir => integer().withDefault(const Constant(0))();
+  IntColumn get hlcMs => integer().withDefault(const Constant(0))();
+  IntColumn get hlcN => integer().withDefault(const Constant(0))();
+
+  /// Yalnızca testler: gerçek saat yerine bu değer (ms) kullanılır.
+  IntColumn get saatMs => integer().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// İki tarafta da değişen satırın kaybeden sürümü. Silinmez; iki uygulamada
+/// da görünür ve istenirse geri alınır.
+@DataClassName('CakismaRow')
+class Cakismalar extends Table {
+  TextColumn get id => text()();
+  TextColumn get tablo => text()();
+  TextColumn get satirId => text()();
+  TextColumn get kazanan => text().nullable()(); // JSON (null: satır silinmişti)
+  TextColumn get kaybeden => text().nullable()();
+
+  /// yerel | uzak: kazanan taraf. geri_al: geri alma satırın değişmiş olması yüzünden yapılamadı.
+  TextColumn get taraf => text()();
+  TextColumn get saat => text()();
+  DateTimeColumn get createdAt => dateTime()();
+  BoolColumn get cozuldu => boolean().withDefault(const Constant(false))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// Senkron imleçleri (anahtar → değer). Bilgisayara ve yedeğe gitmez.
+@DataClassName('EsitlemeDurumRow')
+class EsitlemeDurum extends Table {
+  TextColumn get key => text()();
+  TextColumn get value => text()();
+
+  @override
+  Set<Column> get primaryKey => {key};
+}
+
+/// Silme önerisi (v14): Claude bir satırı silmez, yalnızca işaretler; kullanıcı
+/// iki uygulamadan birinde onaylar ya da reddeder. Senkronlanır.
+@DataClassName('SilmeOnerisiRow')
+class SilmeOnerileri extends Table {
+  TextColumn get id => text()();
+  TextColumn get tablo => text()();
+  TextColumn get satirId => text()();
+  TextColumn get neden => text().withDefault(const Constant(''))();
+  TextColumn get oneren => text().withDefault(const Constant('claude'))();
+  TextColumn get oturumId => text().nullable()();
+
+  /// bekliyor | onaylandi | reddedildi
+  TextColumn get durum => text().withDefault(const Constant('bekliyor'))();
+  DateTimeColumn get createdAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
