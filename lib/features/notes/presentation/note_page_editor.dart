@@ -237,7 +237,7 @@ class NotePageEditorState extends ConsumerState<NotePageEditor> {
               Positioned(
                 right: 8,
                 top: dockTop ? null : 8,
-                bottom: dockTop ? 8 : null,
+                bottom: dockTop ? 8 + MediaQuery.paddingOf(context).bottom : null,
                 child: Material(
                   color: cs.surface.withValues(alpha: 0.9),
                   elevation: 2,
@@ -267,7 +267,14 @@ class NotePageEditorState extends ConsumerState<NotePageEditor> {
                 child: Align(
                   alignment: dockTop ? Alignment.topCenter : Alignment.bottomCenter,
                   child: Padding(
-                    padding: const EdgeInsets.all(10),
+                    // Telefonda (tablet çerçevesi yokken) yuva alttaki sistem
+                    // çubuğunun/jest alanının altında kalmasın.
+                    padding: EdgeInsets.fromLTRB(
+                      10,
+                      10,
+                      10,
+                      10 + (dockTop ? 0 : MediaQuery.paddingOf(context).bottom),
+                    ),
                     child: NoteToolDock(
                       tools: widget.tools,
                       session: session,

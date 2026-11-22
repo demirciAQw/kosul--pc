@@ -326,7 +326,16 @@ class _TabletFrameState extends ConsumerState<TabletFrame> with RouteAware {
               TabletRail(selected: widget.selected, due: due),
               const VerticalDivider(width: 1),
             ],
-            Expanded(child: child),
+            // İçerik sistem çubuğunun (görev çubuğu/gezinme) altına girmesin:
+            // kenardan kenara çizimde alt boşluk burada bırakılır, ray da böyle.
+            Expanded(
+              child: SafeArea(
+                top: false,
+                left: false,
+                right: false,
+                child: child,
+              ),
+            ),
           ],
         ),
       ),
