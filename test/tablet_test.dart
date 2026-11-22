@@ -1,4 +1,5 @@
 import 'dart:async';
+
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -91,6 +92,22 @@ Future<void> _settle(WidgetTester t) async {
   }
 }
 
+/// Sol menüde girişi kaydırarak bulur ve dokunulacak hale getirir.
+Future<void> _reveal(WidgetTester t, String id) async {
+  final list = find.byKey(const Key('menu-scroll'));
+  await t.drag(list, const Offset(0, 5000)); // en başa
+  await t.pump();
+  await t.scrollUntilVisible(
+    find.byKey(Key('menu-$id')),
+    120,
+    scrollable: find.descendant(
+      of: find.byKey(const Key('menu-scroll')),
+      matching: find.byType(Scrollable),
+    ),
+  );
+  await t.pump();
+}
+
 /// Ağacı sök, Drift akışlarının kapanış zamanlayıcıları işlesin.
 Future<void> _unmount(WidgetTester t) async {
   await t.pumpWidget(const SizedBox());
@@ -135,35 +152,29 @@ void main() {
       expect(find.byType(NavigationBar), findsNothing);
       expect(find.text('3'), findsOneWidget); // tekrar rozeti
 
-      await t.tap(find.byKey(const Key('rail-notlar')));
+      await _reveal(t, 'anlik');
+      await t.tap(find.byKey(const Key('menu-anlik')));
       await t.pumpAndSettle();
       expect(find.text('sayfa-/anlik'), findsOneWidget);
-      await t.tap(find.byKey(const Key('rail-soruDefteri')));
+      await _reveal(t, 'notebook');
+      await t.tap(find.byKey(const Key('menu-notebook')));
       await t.pumpAndSettle();
       expect(find.text('sayfa-/notebook'), findsOneWidget);
-      await t.tap(find.byKey(const Key('rail-daha-menu')));
-      await t.pumpAndSettle();
-      await t.scrollUntilVisible(
-        find.byKey(const Key('rail-more-insights')),
-        120,
-        scrollable: find.descendant(
-          of: find.byKey(const Key('rail-more-panel')),
-          matching: find.byType(Scrollable),
-        ),
-      );
-      await t.ensureVisible(find.byKey(const Key('rail-more-insights')));
-      await t.pumpAndSettle();
-      await t.tap(find.byKey(const Key('rail-more-insights')));
+      expect(find.text('Daha fazla'), findsNothing);
+      await _reveal(t, 'insights');
+      await t.tap(find.byKey(const Key('menu-insights')));
       await t.pumpAndSettle();
       expect(find.text('sayfa-/insights'), findsOneWidget);
-      await t.tap(find.byKey(const Key('rail-kitaplik')));
+      await _reveal(t, 'pdf');
+      await t.tap(find.byKey(const Key('menu-pdf')));
       await t.pumpAndSettle();
       expect(find.text('sayfa-pdf'), findsOneWidget);
       expect(find.byKey(const Key('tablet-rail')), findsOneWidget);
-      await t.tap(find.byKey(const Key('rail-defterler')));
+      await _reveal(t, 'notebooks');
+      await t.tap(find.byKey(const Key('menu-notebooks')));
       await t.pumpAndSettle();
       expect(find.text('sayfa-defter'), findsOneWidget);
-      await t.tap(find.byKey(const Key('rail-ayarlar')));
+      await t.tap(find.byKey(const Key('menu-settings')));
       await t.pumpAndSettle();
       expect(find.text('sayfa-settings'), findsOneWidget);
     });
@@ -238,16 +249,37 @@ void main() {
         );
         expect(t.takeException(), isNull);
         // Yuva tek satır, ekrana sığar; araçlar ve yan düğmeler görünür.
-        expect(t.getSize(find.byKey(const Key('note-dock'))).height, lessThan(72));
-        expect(t.getSize(find.byKey(const Key('note-dock'))).width, lessThanOrEqualTo(size.width));
-        for (final k in ['note-pen', 'note-pen-highlighter', 'note-eraser', 'note-lasso', 'note-shape', 'note-undo', 'note-redo', 'note-template', 'note-dock-move']) {
+        expect(
+          t.getSize(find.byKey(const Key('note-dock'))).height,
+          lessThan(72),
+        );
+        expect(
+          t.getSize(find.byKey(const Key('note-dock'))).width,
+          lessThanOrEqualTo(size.width),
+        );
+        for (final k in [
+          'note-pen',
+          'note-pen-highlighter',
+          'note-eraser',
+          'note-lasso',
+          'note-shape',
+          'note-undo',
+          'note-redo',
+          'note-template',
+          'note-dock-move',
+        ]) {
           expect(find.byKey(Key(k)), findsOneWidget, reason: k);
         }
         // Tablette araç düğmeleri en az 48 dp.
-        expect(t.getSize(find.byKey(const Key('note-eraser'))).shortestSide, greaterThanOrEqualTo(48));
+        expect(
+          t.getSize(find.byKey(const Key('note-eraser'))).shortestSide,
+          greaterThanOrEqualTo(48),
+        );
       });
 
-      testWidgets('PDF yuvası (soru seç, sayfasız) ${size.width.toInt()}', (t) async {
+      testWidgets('PDF yuvası (soru seç, sayfasız) ${size.width.toInt()}', (
+        t,
+      ) async {
         late AppDatabase db;
         late PdfInkSession session;
         await t.runAsync(() async {
@@ -276,25 +308,42 @@ void main() {
           size,
         );
         expect(t.takeException(), isNull);
-        expect(t.getSize(find.byKey(const Key('note-dock'))).height, lessThan(72));
+        expect(
+          t.getSize(find.byKey(const Key('note-dock'))).height,
+          lessThan(72),
+        );
         expect(find.byKey(const Key('note-undo')), findsOneWidget);
         expect(find.byKey(const Key('pdf-tool-select')), findsOneWidget);
-        expect(find.byKey(const Key('note-template')), findsNothing); // PDF'te sayfa şablonu yok
+        expect(
+          find.byKey(const Key('note-template')),
+          findsNothing,
+        ); // PDF'te sayfa şablonu yok
       });
     }
 
-    testWidgets('telefonda yuva sığar ve kullanılır (kayar, taşma yok)', (t) async {
+    testWidgets('telefonda yuva sığar ve kullanılır (kayar, taşma yok)', (
+      t,
+    ) async {
       final tools = NoteToolSettings();
       addTearDown(tools.dispose);
       await _pump(
         t,
         MaterialApp(
-          home: Scaffold(body: Column(children: [NoteToolDock(tools: tools, session: null, page: _styleCtl())])),
+          home: Scaffold(
+            body: Column(
+              children: [
+                NoteToolDock(tools: tools, session: null, page: _styleCtl()),
+              ],
+            ),
+          ),
         ),
         const Size(412, 915),
       );
       expect(t.takeException(), isNull);
-      expect(t.getSize(find.byKey(const Key('note-dock'))).width, lessThanOrEqualTo(412));
+      expect(
+        t.getSize(find.byKey(const Key('note-dock'))).width,
+        lessThanOrEqualTo(412),
+      );
       await t.tap(find.byKey(const Key('note-eraser')));
       await t.pump();
       expect(tools.eraser, isTrue);
@@ -364,7 +413,9 @@ void main() {
           ),
         );
         await _pump(t, app, size);
-        await t.runAsync(() => Future.delayed(const Duration(milliseconds: 50)));
+        await t.runAsync(
+          () => Future.delayed(const Duration(milliseconds: 50)),
+        );
         await t.pump();
         return router;
       }
@@ -373,11 +424,13 @@ void main() {
         t,
       ) async {
         final r = await boot(t, const Size(1280, 800));
-        await t.tap(find.byKey(const Key('rail-kitaplik')));
+        await _reveal(t, 'pdf');
+        await t.tap(find.byKey(const Key('menu-pdf')));
         await _settle(t);
         expect(r.state.uri.path, '/pdf');
         expect(find.byKey(const Key('tablet-rail')), findsOneWidget);
-        await t.tap(find.byKey(const Key('rail-defterler')));
+        await _reveal(t, 'notebooks');
+        await t.tap(find.byKey(const Key('menu-notebooks')));
         await _settle(t);
         expect(r.state.uri.path, '/defter');
         expect(find.byKey(const Key('tablet-rail')), findsOneWidget);
@@ -466,26 +519,29 @@ void main() {
         ),
         const Size(800, 1280),
       );
-      await t.tap(find.byKey(const Key('note-pen'))); // seçili kaleme yeniden dokun: ayar penceresi
+      await t.tap(
+        find.byKey(const Key('note-pen')),
+      ); // seçili kaleme yeniden dokun: ayar penceresi
       await t.pumpAndSettle();
       return tools;
     }
 
-    testWidgets('sertlik sürgüsü etkin, değeri değiştirir, pencere açık kalır', (
-      t,
-    ) async {
-      final tools = await open(t);
-      final slider = find.byKey(const Key('note-hardness'));
-      expect(slider, findsOneWidget);
-      final before = tools.hardness;
-      await t.drag(slider, const Offset(60, 0));
-      await t.pumpAndSettle();
-      expect(tools.hardness, greaterThan(before));
-      await t.tapAt(t.getTopLeft(slider) + const Offset(10, 24));
-      await t.pumpAndSettle();
-      expect(tools.hardness, lessThan(0.2));
-      expect(find.byKey(const Key('note-hardness')), findsOneWidget);
-    });
+    testWidgets(
+      'sertlik sürgüsü etkin, değeri değiştirir, pencere açık kalır',
+      (t) async {
+        final tools = await open(t);
+        final slider = find.byKey(const Key('note-hardness'));
+        expect(slider, findsOneWidget);
+        final before = tools.hardness;
+        await t.drag(slider, const Offset(60, 0));
+        await t.pumpAndSettle();
+        expect(tools.hardness, greaterThan(before));
+        await t.tapAt(t.getTopLeft(slider) + const Offset(10, 24));
+        await t.pumpAndSettle();
+        expect(tools.hardness, lessThan(0.2));
+        expect(find.byKey(const Key('note-hardness')), findsOneWidget);
+      },
+    );
 
     testWidgets('Şekil penceresindeki anahtar değeri değiştirir', (t) async {
       final tools = await open(t);

@@ -27,7 +27,7 @@ class AppShell extends ConsumerWidget {
       final selected = switch (shell.currentIndex) {
         1 => RailItem.notlar,
         3 => RailItem.soruDefteri,
-        _ => RailItem.daha,
+        _ => RailItem.diger,
       };
       return Scaffold(
         body: Row(

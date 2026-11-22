@@ -6,7 +6,8 @@ import 'package:go_router/go_router.dart';
 import '../features/question_bank/question_bank_providers.dart';
 import 'platform.dart';
 import 'routes.dart';
-import 'tablet_more_menu.dart';
+import 'tablet_menu.dart';
+import 'tablet_menu_prefs.dart';
 
 /// Tablet eşiği (dp): kısa kenar bu değer ya da üstündeyse tablet düzeni.
 /// Katlanabilirin açık iç ekranı (~670 dp) tablet sayılır, kapalı dış ekranı
@@ -74,12 +75,33 @@ class FocusModeButton extends StatelessWidget {
 }
 
 /// Rayda seçili olabilecek hedefler.
-enum RailItem { kitaplik, defterler, notlar, soruDefteri, daha, ayarlar }
+enum RailItem { kitaplik, defterler, notlar, soruDefteri, diger, ayarlar }
 
-/// Dar sol gezinme rayı: Kitaplık, Defterler, Notlar, Soru defteri, Daha fazla
-/// (tüm hedeflerin gruplu menüsü, `tablet_more_menu.dart`) ve en altta Ayarlar.
-/// Düşük ekranda üst kısım kayar, Ayarlar sabit kalır. [onShell]: ray ana
-/// kabukta mı (menü sayfaları `push` ile açılır).
+/// Genişletilmiş menü ve dar ikon rayı genişlikleri (dp).
+const double kTabletMenuWidth = 232;
+const double kTabletRailWidth = 96;
+
+/// Menü girişinin hangi [RailItem] ile eşleştiği (çerçeve `selected` verir).
+const _entryRail = {
+  'pdf': RailItem.kitaplik,
+  'notebooks': RailItem.defterler,
+  'anlik': RailItem.notlar,
+  'notebook': RailItem.soruDefteri,
+  'settings': RailItem.ayarlar,
+};
+
+/// Dar rayda kısa etiketler (96 dp'ye sığsın).
+const _railLabels = {
+  'pdf': 'Kitaplık',
+  'anlik': 'Notlar',
+  'insights': 'Analiz',
+  'settings': 'Ayarlar',
+};
+
+/// Sol gezinme: varsayılan kalıcı, kaydırılabilir gruplu menü (232 dp: bütün
+/// hedefler, ikon + ad); "daralt" ile dar ikon rayı (96 dp: sık kullanılan
+/// hedefler + genişlet düğmesi). Ayarlar altta sabit. [onShell]: menü ana
+/// kabukta mı (rotası kabuk dışı sayfalar `push` ile açılır).
 class TabletRail extends ConsumerWidget {
   const TabletRail({
     super.key,
@@ -94,60 +116,90 @@ class TabletRail extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final cs = Theme.of(context).colorScheme;
-    Widget item(
-      RailItem id,
-      IconData icon,
-      IconData on,
-      String label,
-      VoidCallback onTap, {
-      int badge = 0,
-      Key? key,
-    }) {
-      final sel = selected == id;
-      return Semantics(
-        selected: sel,
-        button: true,
-        label: label,
-        child: InkWell(
-          key: key ?? Key('rail-${id.name}'),
-          borderRadius: BorderRadius.circular(14),
-          onTap: onTap,
-          child: SizedBox(
-            width: 88,
-            height: 60,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 3,
+    final narrow = ref.watch(tabletMenuNarrowProvider);
+    final listenable = tabletRouteListenable(context);
+
+    bool isSel(MenuEntry e, String here) {
+      if (e.route != null && e.route == here) return true;
+      final r = _entryRail[e.id];
+      return r != null && r == selected;
+    }
+
+    void go(MenuEntry e) {
+      if (e.id == 'settings' && selected == RailItem.ayarlar) return;
+      openMenuEntry(context, ref, e, onShell: onShell);
+    }
+
+    Widget body(String here) {
+      final settings = tabletMenuSettings;
+      return Column(
+        children: [
+          narrow ? _railTop(context, ref) : _menuTop(context, ref),
+          Expanded(
+            child: narrow
+                ? SingleChildScrollView(
+                    key: const Key('rail-scroll'),
+                    child: Column(
+                      children: [
+                        for (final id in tabletRailIds)
+                          _railButton(
+                            context,
+                            tabletMenuEntry(id),
+                            isSel(tabletMenuEntry(id), here),
+                            () => go(tabletMenuEntry(id)),
+                            badge: id == 'notebook' ? due : 0,
+                          ),
+                      ],
+                    ),
+                  )
+                : ListView(
+                    key: const Key('menu-scroll'),
+                    padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                    children: [
+                      for (final g in tabletMenuGroups) ...[
+                        Padding(
+                          key: Key('menu-group-${g.title}'),
+                          padding: const EdgeInsets.fromLTRB(12, 14, 12, 4),
+                          child: Text(
+                            g.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.labelLarge
+                                ?.copyWith(color: cs.primary),
+                          ),
+                        ),
+                        for (final e in g.entries)
+                          _menuTile(
+                            context,
+                            e,
+                            isSel(e, here),
+                            () => go(e),
+                            badge: e.id == 'notebook' ? due : 0,
+                          ),
+                      ],
+                    ],
                   ),
-                  decoration: BoxDecoration(
-                    color: sel ? cs.secondaryContainer : Colors.transparent,
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Badge.count(
-                    count: badge,
-                    isLabelVisible: badge > 0,
-                    child: Icon(sel ? on : icon, size: 22),
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  label,
-                  maxLines: 1,
-                  softWrap: false,
-                  overflow: TextOverflow.fade,
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: sel ? cs.onSurface : cs.onSurfaceVariant,
-                    fontWeight: sel ? FontWeight.w600 : null,
-                  ),
-                ),
-              ],
-            ),
           ),
-        ),
+          if (narrow)
+            _railButton(
+              context,
+              settings,
+              isSel(settings, here),
+              () => go(settings),
+              key: const Key('rail-settings'),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 0, 8, 0),
+              child: _menuTile(
+                context,
+                settings,
+                isSel(settings, here),
+                () => go(settings),
+              ),
+            ),
+          const SizedBox(height: 8),
+        ],
       );
     }
 
@@ -155,74 +207,178 @@ class TabletRail extends ConsumerWidget {
       color: cs.surfaceContainerLow,
       child: SizedBox(
         key: const Key('tablet-rail'),
-        width: 96,
+        width: narrow ? kTabletRailWidth : kTabletMenuWidth,
         child: SafeArea(
           right: false,
-          child: Column(
-            children: [
-              Expanded(
-                child: SingleChildScrollView(
-                  key: const Key('rail-scroll'),
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Column(
-                    children: [
-                      item(
-                        RailItem.kitaplik,
-                        Icons.picture_as_pdf_outlined,
-                        Icons.picture_as_pdf,
-                        'Kitaplık',
-                        () => context.go(AppRoutes.pdfLibrary),
+          child: listenable == null
+              ? body('')
+              : ListenableBuilder(
+                  listenable: listenable,
+                  builder: (context, _) => body(tabletCurrentPath(context)),
+                ),
+        ),
+      ),
+    );
+  }
+
+  Widget _menuTop(BuildContext context, WidgetRef ref) {
+    final cs = Theme.of(context).colorScheme;
+    return SizedBox(
+      height: 56,
+      child: Padding(
+        padding: const EdgeInsets.only(left: 16, right: 4),
+        child: Row(
+          children: [
+            Icon(Icons.school_rounded, color: cs.primary),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Koçum',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleMedium
+                    ?.copyWith(fontWeight: FontWeight.w700),
+              ),
+            ),
+            IconButton(
+              key: const Key('menu-collapse'),
+              tooltip: 'Menüyü daralt',
+              icon: const Icon(Icons.chevron_left),
+              onPressed: () =>
+                  ref.read(tabletMenuNarrowProvider.notifier).set(true),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _railTop(BuildContext context, WidgetRef ref) {
+    return SizedBox(
+      height: 56,
+      child: Center(
+        child: IconButton(
+          key: const Key('menu-expand'),
+          tooltip: 'Menüyü genişlet',
+          icon: const Icon(Icons.menu),
+          onPressed: () =>
+              ref.read(tabletMenuNarrowProvider.notifier).set(false),
+        ),
+      ),
+    );
+  }
+
+  Widget _menuTile(
+    BuildContext context,
+    MenuEntry e,
+    bool sel,
+    VoidCallback onTap, {
+    int badge = 0,
+  }) {
+    final cs = Theme.of(context).colorScheme;
+    return Semantics(
+      selected: sel,
+      button: true,
+      label: e.label,
+      excludeSemantics: true,
+      child: Padding(
+        key: Key('menu-${e.id}'),
+        padding: const EdgeInsets.symmetric(vertical: 1),
+        child: Material(
+          color: sel ? cs.secondaryContainer : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onTap,
+            child: SizedBox(
+              height: 44,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Row(
+                  children: [
+                    Badge.count(
+                      count: badge,
+                      isLabelVisible: badge > 0,
+                      child: Icon(
+                        e.icon,
+                        size: 22,
+                        color: sel
+                            ? cs.onSecondaryContainer
+                            : cs.onSurfaceVariant,
                       ),
-                      item(
-                        RailItem.defterler,
-                        Icons.edit_note_outlined,
-                        Icons.edit_note,
-                        'Defterler',
-                        () => context.go(AppRoutes.notebooks),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        e.label,
+                        maxLines: 1,
+                        softWrap: false,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: sel ? cs.onSecondaryContainer : cs.onSurface,
+                          fontWeight: sel ? FontWeight.w600 : null,
+                        ),
                       ),
-                      item(
-                        RailItem.notlar,
-                        Icons.bolt_outlined,
-                        Icons.bolt_rounded,
-                        'Notlar',
-                        () => context.go(AppRoutes.anlikTab),
-                      ),
-                      item(
-                        RailItem.soruDefteri,
-                        Icons.collections_bookmark_outlined,
-                        Icons.collections_bookmark_rounded,
-                        'Soru defteri',
-                        () => context.go(AppRoutes.notebook),
-                        badge: due,
-                      ),
-                      item(
-                        RailItem.daha,
-                        Icons.more_horiz,
-                        Icons.more_horiz,
-                        'Daha fazla',
-                        () =>
-                            showTabletMoreMenu(context, ref, onShell: onShell),
-                        key: const Key('rail-daha-menu'),
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
-              item(
-                RailItem.ayarlar,
-                Icons.settings_outlined,
-                Icons.settings,
-                'Ayarlar',
-                () {
-                  if (selected == RailItem.ayarlar) return;
-                  if (onShell) {
-                    context.push(AppRoutes.settings);
-                  } else {
-                    context.pushReplacement(AppRoutes.settings);
-                  }
-                },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _railButton(
+    BuildContext context,
+    MenuEntry e,
+    bool sel,
+    VoidCallback onTap, {
+    int badge = 0,
+    Key? key,
+  }) {
+    final cs = Theme.of(context).colorScheme;
+    return Semantics(
+      selected: sel,
+      button: true,
+      label: e.label,
+      child: InkWell(
+        key: key ?? Key('rail-${e.id}'),
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: SizedBox(
+          width: 88,
+          height: 60,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 3,
+                ),
+                decoration: BoxDecoration(
+                  color: sel ? cs.secondaryContainer : Colors.transparent,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Badge.count(
+                  count: badge,
+                  isLabelVisible: badge > 0,
+                  child: Icon(e.icon, size: 22),
+                ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 2),
+              Text(
+                _railLabels[e.id] ?? e.label,
+                maxLines: 1,
+                softWrap: false,
+                overflow: TextOverflow.fade,
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: sel ? cs.onSurface : cs.onSurfaceVariant,
+                  fontWeight: sel ? FontWeight.w600 : null,
+                ),
+              ),
             ],
           ),
         ),

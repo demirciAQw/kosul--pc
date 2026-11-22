@@ -103,7 +103,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.newSession,
         builder: (context, state) => const TabletFrame(
-          selected: RailItem.daha,
+          selected: RailItem.diger,
           child: SessionSetupScreen(),
         ),
       ),
@@ -114,35 +114,35 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/session/:id/results',
         builder: (context, state) => TabletFrame(
-          selected: RailItem.daha,
+          selected: RailItem.diger,
           child: SessionResultsScreen(sessionId: state.pathParameters['id']!),
         ),
       ),
       GoRoute(
         path: AppRoutes.newQuestion,
         builder: (context, state) => TabletFrame(
-          selected: RailItem.daha,
+          selected: RailItem.diger,
           child: AddQuestionScreen(prefill: state.extra as QuestionPrefill?),
         ),
       ),
       GoRoute(
         path: AppRoutes.incompleteQuestions,
         builder: (context, state) => TabletFrame(
-          selected: RailItem.daha,
+          selected: RailItem.diger,
           child: const IncompleteQuestionsScreen(),
         ),
       ),
       GoRoute(
         path: '/questions/:id/edit',
         builder: (context, state) => TabletFrame(
-          selected: RailItem.daha,
+          selected: RailItem.diger,
           child: AddQuestionScreen(editCardId: state.pathParameters['id']!),
         ),
       ),
       GoRoute(
         path: '/questions/:id',
         builder: (context, state) => TabletFrame(
-          selected: RailItem.daha,
+          selected: RailItem.diger,
           child: QuestionDetailScreen(cardId: state.pathParameters['id']!),
         ),
       ),
@@ -180,19 +180,19 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.plan,
         builder: (context, state) =>
-            const TabletFrame(selected: RailItem.daha, child: PlanScreen()),
+            const TabletFrame(selected: RailItem.diger, child: PlanScreen()),
       ),
       GoRoute(
         path: AppRoutes.newPlan,
         builder: (context, state) => const TabletFrame(
-          selected: RailItem.daha,
+          selected: RailItem.diger,
           child: CreatePlanScreen(),
         ),
       ),
       GoRoute(
         path: AppRoutes.sessions,
         builder: (context, state) => const TabletFrame(
-          selected: RailItem.daha,
+          selected: RailItem.diger,
           child: SessionHistoryScreen(),
         ),
       ),
@@ -206,26 +206,26 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.tools,
         builder: (context, state) =>
-            const TabletFrame(selected: RailItem.daha, child: ToolsScreen()),
+            const TabletFrame(selected: RailItem.diger, child: ToolsScreen()),
       ),
       GoRoute(
         path: AppRoutes.practiceTest,
         builder: (context, state) => const TabletFrame(
-          selected: RailItem.daha,
+          selected: RailItem.diger,
           child: PracticeTestScreen(),
         ),
       ),
       GoRoute(
         path: AppRoutes.claudeChanges,
         builder: (context, state) => const TabletFrame(
-          selected: RailItem.daha,
+          selected: RailItem.diger,
           child: ClaudeChangesScreen(),
         ),
       ),
       GoRoute(
         path: AppRoutes.conflicts,
         builder: (context, state) => const TabletFrame(
-          selected: RailItem.daha,
+          selected: RailItem.diger,
           child: ConflictsScreen(),
         ),
       ),
@@ -299,28 +299,28 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.sendToComputer,
         builder: (context, state) => const TabletFrame(
-          selected: RailItem.daha,
+          selected: RailItem.diger,
           child: SendToComputerScreen(),
         ),
       ),
       GoRoute(
         path: AppRoutes.newNote,
         builder: (context, state) => TabletFrame(
-          selected: RailItem.daha,
+          selected: RailItem.diger,
           child: NoteEditorScreen(initialSubject: state.extra as String?),
         ),
       ),
       GoRoute(
         path: '/notes/:id',
         builder: (context, state) => TabletFrame(
-          selected: RailItem.daha,
+          selected: RailItem.diger,
           child: NoteEditorScreen(noteId: state.pathParameters['id']!),
         ),
       ),
       GoRoute(
         path: '/books/:id/tests/:nodeId',
         builder: (context, state) => TabletFrame(
-          selected: RailItem.daha,
+          selected: RailItem.diger,
           child: TestDetailScreen(
             bookId: state.pathParameters['id']!,
             nodeId: state.pathParameters['nodeId']!,
@@ -330,7 +330,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/books/:id',
         builder: (context, state) => TabletFrame(
-          selected: RailItem.daha,
+          selected: RailItem.diger,
           child: BookDetailScreen(bookId: state.pathParameters['id']!),
         ),
       ),
@@ -341,28 +341,28 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.newMockExam,
         builder: (context, state) => const TabletFrame(
-          selected: RailItem.daha,
+          selected: RailItem.diger,
           child: EditMockExamScreen(),
         ),
       ),
       GoRoute(
         path: AppRoutes.karneImport,
         builder: (context, state) => TabletFrame(
-          selected: RailItem.daha,
+          selected: RailItem.diger,
           child: KarneImportScreen(plan: state.extra! as KarneImportPlan),
         ),
       ),
       GoRoute(
         path: '/mock/:id/edit',
         builder: (context, state) => TabletFrame(
-          selected: RailItem.daha,
+          selected: RailItem.diger,
           child: EditMockExamScreen(examId: state.pathParameters['id']!),
         ),
       ),
       GoRoute(
         path: '/mock/:id',
         builder: (context, state) => TabletFrame(
-          selected: RailItem.daha,
+          selected: RailItem.diger,
           child: MockExamDetailScreen(examId: state.pathParameters['id']!),
         ),
       ),

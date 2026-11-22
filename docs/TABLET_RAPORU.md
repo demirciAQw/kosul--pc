@@ -188,7 +188,7 @@ Ahmet: "parmakla büyütme/küçültme yok, PDF'te el ile hareket yok, silinen d
 - 829 test. Açık: yuva kalemle sürüklenmiyor (yalnız ⇅); koyu arka planda varsayılan siyah kalem görünmez; ayar penceresi açıkken sayfaya çizilemez; fotoğraf başka oranlı resimle değiştirilirse eski çizgiler kayar.
 
 ## v9.13: sonsuz defter, 4 kenar yuva, silgi, PDF araçları, tam sol menü (22.11.2026)
-Ahmet'in isteği: "sonsuz aşağı kayan defter; kalem menüsü yana/üste/alta kayabilsin; geri al/ileri al; silgi kalınlık modu; PDF'te aynı araçlar; tablette her şey, sol menüde hepsi, Daha fazla'nın altında".
+Ahmet'in isteği: "sonsuz aşağı kayan defter; kalem menüsü yana/üste/alta kayabilsin; geri al/ileri al; silgi kalınlık modu; PDF'te aynı araçlar; tablette her şey, sol menüde hepsi, doğrudan sol menüde".
 - **Sonsuz (aşağı kayan) sayfa:** genişlik 1404, yükseklik 4300+ ise sonsuz sayılır (şema değişmedi; eski 1404×14040 sayfalar da); kalem/çizgi alta 600 birim yaklaşınca +2000 uzar (üst sınır 200000), kalem basılıyken uzamaz, çizgi koordinatı değişmez, şablon yalnız görünen aralığa çizilir. Yeni sonsuz sayfa 1404×4400 başlar.
 - **Yuva:** üst/alt/sol/sağ; "Konum" düğmesi (4 yönlü menü) ya da basılı tutup sürükleyerek en yakın kenara; dikey düzen; kalıcı. Defter, PDF okuyucu ve çözüm ekranı aynı `NoteToolDock`/`FloatingToolDock`u kullanır; ayarlar ortak (`defter.arac_ayari`).
 - **Geri al/yinele:** yuvada hep görünür, büyük; basılı tutunca hızlı tekrar.
@@ -198,3 +198,8 @@ Ahmet'in isteği: "sonsuz aşağı kayan defter; kalem menüsü yana/üste/alta 
 - **Rotası olmayan, menüde ayrı satırı olmayanlar:** Optik, Hazır kitap ekle/JSON şablon (Kitaplar içinde), Silme önerileri, Claude raporu/dışa aktarma (`/tools` içinde).
 - Açık: çok uzun düz tek çizgide çizim sırasında takılma riski (dış hat üretimi, ölçülmedi); sürüklerken kenar önizlemesi yok; alt yuvayı SnackBar kısa süre örter; "Soru defteri" etiketi gerçek fontta sığıyor mu bakılmadı. 903 test.
 - **Soru nasıl saklanır:** PDF koordinatı (pdfDocumentId, pdfPage, pdfBox) kaynak gerçek; `questionImage` ~480 px önizleme PDF'siz cihazlar için.
+
+## v9.14: Kitaplar kitap raf görünümü, "Daha fazla" kalktı, hepsi doğrudan sol menüde (22.11.2026)
+- **Kitaplar:** düz liste yerine kapak kartları (dikey 2:3, ders etiketi, büyük ad, yayınevi, sırt gölgesi, ilerleme şeridi) ve sade ahşap raf çizgisi; kapak rengi dersten/addan kararlı seçilir (FNV-1a); 2–6 sütun. TYT/AYT/MEB sekmeleri duruyor. Eski kartın doğru/yanlış/boş çubuğu kapaktan kalktı (ayrıntıda). Masaüstü kitaplar sayfası dokunulmadı (`BookShelfView` oraya takılabilir).
+- **Sol menü:** "Daha fazla" TAMAMEN kalktı (v9.13 raporundaki "Daha fazla" ifadeleri artık geçersiz). Kalıcı, kaydırılabilir 232 dp menü: 7 grup başlığı (Çalışma, Sorular, Kitaplar ve denemeler, Notlar, Analiz, Tablet, Araçlar) ve her öğe ikon + ad; Ayarlar altta sabit; daralt düğmesi ile 96 dp ikon rayı (Bugün, Kitaplık, Defterler, Notlar, Soru defteri, Kitaplar, Deneme, Analiz + Ayarlar); tercih `tablet.menu_dar`, varsayılan geniş. 924 test.
+- Doğrulanmadı: gerçek ekranda kapak/raf görünümü; "Claude'un değişiklikleri" gibi uzun adlar 232 dp'de elips olabilir.

@@ -3,12 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../app/routes.dart';
-import '../../../core/di/core_providers.dart';
-import '../../../core/utils/formatters.dart';
 import '../domain/library.dart';
 import '../domain/progress.dart';
 import '../library_providers.dart';
 import 'library_sheet.dart';
+import 'widgets/book_shelf_view.dart';
 import 'widgets/progress_widgets.dart';
 import '../../../app/widgets/home_logo_button.dart';
 
@@ -85,13 +84,10 @@ class _ShelfView extends StatelessWidget {
     if (items.isEmpty) return _EmptyBooks(shelf: shelf);
     final done = items.fold<int>(0, (a, p) => a + p.doneLeaves);
     final total = items.fold<int>(0, (a, p) => a + p.totalLeaves);
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
-      children: [
-        _Overview(done: done, total: total, books: items.length),
-        const SizedBox(height: 12),
-        for (final p in items) _BookCard(progress: p),
-      ],
+    return BookShelfView(
+      items: items,
+      onOpen: (book) => context.push(AppRoutes.book(book.id)),
+      header: _Overview(done: done, total: total, books: items.length),
     );
   }
 }
@@ -124,69 +120,6 @@ class _Overview extends StatelessWidget {
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _BookCard extends ConsumerWidget {
-  const _BookCard({required this.progress});
-  final BookProgress progress;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final p = progress;
-    final b = p.book;
-    final now = ref.watch(clockProvider)();
-    final last = p.lastSolvedAt;
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: () => context.push(AppRoutes.book(b.id)),
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Row(
-            children: [
-              ProgressRing(value: p.ratio),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(b.title, style: theme.textTheme.titleMedium, maxLines: 2, overflow: TextOverflow.ellipsis),
-                    Text(
-                      [b.examType, b.subject, if (b.publisher != null) b.publisher!].join(', '),
-                      style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      '${p.doneLeaves}/${p.totalLeaves} ${p.unitName} bitti, ${p.remainingLeaves} duruyor',
-                      style: theme.textTheme.bodyMedium,
-                    ),
-                    if (p.answered > 0) ...[
-                      const SizedBox(height: 6),
-                      ResultBar(correct: p.correct, wrong: p.wrong, blank: p.blank, height: 6),
-                      const SizedBox(height: 4),
-                      Text(
-                        '${p.correct} D, ${p.wrong} Y, ${p.blank} B'
-                        '${p.accuracy == null ? '' : ', başarı %${(p.accuracy! * 100).round()}'}',
-                        style: theme.textTheme.labelSmall,
-                      ),
-                    ],
-                    if (last != null)
-                      Text(
-                        'Son çalışma: ${formatRelativeDay(last, now)}',
-                        style: theme.textTheme.labelSmall?.copyWith(color: scheme.onSurfaceVariant),
-                      ),
-                  ],
-                ),
-              ),
-              const Icon(Icons.chevron_right_rounded),
-            ],
-          ),
         ),
       ),
     );
