@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../../../app/routes.dart';
 import '../../../../core/text/turkish_text.dart';
 import '../../domain/question_card.dart';
+import '../../../pdf/pdf_providers.dart';
 import '../../question_bank_providers.dart';
 import 'media_image.dart';
 import '../../../../app/palette.dart';
@@ -30,6 +31,16 @@ class QuestionTile extends ConsumerWidget {
     final selection = ref.watch(questionSelectionProvider);
     final selected = selection.contains(card.id);
     final selecting = selection.isNotEmpty;
+    // PDF kartı: PDF bu cihazdaysa dokunuş PDF sayfasına/kutuya gider; yoksa
+    // (telefon) yalnız önizleme, her zamanki gibi ayrıntı sayfası açılır.
+    final pdfId = card.hasPdfAnchor ? card.pdfDocumentId : null;
+    final hasPdf = pdfId != null && (ref.watch(pdfAvailableProvider(pdfId)).value ?? false);
+    final openPdf = hasPdf
+        ? () {
+            final b = card.pdfBox!;
+            context.push(AppRoutes.pdfReaderAt(pdfId, card.pdfPage!, b.left, b.top, b.right, b.bottom));
+          }
+        : null;
     return Material(
       color: scheme.surfaceContainerHighest,
       clipBehavior: Clip.antiAlias,
@@ -41,7 +52,7 @@ class QuestionTile extends ConsumerWidget {
         // Seçim modundayken dokunmak seçer; değilken soruyu açar. Uzun bas: seçimi başlat.
         onTap: selecting
             ? () => ref.read(questionSelectionProvider.notifier).toggle(card.id)
-            : (onOpen ?? () => context.push(AppRoutes.question(card.id))),
+            : (openPdf ?? onOpen ?? () => context.push(AppRoutes.question(card.id))),
         onLongPress: () => ref.read(questionSelectionProvider.notifier).toggle(card.id),
         child: Stack(
           fit: StackFit.expand,

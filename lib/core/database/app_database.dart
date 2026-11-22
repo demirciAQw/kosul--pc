@@ -56,8 +56,9 @@ class AppDatabase extends _$AppDatabase {
   /// v14: silme önerileri (Claude silmez, işaretler).
   /// v15: kalem çizgileri (ink_strokes), noktalar sıkıştırılmış BLOB.
   /// v16: PDF belgeleri (pdf_documents): satır senkron olur, dosya olmaz.
+  /// v17: soru kartında PDF koordinatı (pdf_document_id, pdf_page, pdf_box_*).
   @override
-  int get schemaVersion => 16;
+  int get schemaVersion => 17;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -156,6 +157,18 @@ class AppDatabase extends _$AppDatabase {
             await _createInkIndexes();
           }
           if (from < 16) await m.createTable(pdfDocuments);
+          // v2'deki alterTable güncel tanımı kurduğu için (from < 2) sütunlar
+          // zaten olabilir; yalnızca eksikse ekle (12→17, 14→17, 16→17 hepsi buradan).
+          if (from < 17) {
+            final cols = await customSelect('PRAGMA table_info(question_cards)').get();
+            final names = {for (final c in cols) c.read<String>('name')};
+            if (!names.contains('pdf_document_id')) await m.addColumn(questionCards, questionCards.pdfDocumentId);
+            if (!names.contains('pdf_page')) await m.addColumn(questionCards, questionCards.pdfPage);
+            if (!names.contains('pdf_box_left')) await m.addColumn(questionCards, questionCards.pdfBoxLeft);
+            if (!names.contains('pdf_box_top')) await m.addColumn(questionCards, questionCards.pdfBoxTop);
+            if (!names.contains('pdf_box_right')) await m.addColumn(questionCards, questionCards.pdfBoxRight);
+            if (!names.contains('pdf_box_bottom')) await m.addColumn(questionCards, questionCards.pdfBoxBottom);
+          }
           // Tablolar yeniden kurulmuş ya da sütun eklenmiş olabilir: tetikleyiciler baştan.
           await LedgerService(this).installTriggers(rebuild: true);
         },

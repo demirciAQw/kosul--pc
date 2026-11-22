@@ -5,6 +5,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pdfrx/pdfrx.dart' as r; // pdfrx YALNIZ data/ ve bu dosyada
 
 import '../../ink/domain/ink_models.dart';
+import '../../question_bank/domain/question_card.dart';
+import '../domain/pdf_engine.dart' show PdfBox, PdfPageSize;
+import '../domain/question_box.dart';
+import 'pdf_box_overlay.dart';
+import 'pdf_question_panel.dart';
 import '../../../core/di/core_providers.dart';
 import '../pdf_providers.dart';
 import 'pdf_ink_input.dart';
@@ -14,8 +19,12 @@ import 'pdf_page_ink_layer.dart';
 /// PDF okuyucu: dikey kaydırma, parmakla yakınlaştırma, küçük resim şeridi,
 /// sayfa göstergesi ve her sayfanın üstünde kalem katmanı.
 class PdfReaderPage extends ConsumerWidget {
-  const PdfReaderPage({super.key, required this.documentId});
+  const PdfReaderPage({super.key, required this.documentId, this.initialPage, this.highlight});
   final String documentId;
+
+  /// Soru kartından gelince: açılacak sayfa (0'dan) ve vurgulanacak kutu.
+  final int? initialPage;
+  final PdfBox? highlight;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -49,7 +58,7 @@ class PdfReaderPage extends ConsumerWidget {
             ),
           );
         }
-        return PdfReaderView(info: i);
+        return PdfReaderView(info: i, initialPage: initialPage, highlight: highlight);
       },
     );
   }
@@ -65,8 +74,10 @@ const _colors = <int>[
 const _widths = <double>[2, 4, 8];
 
 class PdfReaderView extends ConsumerStatefulWidget {
-  const PdfReaderView({super.key, required this.info});
+  const PdfReaderView({super.key, required this.info, this.initialPage, this.highlight});
   final PdfOpenInfo info;
+  final int? initialPage;
+  final PdfBox? highlight;
 
   @override
   ConsumerState<PdfReaderView> createState() => _PdfReaderViewState();
@@ -81,6 +92,11 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
   StreamSubscription<String>? _errorSub;
   bool _thumbs = false;
   InkTool _tool = InkTool.pen;
+  bool _selecting = false;
+
+  /// Sayfa üstündeki kutular: bekleyen seçim (mavi) ve kart vurgusu (turuncu).
+  final _marks = ValueNotifier<List<PdfBoxMark>>(const []);
+  ({int page, PdfBox box})? _pending;
   int _color = _colors.first;
   double _width = _widths[1];
 
@@ -93,6 +109,10 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
       clock: ref.read(clockProvider),
     );
     _applyBrush();
+    _session.onSelectBox = _onBox;
+    _page.value = (widget.initialPage ?? 0) + 1;
+    final hl = widget.highlight, hp = widget.initialPage;
+    if (hl != null && hp != null) _marks.value = [PdfBoxMark(hp, hl, _highlightColor)];
     // Görünüm ve küçük resim şeridi AYNI belgeyi paylaşır (ref anahtarı aynı:
     // PDFium belgesi bir kez açılır).
     _docRef = r.PdfDocumentRefFile(
@@ -120,6 +140,7 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
     _lifecycle.dispose();
     _errorSub?.cancel();
     _page.dispose();
+    _marks.dispose();
     // Kuyruk bitmeden oturum kapanmasın: kayıtlar tamamlanınca kapat.
     unawaited(_session.flush().whenComplete(_session.dispose));
     super.dispose();
@@ -130,7 +151,55 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
     _session.setBrush(InkBrush(tool: _tool, color: _color, width: w));
   }
 
+  static const _selectColor = Color(0xFF1565C0);
+  static const _highlightColor = Color(0xFFEF6C00);
+
+  void _setSelecting(bool v) {
+    setState(() {
+      _selecting = v;
+      if (!v) _clearPending();
+    });
+    _session.setSelecting(v);
+  }
+
+  void _clearPending() {
+    _pending = null;
+    _marks.value = [for (final m in _marks.value) if (m.color != _selectColor) m];
+  }
+
+  /// Kalemle çizilen kutu bırakıldı: normalize et, çok küçükse reddet.
+  void _onBox(int page, double x1, double y1, double x2, double y2, double pw, double ph) {
+    if (!mounted) return;
+    final box = normalizeQuestionBox(x1, y1, x2, y2, PdfPageSize(pw, ph));
+    if (box == null) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('Kutu çok küçük. Soruyu saran daha büyük bir kutu çiz.')));
+      return;
+    }
+    setState(() => _pending = (page: page, box: box));
+    _marks.value = [
+      for (final m in _marks.value)
+        if (m.color != _selectColor) m,
+      PdfBoxMark(page, box, _selectColor),
+    ];
+  }
+
+  void _onSaved(QuestionCard card) {
+    setState(_clearPending);
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(const SnackBar(content: Text('Soru kaydedildi.')));
+  }
+
   List<Widget> _overlays(BuildContext context, Rect rect, r.PdfPage page) => [
+    PdfPageBoxOverlay(
+      key: ValueKey('box-${page.pageNumber}'),
+      page: page.pageNumber - 1,
+      pageWidth: page.width,
+      pageHeight: page.height,
+      marks: _marks,
+    ),
     PdfPageInkLayer(
       key: ValueKey('ink-${page.pageNumber}'),
       session: _session,
@@ -162,12 +231,17 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
           _Toolbar(
             session: _session,
             tool: _tool,
+            selecting: _selecting,
+            onSelect: () => _setSelecting(!_selecting),
             color: _color,
             width: _width,
-            onTool: (t) => setState(() {
-              _tool = t;
-              _applyBrush();
-            }),
+            onTool: (t) {
+              if (_selecting) _setSelecting(false);
+              setState(() {
+                _tool = t;
+                _applyBrush();
+              });
+            },
             onColor: (c) => setState(() {
               _color = c;
               _applyBrush();
@@ -201,6 +275,7 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
                           builder: (context, locked, _) => r.PdfViewer(
                             _docRef,
                             controller: _viewer,
+                            initialPageNumber: (widget.initialPage ?? 0) + 1,
                             params: r.PdfViewerParams(
                               panEnabled: !locked,
                               scaleEnabled: !locked,
@@ -215,6 +290,25 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
                           ),
                         ),
                       ),
+                      if (_pending != null)
+                        Positioned(
+                          bottom: 48,
+                          left: 12,
+                          right: 12,
+                          child: Center(
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 560),
+                              child: PdfQuestionPanel(
+                                key: ValueKey(_pending),
+                                info: widget.info,
+                                page: _pending!.page,
+                                box: _pending!.box,
+                                onSaved: _onSaved,
+                                onCancel: () => setState(_clearPending),
+                              ),
+                            ),
+                          ),
+                        ),
                       Positioned(
                         bottom: 12,
                         left: 0,
@@ -258,6 +352,8 @@ class _Toolbar extends StatelessWidget {
   const _Toolbar({
     required this.session,
     required this.tool,
+    required this.selecting,
+    required this.onSelect,
     required this.color,
     required this.width,
     required this.onTool,
@@ -267,6 +363,8 @@ class _Toolbar extends StatelessWidget {
 
   final PdfInkSession session;
   final InkTool tool;
+  final bool selecting;
+  final VoidCallback onSelect;
   final int color;
   final double width;
   final ValueChanged<InkTool> onTool;
@@ -279,7 +377,7 @@ class _Toolbar extends StatelessWidget {
     Widget toolBtn(InkTool t, IconData icon, String tip) => IconButton(
       key: Key('pdf-tool-${t.name}'),
       tooltip: tip,
-      isSelected: tool == t,
+      isSelected: !selecting && tool == t,
       icon: Icon(icon),
       onPressed: () => onTool(t),
     );
@@ -291,6 +389,13 @@ class _Toolbar extends StatelessWidget {
           toolBtn(InkTool.pen, Icons.edit_outlined, 'Kalem'),
           toolBtn(InkTool.highlighter, Icons.border_color_outlined, 'Fosforlu'),
           toolBtn(InkTool.eraser, Icons.auto_fix_normal_outlined, 'Silgi'),
+          IconButton(
+            key: const Key('pdf-tool-select'),
+            tooltip: 'Soru seç',
+            isSelected: selecting,
+            icon: const Icon(Icons.crop_free),
+            onPressed: onSelect,
+          ),
           const SizedBox(width: 8),
           for (final c in _colors)
             InkWell(

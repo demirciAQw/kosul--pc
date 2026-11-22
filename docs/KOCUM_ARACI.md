@@ -83,6 +83,22 @@ Notun gövdesi.
 
 Aynı dosya yeniden yazılır (üzerine yazar); araç hiçbir dosyayı silmez.
 
+## Soru kartında PDF koordinatı (şema 17)
+
+Tabletten PDF'te seçilen sorular `question_cards` satırıdır; `sorgu` ve `duzelt` bu sütunları okur/yazar:
+
+| Sütun | Anlam |
+|---|---|
+| `pdf_document_id` | `pdf_documents.id` (= PDF'in sha256'sı); PDF'siz kartta NULL |
+| `pdf_page` | PDF sayfası, 0'dan |
+| `pdf_box_left`, `pdf_box_top`, `pdf_box_right`, `pdf_box_bottom` | Kutu, sayfa birimi (1/72 inç), döndürülmüş sayfa, sol-üst başlangıç, y aşağı (`real`) |
+
+`question_image` bu durumda kutunun küçük önizlemesidir (WebP; Android dışında PNG): PDF'i olmayan cihazlarda soru görüntüsü olarak görünür. Beşi birden dolu olmalıdır (`duzelt` tek tek yazar: kutuyu değiştirirken `pdf_box_*` dördünü de düzelt, `sag > sol` ve `alt > ust` kalsın; yoksa uygulama kutuyu yok sayar ve kart PDF'siz görünür).
+
+```bash
+dart run bin/kocum.dart sorgu "SELECT id, pdf_page, pdf_box_left, pdf_box_top, pdf_box_right, pdf_box_bottom FROM question_cards WHERE pdf_document_id IS NOT NULL"
+```
+
 ## Güvenlik özeti
 
 - `sorgu` salt okunurdur (`PRAGMA query_only`, ifade denetimi).

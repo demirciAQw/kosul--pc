@@ -8,6 +8,7 @@ import '../../../../core/text/turkish_text.dart';
 import '../../../../core/utils/formatters.dart';
 import '../../../curriculum/curriculum_providers.dart';
 import '../../../curriculum/domain/curriculum.dart';
+import '../../../pdf/pdf_providers.dart';
 import '../../domain/question_card.dart';
 import '../../question_bank_providers.dart';
 import '../widgets/media_image.dart';
@@ -62,6 +63,16 @@ class _QuestionDetailScreenState extends ConsumerState<QuestionDetailScreen> {
               color: card.isStarred ? KocumColors.star : null,
             ),
           ),
+          if (card.hasPdfAnchor && (ref.watch(pdfAvailableProvider(card.pdfDocumentId!)).value ?? false))
+            IconButton(
+              key: const Key('detail-open-pdf'),
+              tooltip: 'PDF\'te göster',
+              onPressed: () {
+                final b = card.pdfBox!;
+                context.push(AppRoutes.pdfReaderAt(card.pdfDocumentId!, card.pdfPage!, b.left, b.top, b.right, b.bottom));
+              },
+              icon: const Icon(Icons.picture_as_pdf_outlined),
+            ),
           IconButton(
             tooltip: 'Düzenle',
             onPressed: () => context.push(AppRoutes.editQuestion(card.id)),

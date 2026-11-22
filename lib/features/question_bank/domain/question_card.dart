@@ -1,3 +1,5 @@
+import '../../pdf/domain/pdf_engine.dart' show PdfBox;
+
 enum QuestionStatus {
   wrong('Yanlış'),
   blank('Boş'),
@@ -72,6 +74,9 @@ class QuestionCard {
     this.testLabel,
     this.sessionItemId,
     this.mockExamId,
+    this.pdfDocumentId,
+    this.pdfPage,
+    this.pdfBox,
   });
 
   final String id;
@@ -127,6 +132,14 @@ class QuestionCard {
   final String? testLabel;
   final String? sessionItemId;
   final String? mockExamId;
+
+  /// Soru bir PDF sayfasındaki kutuysa: belge (sha256), sayfa (0'dan) ve kutu
+  /// (sayfa birimi, sol-üst başlangıç). [questionImage] bu kutunun küçük önizlemesidir.
+  final String? pdfDocumentId;
+  final int? pdfPage;
+  final PdfBox? pdfBox;
+
+  bool get hasPdfAnchor => pdfDocumentId != null && pdfPage != null && pdfBox != null;
 
   bool get hasPhoto => questionImage != null;
 
@@ -198,6 +211,9 @@ class QuestionCard {
         testLabel: testLabel,
         sessionItemId: sessionItemId,
         mockExamId: mockExamId,
+        pdfDocumentId: pdfDocumentId,
+        pdfPage: pdfPage,
+        pdfBox: pdfBox,
       );
 }
 

@@ -248,6 +248,20 @@ class PdfInkSession extends ChangeNotifier {
     _ping();
   }
 
+  // --- "Soru seç" aracı: kalem çizmek yerine dikdörtgen sürüklenir ---
+  bool _selecting = false;
+  bool get selecting => _selecting;
+  void setSelecting(bool v) {
+    if (_selecting == v) return;
+    _selecting = v;
+    _ping();
+  }
+
+  /// Sürüklenen kutu bırakıldı: iki köşe SAYFA biriminde (ham; normalizasyon
+  /// çağıranın işi), sayfa boyutu görünen (döndürülmüş) sayfanın boyutu.
+  void Function(int page, double x1, double y1, double x2, double y2, double pageWidth, double pageHeight)?
+      onSelectBox;
+
   // --- sayfa katmanları (kalem olaylarını yönlendirmek için) ---
   final List<PdfPageInkLayerState> _layers = [];
   void registerLayer(PdfPageInkLayerState l) {

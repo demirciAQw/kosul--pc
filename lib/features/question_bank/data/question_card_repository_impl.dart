@@ -3,6 +3,7 @@ import 'package:drift/drift.dart';
 import '../../../core/database/app_database.dart';
 import '../../../core/text/turkish_text.dart';
 import '../../../core/utils/enum_x.dart';
+import '../../pdf/domain/pdf_engine.dart' show PdfBox;
 import '../domain/question_bank.dart';
 import '../domain/question_card.dart';
 import '../domain/srs.dart';
@@ -217,6 +218,12 @@ class DriftQuestionCardRepository implements QuestionCardRepository {
         topicText: Value(c.topicText),
         correctAnswer: Value(c.correctAnswer),
         givenAnswer: Value(c.givenAnswer),
+        pdfDocumentId: Value(c.pdfDocumentId),
+        pdfPage: Value(c.pdfPage),
+        pdfBoxLeft: Value(c.pdfBox?.left),
+        pdfBoxTop: Value(c.pdfBox?.top),
+        pdfBoxRight: Value(c.pdfBox?.right),
+        pdfBoxBottom: Value(c.pdfBox?.bottom),
       );
 
   static QuestionCard _toEntity(QuestionCardRow r) => QuestionCard(
@@ -247,5 +254,10 @@ class DriftQuestionCardRepository implements QuestionCardRepository {
         topicText: r.topicText,
         correctAnswer: r.correctAnswer,
         givenAnswer: r.givenAnswer,
+        pdfDocumentId: r.pdfDocumentId,
+        pdfPage: r.pdfPage,
+        pdfBox: r.pdfBoxLeft == null || r.pdfBoxTop == null || r.pdfBoxRight == null || r.pdfBoxBottom == null
+            ? null
+            : PdfBox(r.pdfBoxLeft!, r.pdfBoxTop!, r.pdfBoxRight!, r.pdfBoxBottom!),
       );
 }

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
@@ -49,6 +50,10 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
   bool _erasing = false;
   final List<PenStroke> _erased = [];
 
+  /// "Soru seç" sürüklemesi: görünüm yerel köşeleri (başlangıç, şimdiki).
+  final _sel = ValueNotifier<(Offset, Offset)?>(null);
+  bool _selDrag = false;
+
   @override
   void initState() {
     super.initState();
@@ -81,6 +86,7 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
     widget.session.unregisterLayer(this, page: widget.page);
     _sub?.cancel();
     _ctl.dispose();
+    _sel.dispose();
     super.dispose();
   }
 
@@ -119,6 +125,12 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
   void pointerDown(PointerDownEvent e) {
     if (_pointer != null || _box == null) return;
     _pointer = e.pointer;
+    if (widget.session.selecting) {
+      _selDrag = true;
+      final l = _box!.globalToLocal(e.position);
+      _sel.value = (l, l);
+      return;
+    }
     _last = _point(e);
     _ctl.beginStroke(
       _last!,
@@ -128,6 +140,11 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
 
   void pointerMove(PointerMoveEvent e) {
     if (e.pointer != _pointer || _box == null) return;
+    if (_selDrag) {
+      final s = _sel.value;
+      if (s != null) _sel.value = (s.$1, _box!.globalToLocal(e.position));
+      return;
+    }
     _last = _point(e);
     _ctl.addPoint(_last!);
   }
@@ -135,12 +152,27 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
   void pointerUp(PointerUpEvent e) {
     if (e.pointer != _pointer) return;
     _pointer = null;
+    if (_selDrag) {
+      _selDrag = false;
+      final s = _sel.value;
+      _sel.value = null;
+      final c = _coords;
+      if (s == null || c == null || _box == null) return;
+      final a = c.toPage(s.$1), b = c.toPage(_box!.globalToLocal(e.position));
+      widget.session.onSelectBox?.call(widget.page, a.dx, a.dy, b.dx, b.dy, widget.pageWidth, widget.pageHeight);
+      return;
+    }
     _ctl.endStroke(_box == null ? _last! : _point(e));
   }
 
   void pointerCancel(PointerCancelEvent e) {
     if (e.pointer != _pointer) return;
     _pointer = null;
+    if (_selDrag) {
+      _selDrag = false;
+      _sel.value = null;
+      return;
+    }
     _ctl.cancelStroke();
   }
 
@@ -228,6 +260,17 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
                   size: Size.infinite,
                 ),
               ),
+              // "Soru seç" sürüklemesi: görünür çerçeve.
+              ValueListenableBuilder<(Offset, Offset)?>(
+                valueListenable: _sel,
+                builder: (_, s, _) => s == null
+                    ? const SizedBox.shrink()
+                    : CustomPaint(
+                        key: const Key('pdf-select-drag'),
+                        painter: PdfBoxPainter([Rect.fromPoints(s.$1, s.$2)], const Color(0xFF1565C0)),
+                        size: Size.infinite,
+                      ),
+              ),
             ],
           );
         },
@@ -270,4 +313,27 @@ class _LivePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_LivePainter old) => old.c != c;
+}
+
+/// Görünüm piksellerinde dikdörtgen çerçeveler (seçim sürüklemesi, işaretli kutular).
+class PdfBoxPainter extends CustomPainter {
+  PdfBoxPainter(this.rects, this.color);
+  final List<Rect> rects;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final fill = Paint()..color = color.withAlpha(36);
+    final line = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
+    for (final r in rects) {
+      canvas.drawRect(r, fill);
+      canvas.drawRect(r, line);
+    }
+  }
+
+  @override
+  bool shouldRepaint(PdfBoxPainter old) => old.color != color || !listEquals(old.rects, rects);
 }

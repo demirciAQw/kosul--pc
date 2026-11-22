@@ -201,6 +201,20 @@ class QuestionCards extends Table {
   TextColumn get mockExamId =>
       text().nullable().references(MockExams, #id, onDelete: KeyAction.setNull)();
 
+  // ── v17: soru = PDF koordinatı (tablet). Hepsi boşsa kart PDF'siz. ──
+  /// `pdf_documents.id` (= sha256). Bağ yalnızca bilgidir: PDF bu cihazda
+  /// olmayabilir, satır silinse de kart önizlemesiyle yaşar (yabancı anahtar yok).
+  TextColumn get pdfDocumentId => text().nullable()();
+
+  /// Sayfa, 0'dan (`ink_strokes.pdfPage` ile aynı).
+  IntColumn get pdfPage => integer().nullable()();
+
+  /// Kutu: sayfa birimi (1/72 inç), döndürülmüş sayfa, sol-üst başlangıç, y aşağı.
+  RealColumn get pdfBoxLeft => real().nullable()();
+  RealColumn get pdfBoxTop => real().nullable()();
+  RealColumn get pdfBoxRight => real().nullable()();
+  RealColumn get pdfBoxBottom => real().nullable()();
+
   @override
   Set<Column> get primaryKey => {id};
 

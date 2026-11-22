@@ -15,6 +15,10 @@ abstract final class AppRoutes {
   static const pdfLibrary = '/pdf';
   static String pdfReader(String id) => '/pdf/$id';
 
+  /// Soru kartından PDF'e: sayfa (0'dan) ve kutu `sol,üst,sağ,alt` (sayfa birimi).
+  static String pdfReaderAt(String id, int page, double l, double t, double r, double b) =>
+      '/pdf/$id?page=$page&box=$l,$t,$r,$b';
+
   // Tam ekran sayfalar
   static const newSession = '/session/new';
   static const activeSession = '/session/active';

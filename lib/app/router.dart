@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../features/anlik/presentation/anlik_screens.dart';
 import '../features/dashboard/presentation/dashboard_screen.dart';
 import '../features/ink/presentation/ink_lab_page.dart';
+import '../features/pdf/domain/pdf_engine.dart' show PdfBox;
 import '../features/pdf/presentation/pdf_library_page.dart';
 import '../features/pdf/presentation/pdf_reader_page.dart';
 import '../features/ledger/presentation/ledger_screens.dart';
@@ -109,7 +110,21 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: AppRoutes.pdfLibrary, builder: (context, state) => const PdfLibraryPage()),
       GoRoute(
         path: '/pdf/:id',
-        builder: (context, state) => PdfReaderPage(documentId: state.pathParameters['id']!),
+        builder: (context, state) {
+          final page = int.tryParse(state.uri.queryParameters['page'] ?? '');
+          final parts = (state.uri.queryParameters['box'] ?? '').split(',').map(double.tryParse).toList();
+          final ok = page != null &&
+              page >= 0 &&
+              parts.length == 4 &&
+              parts.every((v) => v != null && v.isFinite) &&
+              parts[2]! > parts[0]! &&
+              parts[3]! > parts[1]!;
+          return PdfReaderPage(
+            documentId: state.pathParameters['id']!,
+            initialPage: ok ? page : null,
+            highlight: ok ? PdfBox(parts[0]!, parts[1]!, parts[2]!, parts[3]!) : null,
+          );
+        },
       ),
       GoRoute(path: AppRoutes.sendToComputer, builder: (context, state) => const SendToComputerScreen()),
       GoRoute(

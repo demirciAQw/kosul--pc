@@ -77,3 +77,15 @@ Dal: `tablet-1`. Her adım: saat, sonuç, ölçüm, "Ahmet elle denesin".
 - Masaüstünde fare de çizer (telefon/tabletde yalnız kalem). Silgi sürerken geri al/yinele kapalı.
 - Kalem sayfalar arası boşluktayken çizmez, kalem/parmak görünümü kaydırır.
 - **Elle bakılacak:** kalem değdiği anda `panEnabled` değişimi görüntüyü zıplatıyor mu? Cihaz `radiusMajor` bildirmiyorsa avuç önce + kalem havada algılanmadan inerse kayma olabilir.
+
+## T4: Soru = PDF koordinatı (v9.5)
+- `question_cards`: `pdf_document_id`, `pdf_page`, `pdf_box_left/top/right/bottom` (şema 17; sütunlar `from < 17` + PRAGMA kontrolüyle, 12/14/16→17 testli). Ledger, masaüstü birleştirici, CLI kendiliğinden kapsıyor.
+- Okuyucuda "Soru seç" aracı: sürükle, çerçeve, Doğru/Yanlış/Boş, ders/konu önerisi, kaydet/iptal. Metin varsa `textInBox` → `readPage` + `autoTag`; yoksa Android'de sayfa resmi + ML Kit (Linux'ta metinsiz kayıt). Eşik: ≥20 harf/rakam ve ≥3 sözcük.
+- Önizleme `questionImage` olarak saklanır, defterde fotoğraflı kartla aynı görünür. Android'de WebP (mevcut hat), Linux/testte 480 px PNG.
+- Defterde PDF kartına dokununca okuyucu sayfaya atlar, kutuyu vurgular; PDF yoksa ayrıntı sayfası.
+- Doğrulanmadı: Android'de gerçek WebP çıktısı, ML Kit yolu gerçek cihazda (yalnız sahte motorla), okuyucudan karta dönüş yok, soru türü ayrı alan değil (OcrRecord'dan türetilir).
+
+### Ahmet elle denesin (T4)
+- PDF'te "Soru seç" ile bir soruyu çerçevele, Yanlış işaretle; Defter'de kart görünüyor mu, dokununca PDF'e gidiyor mu?
+- Taranmış (metinsiz) PDF'te ders/konu önerisi ML Kit'ten geliyor mu?
+- Telefon (PDF'siz): kart önizleme resmiyle görünüyor mu?
