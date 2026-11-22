@@ -3,6 +3,8 @@ library;
 
 import 'dart:math' as math;
 
+import 'package:uuid/uuid.dart';
+
 import 'ink_models.dart';
 import 'ink_object.dart';
 
@@ -39,6 +41,7 @@ List<InkObject> strokesTouchedByEraser(
   List<InkPoint> eraserPath,
   double radius,
 ) {
+  _checkRadius(radius);
   final out = <InkObject>[];
   if (eraserPath.isEmpty) return out;
   for (final s in strokes) {
@@ -107,47 +110,90 @@ class EraseResult {
   final bool changed;
 }
 
-/// Alan silgisi: çizgiyi silgi yolu boyunca böler. Parçalar özgün çizgiden
-/// `id#0`, `id#1` ... kimliği alır; fırça (kalınlık), baskı ve zaman korunur.
-/// Silgi yolu üstündeki kısım atılır.
+const _uuid = Uuid();
+
+void _checkRadius(double radius) {
+  if (!radius.isFinite || radius < 0) {
+    throw ArgumentError.value(radius, 'radius', 'Silgi yarıçapı sonlu ve negatif olmayan bir sayı olmalı');
+  }
+}
+
+/// Alan silgisi: çizgiyi silgi yolu boyunca böler. Fırça (kalınlık) korunur.
+/// Parçalarda özgün köşe noktaları aynen kalır; yalnız silgi sınırına bir kesişim
+/// noktası (baskı, eğim ve zaman doğrusal aradeğerlenmiş) eklenir: kesim başına
+/// en çok 2 yeni nokta, art arda silmede çizgi şişmez. Silgi yolu üstündeki kısım atılır.
+///
+/// Parçalar YENİ kimlik alır ([idFor] verilmezse UUID v4; iki cihazda ya da
+/// yeniden bölmede çakışmaz). Çağıran, `changed` ise özgün çizgiyi YUMUŞAK
+/// silmeli (kayıt kalır, geri alınabilir) ve parçaları eklemelidir.
 EraseResult eraseArea(
   InkObject stroke,
   List<InkPoint> eraserPath,
   double radius, {
   String Function(String baseId, int index)? idFor,
 }) {
+  _checkRadius(radius);
   final pts = stroke.points;
   if (pts.isEmpty || eraserPath.isEmpty || !_touches(stroke, eraserPath, radius)) {
     return EraseResult([stroke], false);
   }
   final r = radius + stroke.halfWidth;
-  // Seyrek örneklenmiş çizgide silgi arada kalmasın: parçaları sıklaştır.
+  bool hit(InkPoint p) => distanceToPath(eraserPath, p.x, p.y) <= r;
+
+  // Sıklaştırılmış noktalar YALNIZ "silgi değdi mi" kararı içindir; seyrek
+  // çizgide silgi iki köşe arasında kalmasın diye. Çıktıya girmezler.
   final step = math.max(r / 3, 0.25);
-  final dense = <InkPoint>[pts.first];
+  final dense = <({InkPoint p, bool orig})>[(p: pts.first, orig: true)];
   for (var i = 0; i < pts.length - 1; i++) {
     final a = pts[i], b = pts[i + 1];
     final dx = b.x - a.x, dy = b.y - a.y;
-    final len = math.sqrt(dx * dx + dy * dy);
-    final n = (len / step).ceil();
+    final n = (math.sqrt(dx * dx + dy * dy) / step).ceil();
     for (var k = 1; k < n; k++) {
-      dense.add(_lerp(a, b, k / n));
+      dense.add((p: _lerp(a, b, k / n), orig: false));
     }
-    dense.add(b);
+    dense.add((p: b, orig: true));
   }
+
+  // [out] silgi dışında, [inn] içinde olan iki komşu yoğun nokta arasında sınır.
+  InkPoint boundary(InkPoint out, InkPoint inn) {
+    var lo = 0.0, hi = 1.0;
+    for (var i = 0; i < 24; i++) {
+      final mid = (lo + hi) / 2;
+      if (hit(_lerp(out, inn, mid))) {
+        hi = mid;
+      } else {
+        lo = mid;
+      }
+    }
+    return _lerp(out, inn, lo);
+  }
+
   final pieces = <List<InkPoint>>[];
   var cur = <InkPoint>[];
-  for (final p in dense) {
-    if (distanceToPath(eraserPath, p.x, p.y) <= r) {
-      if (cur.length >= 2) pieces.add(cur);
-      cur = <InkPoint>[];
-    } else {
-      cur.add(p);
-    }
+  void flush() {
+    if (cur.length >= 2) pieces.add(cur);
+    cur = <InkPoint>[];
   }
-  if (cur.length >= 2) pieces.add(cur);
-  String name(int i) => idFor != null ? idFor(stroke.id, i) : '${stroke.id}#$i';
+
+  var prevInside = hit(dense.first.p);
+  if (!prevInside) cur.add(dense.first.p);
+  for (var i = 1; i < dense.length; i++) {
+    final d = dense[i];
+    final inside = hit(d.p);
+    if (!prevInside && inside) {
+      cur.add(boundary(dense[i - 1].p, d.p)); // çıkış sınırı
+      flush();
+    } else if (prevInside && !inside) {
+      cur.add(boundary(d.p, dense[i - 1].p)); // giriş sınırı
+      if (d.orig) cur.add(d.p);
+    } else if (!inside && d.orig) {
+      cur.add(d.p);
+    }
+    prevInside = inside;
+  }
+  flush();
+  String name(int i) => idFor != null ? idFor(stroke.id, i) : _uuid.v4();
   return EraseResult([
-    for (var i = 0; i < pieces.length; i++)
-      stroke.copyWith(id: name(i), points: pieces[i]),
+    for (var i = 0; i < pieces.length; i++) stroke.copyWith(id: name(i), points: pieces[i]),
   ], true);
 }

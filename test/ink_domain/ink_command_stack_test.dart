@@ -70,6 +70,38 @@ void main() {
     expect(ids(s), ['a', 'b#0', 'b#1', 'c']);
   });
 
+  test('replaceMany: çok nesne tek harekette, tek geri al tümünü alır', () {
+    final s = InkCommandStack(initial: [o('a'), o('b'), o('c'), o('d')]);
+    final n = s.replaceMany({
+      'a': [o('a1'), o('a2')],
+      'c': const [],
+      'yok': [o('z')],
+    });
+    expect(n, 2);
+    expect(ids(s), ['a1', 'a2', 'b', 'd']);
+    expect(s.undo(), isTrue);
+    expect(ids(s), ['a', 'b', 'c', 'd']);
+    expect(s.canUndo, isFalse); // tek kayıt
+    expect(s.redo(), isTrue);
+    expect(ids(s), ['a1', 'a2', 'b', 'd']);
+    expect(s.replaceMany({'yok': [o('z')]}), 0);
+    expect(s.replaceMany({}), 0);
+    expect(s.canRedo, isFalse);
+  });
+
+  test('replaceMany: maxDepth hareketleri sayar', () {
+    final s = InkCommandStack(initial: [for (var i = 0; i < 20; i++) o('s$i')], maxDepth: 2);
+    for (var k = 0; k < 4; k++) {
+      s.replaceMany({for (var i = 0; i < 5; i++) 's${k * 5 + i}': [o('r${k * 5 + i}')]});
+    }
+    var n = 0;
+    while (s.undo()) {
+      n++;
+    }
+    expect(n, 2);
+    expect(s.objects.where((e) => e.id.startsWith('r')).length, 10);
+  });
+
   test('derinlik sınırı', () {
     final s = InkCommandStack(maxDepth: 3);
     for (var i = 0; i < 6; i++) {

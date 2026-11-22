@@ -79,7 +79,7 @@ InkObject scaleObject(
       _map(p, cx + (p.x - cx) * sx, cy + (p.y - cy) * sy),
   ];
   final w = scaleWidth
-      ? s.brush.width * math.sqrt((sx * sy).abs())
+      ? math.max(s.brush.width * math.sqrt((sx * sy).abs()), minBrushWidth)
       : s.brush.width;
   return s.copyWith(points: pts, brush: s.brush.copyWith(width: w));
 }
@@ -99,6 +99,15 @@ InkObject rotateObject(InkObject s, double radians, double cx, double cy) {
   );
 }
 
+/// Ölçeklemede kalınlığın alt sınırı.
+const minBrushWidth = 0.05;
+
+/// Ölçeğin mutlak değeri bu sınırın altına inmez (işareti korunur): hedef kutu
+/// sıfır genişlik/yükseklikteyse noktalar tek noktaya çökmesin, kalınlık 0 olmasın.
+const minScale = 1e-3;
+
+double _clampScale(double s) => s.abs() >= minScale ? s : (s < 0 ? -minScale : minScale);
+
 /// Seçimi bir kutudan diğerine uyduran ölçek (köşe tutamacı sürükleme).
 /// [keepAspect] true ise küçük ölçek iki eksene de uygulanır.
 List<InkObject> resizeSelection(
@@ -108,8 +117,8 @@ List<InkObject> resizeSelection(
   bool keepAspect = false,
   bool scaleWidth = false,
 }) {
-  final sx0 = from.width == 0 ? 1.0 : to.width / from.width;
-  final sy0 = from.height == 0 ? 1.0 : to.height / from.height;
+  final sx0 = from.width == 0 ? 1.0 : _clampScale(to.width / from.width);
+  final sy0 = from.height == 0 ? 1.0 : _clampScale(to.height / from.height);
   var sx = sx0, sy = sy0;
   if (keepAspect) {
     final k = sx0.abs() < sy0.abs() ? sx0 : sy0;

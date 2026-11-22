@@ -42,7 +42,7 @@ void main() {
   group('alan silgisi', () {
     test('ortadan böler, özellikler korunur', () {
       final a = line('a', w: 3);
-      final r = eraseArea(a, [p(50, 0)], 8);
+      final r = eraseArea(a, [p(50, 0)], 8, idFor: (b, i) => '$b#$i');
       expect(r.changed, isTrue);
       expect(r.pieces.length, 2);
       expect(r.pieces[0].id, 'a#0');
@@ -88,6 +88,63 @@ void main() {
     test('silgi yolu çizgiyi dik keserse böler', () {
       final r = eraseArea(line('a'), [p(50, -30), p(50, 30)], 4);
       expect(r.pieces.length, 2);
+    });
+
+    test('varsayılan parça kimlikleri UUID: çağrılar arasında benzersiz', () {
+      final a = line('a');
+      final r1 = eraseArea(a, [p(50, 0)], 8);
+      final r2 = eraseArea(a, [p(50, 0)], 8);
+      final all = [...r1.pieces, ...r2.pieces].map((e) => e.id).toList();
+      expect(all.toSet().length, 4);
+      expect(all.any((e) => e.contains('#') || e == 'a'), isFalse);
+    });
+    test('özgün köşeler korunur, kesim başına en çok 2 sınır noktası', () {
+      final a = line('a', n: 50); // x = 0, 10, ... 490
+      final r = eraseArea(a, [p(245, 0)], 15);
+      expect(r.pieces.length, 2);
+      final total = r.pieces.fold<int>(0, (s, e) => s + e.points.length);
+      final origKept = a.points.where((q) => (q.x - 245).abs() > 15).length;
+      expect(total, lessThanOrEqualTo(origKept + 2));
+      expect(total, greaterThanOrEqualTo(origKept));
+      // özgün noktaların hepsi (silinmeyenler) aynen duruyor
+      final xs = {for (final e in r.pieces) for (final q in e.points) q.x};
+      for (final q in a.points.where((q) => (q.x - 245).abs() > 15)) {
+        expect(xs, contains(q.x));
+      }
+    });
+    test('art arda 10 silgi geçişinde nokta sayısı patlamaz', () {
+      var strokes = [line('a', n: 50)];
+      final start = strokes.single.points.length;
+      for (var k = 0; k < 10; k++) {
+        final cx = 30.0 + k * 45;
+        strokes = [
+          for (final s in strokes) ...eraseArea(s, [p(cx, 0)], 6).pieces,
+        ];
+      }
+      final total = strokes.fold<int>(0, (s, e) => s + e.points.length);
+      expect(total, lessThanOrEqualTo(start + 2 * 10 * 2));
+      expect(total, lessThan(start + 40));
+    });
+    test('sınır noktasında baskı ve zaman doğrusal aradeğerlenir', () {
+      final a = InkObject(id: 'a', points: [p(0, 0, 0, 0), p(100, 0, 1, 100)]);
+      final r = eraseArea(a, [p(50, 0)], 10, idFor: (b, i) => '$b$i');
+      expect(r.pieces.length, 2);
+      final b0 = r.pieces[0].points.last; // ~x=40
+      final b1 = r.pieces[1].points.first; // ~x=60
+      expect(b0.x, closeTo(50 - 10 - a.halfWidth, 0.01));
+      expect(b0.pressure, closeTo(b0.x / 100, 1e-9));
+      expect(b0.tMs, closeTo(b0.x, 1e-9));
+      expect(b1.x, closeTo(50 + 10 + a.halfWidth, 0.01));
+      expect(b1.pressure, closeTo(b1.x / 100, 1e-9));
+      expect(b1.tMs, closeTo(b1.x, 1e-9));
+      expect(r.pieces[0].points.length, 2);
+      expect(r.pieces[1].points.length, 2);
+    });
+    test('geçersiz yarıçap ArgumentError', () {
+      for (final bad in [double.nan, double.infinity, -1.0]) {
+        expect(() => eraseArea(line('a'), [p(5, 0)], bad), throwsArgumentError);
+        expect(() => strokesTouchedByEraser([line('a')], [p(5, 0)], bad), throwsArgumentError);
+      }
     });
   });
 }

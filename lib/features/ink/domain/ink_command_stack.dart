@@ -3,7 +3,7 @@ library;
 
 import 'ink_object.dart';
 
-enum InkCommandKind { add, remove, transform, split }
+enum InkCommandKind { add, remove, transform, split, replaceMany }
 
 class _Entry {
   _Entry(this.kind, this.before, this.after);
@@ -72,6 +72,27 @@ class InkCommandStack {
     if (i < 0) return;
     final next = [..._objects]..replaceRange(i, i + 1, pieces);
     _commit(InkCommandKind.split, next);
+  }
+
+  /// Bir hareketle birçok nesneyi değiştirir (silgi sürüklemesi): anahtar nesne
+  /// kimliği, değer yerine geçecek parçalar (boşsa nesne silinir). Parçalar eski
+  /// nesnenin z-sırasında durur. Hepsi TEK geri alma kaydıdır; [maxDepth] hareketi
+  /// sayar. Hiçbir kimlik bulunmazsa komut eklenmez; döner: değişen nesne sayısı.
+  int replaceMany(Map<String, List<InkObject>> replacements) {
+    if (replacements.isEmpty) return 0;
+    var n = 0;
+    final next = <InkObject>[];
+    for (final o in _objects) {
+      final r = replacements[o.id];
+      if (r == null) {
+        next.add(o);
+      } else {
+        n++;
+        next.addAll(r);
+      }
+    }
+    if (n > 0) _commit(InkCommandKind.replaceMany, next);
+    return n;
   }
 
   bool undo() {

@@ -300,6 +300,32 @@ void main() {
     expect(h.where((c) => c.source == 'claude' && c.table == 'ink_notebooks'), isNotEmpty);
   });
 
+  test('silinmiş sayfa çoğaltılamaz', () async {
+    final nb = await repo.createNotebook();
+    final a = (await repo.pages(nb)).single.id;
+    await repo.addPage(nb);
+    await repo.deletePage(a);
+    expect(() => repo.duplicatePage(a), throwsStateError);
+  });
+
+  test('ensureVisiblePage: görünür sayfa varsa dokunmaz; yoksa en son silineni geri getirir; hiç yoksa ekler', () async {
+    final nb = await repo.createNotebook();
+    final a = (await repo.pages(nb)).single.id;
+    expect(await repo.ensureVisiblePage(nb), a);
+    final b = await repo.addPage(nb);
+    // Senkronda iki cihaz son iki sayfayı ayrı sildi: depo kuralı aşılmış olur.
+    await db.customStatement('UPDATE ink_note_pages SET deleted = 1');
+    await db.customStatement("UPDATE ink_note_pages SET updated_at = updated_at + 10 WHERE id = '$b'");
+    expect(await repo.pages(nb), isEmpty);
+    expect(await repo.ensureVisiblePage(nb), b);
+    expect(await order(nb), [b]);
+    // Hiç sayfa yok (ya da hepsi yok): yeni sayfa eklenir.
+    final empty = await repo.createNotebook(withFirstPage: false);
+    final n = await repo.ensureVisiblePage(empty);
+    expect(await order(empty), [n]);
+    expect(() => repo.ensureVisiblePage('yok'), throwsStateError);
+  });
+
   // ───────────── Göç ─────────────
 
   Future<void> migrate(int from) async {
@@ -331,6 +357,16 @@ void main() {
       await d.customStatement('DROP TABLE $t');
     }
     await d.customStatement('DROP INDEX IF EXISTS ix_defter_sayfa');
+    if (from >= 15 && from < 18) {
+      // Gerçek v15-17 şeması: ink_strokes question_id sütunu ve indeksi olmadan.
+      for (final r in await d.customSelect("SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'ink_strokes'").get()) {
+        await d.customStatement('DROP TRIGGER "${r.read<String>('name')}"');
+      }
+      await d.customStatement('DROP INDEX IF EXISTS ix_ink_question');
+      await d.customStatement('ALTER TABLE ink_strokes DROP COLUMN question_id');
+      final cols = {for (final c in await d.customSelect('PRAGMA table_info(ink_strokes)').get()) c.read<String>('name')};
+      expect(cols.contains('question_id'), isFalse, reason: 'eski şema kurulamadı');
+    }
     await d.customStatement('PRAGMA user_version = $from');
     await d.close();
 
@@ -340,6 +376,10 @@ void main() {
     expect(names, containsAll(['ink_notebooks', 'ink_note_pages', 'ink_notebook_tags', 'ink_notebook_people', 'ink_page_tags', 'ink_page_people', 'ink_strokes', 'pdf_documents']));
     expect((await d.select(d.anlikNotes).getSingle()).body, 'eski not');
     if (from >= 15) expect(await d.select(d.inkStrokes).get(), hasLength(1)); // eski çizgi bozulmadı
+    final cols = {for (final c in await d.customSelect('PRAGMA table_info(ink_strokes)').get()) c.read<String>('name')};
+    expect(cols, contains('question_id'));
+    if (from >= 15) expect((await d.select(d.inkStrokes).getSingle()).questionId, isNull);
+    expect(await d.customSelect("SELECT name FROM sqlite_master WHERE name = 'ix_ink_question'").get(), hasLength(1));
     expect((await d.customSelect('PRAGMA user_version').getSingle()).read<int>('user_version'), 19);
     expect(await d.customSelect("SELECT name FROM sqlite_master WHERE name = 'ix_defter_sayfa'").get(), hasLength(1));
     // Yeni defter çalışır ve deftere yazılır.
@@ -350,6 +390,7 @@ void main() {
     expect(tables, containsAll(['ink_notebooks', 'ink_note_pages']));
   }
 
+  test('v16 -> v19 göçü (question_id sütunu gerçekten eklenir)', () => migrate(16));
   test('v14 -> v19 göçü', () => migrate(14));
   test('v17 -> v19 göçü', () => migrate(17));
   test('v18 -> v19 göçü', () => migrate(18));

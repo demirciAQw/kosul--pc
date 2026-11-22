@@ -175,8 +175,10 @@ class InkNotebookRepository {
       });
 
   /// Sayfayı hemen arkasına, çizgileriyle birlikte çoğaltır. Etiket/kişi bağları kopyalanmaz.
+  /// Silinmiş sayfa çoğaltılamaz ([StateError]); önce geri getirilmeli.
   Future<String> duplicatePage(String pageId) => _db.transaction(() async {
         final src = await _requirePage(pageId);
+        if (src.deleted) throw StateError('Silinmiş sayfa çoğaltılamaz');
         final visible = [for (final r in await _pageRows(src.notebookId)) r.id];
         final newId = await addPage(
           src.notebookId,
@@ -228,6 +230,25 @@ class InkNotebookRepository {
         if (visible.length <= 1) throw StateError('Defterin son sayfası silinemez');
         await _touchPage(pageId, const InkNotePagesCompanion(deleted: Value(true)));
         await _applyOrder(p.notebookId, [for (final r in visible) if (r.id != pageId) r.id]);
+      });
+
+  /// Defterde görünür sayfa yoksa (iki cihaz son iki sayfayı ayrı sildi: "son sayfa
+  /// silinemez" kuralı senkronda aşılabilir) en son silineni geri getirir, o da
+  /// yoksa yeni sayfa ekler; döner: görünür kalan/oluşan sayfanın kimliği (zaten
+  /// görünür sayfa varsa ilki, hiçbir şey değişmez).
+  /// T6b: defter açılırken ve senkrondan sonra çağrılmalı (T6a'da çağıran yok).
+  Future<String> ensureVisiblePage(String notebookId) => _db.transaction(() async {
+        await _requireNotebook(notebookId);
+        final visible = await _pageRows(notebookId);
+        if (visible.isNotEmpty) return visible.first.id;
+        final all = await _pageRows(notebookId, includeDeleted: true);
+        if (all.isEmpty) return addPage(notebookId);
+        final last = all.reduce((a, b) => (b.updatedAt.isAfter(a.updatedAt) ||
+                (b.updatedAt == a.updatedAt && b.pageNo > a.pageNo))
+            ? b
+            : a);
+        await restorePage(last.id);
+        return last.id;
       });
 
   /// Silinen sayfayı eski yerine yakın geri getirir.

@@ -85,4 +85,20 @@ void main() {
     // sıfır genişlikli kutu patlamaz
     expect(resizeSelection([a], const InkRect(0, 0, 0, 0), const InkRect(5, 5, 5, 5)), hasLength(1));
   });
+
+  test('hedef kutu sıfır genişlik/yükseklik: çökme ve sıfır kalınlık yok', () {
+    final a = s('a', [p(0, 0), p(10, 10)], w: 2);
+    final from = selectionBounds([a])!;
+    final to = InkRect(5, 5, 5, 5);
+    final r = resizeSelection([a], from, to, scaleWidth: true).single;
+    expect(r.brush.width, greaterThan(0));
+    expect(r.points[1].x, greaterThan(r.points[0].x)); // iki nokta ayrı kalır
+    expect(r.points[1].y, greaterThan(r.points[0].y));
+    final k = resizeSelection([a], from, to, keepAspect: true, scaleWidth: true).single;
+    expect(k.brush.width, greaterThan(0));
+    expect(k.points[1].x, isNot(k.points[0].x));
+    // ters çevirme (negatif ölçek) işaretini korur
+    final flip = resizeSelection([a], from, InkRect(from.left, from.top, from.left - 0.0, from.bottom)).single;
+    expect(flip.points[1].x, greaterThan(flip.points[0].x));
+  });
 }
