@@ -42,9 +42,14 @@ class NoteToolDock extends StatelessWidget {
     required this.session,
     required this.page,
     this.small = false,
+    this.axis = Axis.horizontal,
   });
 
   final NoteToolSettings tools;
+
+  /// Yuvanın yönü: üst/alt kenarda yatay, sol/sağ kenarda dikey
+  /// (dikey düzen `tools.dockPosition` left/right iken ekran tarafından istenir).
+  final Axis axis;
 
   /// Sayfa değişirken null olabilir (geri al/yinele kapalı).
   final PdfInkSession? session;

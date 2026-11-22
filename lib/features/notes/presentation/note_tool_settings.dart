@@ -6,6 +6,9 @@ import '../../ink/domain/pen_profiles.dart';
 import '../../ink/domain/shape_recognizer.dart' show ShapeTool;
 import '../../pdf/presentation/pdf_ink_session.dart';
 
+/// Araç yuvasının ekranda durduğu kenar (kullanıcı değiştirir, kalıcıdır).
+enum DockPosition { top, bottom, left, right }
+
 /// Defter araç durumu (kalem türü, renk, kalınlık, sertlik, silgi). Sayfa değişince
 /// kaybolmaması için ekran tutar; her sayfa oturumuna [apply] ile uygulanır.
 class NoteToolSettings extends ChangeNotifier {
@@ -14,8 +17,8 @@ class NoteToolSettings extends ChangeNotifier {
   /// Son seçilen kalem (fosforlu hariç): yuvadaki "Kalem" düğmesi buna döner.
   PenKind _lastPen = PenKind.ballpoint;
 
-  /// Araç yuvası üstte mi (varsayılan altta).
-  bool _dockTop = false;
+  /// Araç yuvasının kenarı (varsayılan alt).
+  DockPosition _dockPos = DockPosition.bottom;
   bool _eraser = false;
   bool _lasso = false;
   bool _shapeSnap = true;
@@ -41,16 +44,24 @@ class NoteToolSettings extends ChangeNotifier {
 
   PenKind get kind => _kind;
   PenKind get lastPenKind => _lastPen;
-  bool get dockAtTop => _dockTop;
+
+  /// Yuvanın bulunduğu kenar: üst, alt, sol, sağ.
+  DockPosition get dockPosition => _dockPos;
+  bool get dockAtTop => _dockPos == DockPosition.top;
 
   /// [k] türünün seçili rengi (yuvadaki renk noktası için).
   int colorFor(PenKind k) => _color[k]!;
 
-  void setDockAtTop(bool top) {
-    if (_dockTop == top) return;
-    _dockTop = top;
+  void setDockPosition(DockPosition p) {
+    if (_dockPos == p) return;
+    _dockPos = p;
     notifyListeners();
   }
+
+  /// Eski ikili API (üst/alt): yeni kodda [setDockPosition] kullan.
+  void setDockAtTop(bool top) =>
+      setDockPosition(top ? DockPosition.top : DockPosition.bottom);
+
   bool get eraser => _eraser;
   bool get lasso => _lasso;
 
@@ -97,12 +108,23 @@ class NoteToolSettings extends ChangeNotifier {
   };
 
   /// Kalıcı saklanacak her şey: boyutlar ve yuva konumu.
-  Map<String, Object?> toPrefs() => {...toSizes(), 'dock.top': _dockTop};
+  Map<String, Object?> toPrefs() => {
+    ...toSizes(),
+    'dock.pos': _dockPos.name,
+    'dock.top': _dockPos == DockPosition.top, // eski sürümlerle uyum
+  };
 
   /// [toPrefs]/[toSizes] çıktısını geri yükler (bilinmeyen/bozuk değerler yok sayılır).
   void restoreSizes(Map<String, Object?> m) {
+    final pos = m['dock.pos'];
     final top = m['dock.top'];
-    if (top is bool) _dockTop = top;
+    if (pos is String) {
+      for (final p in DockPosition.values) {
+        if (p.name == pos) _dockPos = p;
+      }
+    } else if (top is bool) {
+      _dockPos = top ? DockPosition.top : DockPosition.bottom;
+    }
     for (final k in PenKind.values) {
       final v = m['width.${k.name}'];
       if (v is num && v.isFinite) {
