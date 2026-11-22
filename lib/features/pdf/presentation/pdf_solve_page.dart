@@ -115,6 +115,8 @@ class _PdfSolveViewState extends ConsumerState<PdfSolveView> {
         final size = await doc.pageSize(widget.page);
         final region = solveRegion(widget.box, size);
         if (region == null) throw StateError('Soru kutusu geçersiz');
+        // Not: motor yalnızca tam sayfa çizer (bölge-only API yok); 3x A4 ~4,4 Mpx
+        // (~17 MB) olur ve aşağıdaki döngü maxRenderPixels*0.9 sınırını korur.
         // Bölge genişliği ~1600 piksel olsun (en çok 3x); belge sınırını aşma.
         var scale = math.min<double>(3, 1600 / region.width);
         while (size.width * scale * size.height * scale > maxRenderPixels * 0.9) {

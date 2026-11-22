@@ -4,6 +4,7 @@ import 'package:drift/native.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kocum/core/database/app_database.dart';
 import 'package:kocum/core/di/core_providers.dart';
@@ -274,6 +275,28 @@ void main() {
     await open(t, initialPage: 0, highlight: const PdfBox(72, 100, 300, 300), questionId: 'q1');
     expect(find.byKey(const Key('pdf-solve-button')), findsOneWidget);
     expect(find.text('Çöz'), findsOneWidget);
+  });
+
+  testWidgets('kaydedildi iletisindeki Çöz: sayfa kapandıktan sonra basılınca çökmez', (t) async {
+    final pushed = <String>[];
+    final router = GoRouter(
+      routes: [
+        GoRoute(path: '/', builder: (_, __) => const SizedBox()),
+        GoRoute(
+          path: '/pdf/:id/soru/:card',
+          builder: (_, st) {
+            pushed.add(st.pathParameters['card']!);
+            return const SizedBox();
+          },
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+    final bar = savedQuestionSnackBar(router, 'doc', 'kart');
+    // Sayfa ölmüş: eylem yalnızca önceden alınmış yönlendiriciyi kullanır.
+    bar.action!.onPressed();
+    bar.action!.onPressed();
+    expect(() => savedQuestionSnackBar(null, 'doc', 'kart').action!.onPressed(), returnsNormally);
   });
 
   testWidgets('Çöz düğmesi kutu olmadan ya da soru kimliği olmadan çıkmaz', (t) async {

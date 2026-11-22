@@ -114,6 +114,24 @@ void _solveTests() {
     expect(await repo.forPage(PdfPageOwner(_doc, 0), questionId: 'q1', attemptNo: 2), hasLength(1));
   });
 
+  test('startedAtMs çizginin BAŞLANGICI: bitiş saati - çizgi süresi', () async {
+    final (_, repo) = await _open();
+    final s = PdfInkSession(
+      documentId: _doc,
+      repository: repo,
+      attemptNo: 1,
+      questionId: 'q1',
+      retryDelays: _fast,
+      clock: () => DateTime.fromMillisecondsSinceEpoch(1000000),
+    );
+    addTearDown(s.dispose);
+    s.addStroke(0, const InkBrush(width: 2), _line(10, 10), _coords(1)); // süre 32 ms
+    await s.flush();
+    final r = await repo.forPage(PdfPageOwner(_doc, 0), questionId: 'q1');
+    expect(r.single.durationMs, 32);
+    expect(r.single.startedAtMs, 1000000 - 32);
+  });
+
   test('çözüm oturumunda kayıt hatası yeniden denenir, kayıp olmaz ve questionId korunur', () async {
     final (db, _) = await _open();
     final repo = _FlakyRepo(db)..addFailures = 5;

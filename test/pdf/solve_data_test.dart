@@ -16,6 +16,8 @@ import 'package:kocum/features/ink/data/ink_stroke_repository.dart';
 import 'package:kocum/features/ink/domain/ink_stroke_record.dart';
 import 'package:kocum/features/ink/domain/stroke_codec.dart';
 import 'package:kocum/features/pdf/domain/solve.dart';
+import 'package:kocum/features/question_bank/data/question_card_repository_impl.dart';
+import 'package:kocum/features/question_bank/domain/question_card.dart';
 
 final _pts = [const StrokePoint(1, 2, t: 0), const StrokePoint(3, 4, t: 40)];
 const _doc = PdfPageOwner('belge', 2);
@@ -53,6 +55,30 @@ void main() {
       expect(f.single.questionId, isNull);
       // Hiç filtre yok: eskisi gibi hepsi.
       expect(await repo.forPage(_doc), hasLength(4));
+    });
+
+    test('kart silinince çizgileri yumuşak silinir (satır kalır), başka sorunun çizgisi kalır', () async {
+      final db = await _open();
+      final repo = InkStrokeRepository(db);
+      final cards = DriftQuestionCardRepository(db);
+      await cards.insert(QuestionCard(
+        id: 'q1',
+        status: QuestionStatus.wrong,
+        origin: QuestionOrigin.independent,
+        sourceName: 'x',
+        subject: 'TYT Matematik',
+        difficulty: 5,
+        createdAt: DateTime(2026),
+      ));
+      await repo.add(owner: _doc, points: _pts, startedAtMs: 1, attemptNo: 1, questionId: 'q1');
+      await repo.add(owner: _doc, points: _pts, startedAtMs: 2, attemptNo: 2, questionId: 'q1');
+      final other = await repo.add(owner: _doc, points: _pts, startedAtMs: 3, questionId: 'q2');
+      await cards.delete('q1');
+      expect(await repo.forPage(_doc, questionId: 'q1'), isEmpty);
+      expect((await repo.forPage(_doc, questionId: 'q2')).map((s) => s.id), [other]);
+      final rows = await (db.select(db.inkStrokes)..where((r) => r.questionId.equals('q1'))).get();
+      expect(rows, hasLength(2)); // veri silinmedi
+      expect(rows.every((r) => r.deleted), isTrue);
     });
 
     test('çizgi zamanları: silinenler hariç, yalnızca o soru', () async {

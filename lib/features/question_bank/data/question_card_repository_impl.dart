@@ -51,6 +51,11 @@ class DriftQuestionCardRepository implements QuestionCardRepository {
         // Tekrar kaydı açıkça silinir; yabancı anahtar zincirine güvenmiyoruz
         // (eski sürümden yükseltmede bağ kopmuş olabilir).
         await (_db.delete(_db.reviewStates)..where((r) => r.cardId.equals(cardId))).go();
+        // Kartın PDF çözüm çizgileri (tablet) görünmez olur ama veri silinmez:
+        // yumuşak silinir, satır senkronla gider. (Kutu güncellenirse çizgiler
+        // dokunulmaz kalır: sayfa koordinatındadırlar, eski kutu yerinde doğrudur.)
+        await (_db.update(_db.inkStrokes)..where((s) => s.questionId.equals(cardId) & s.deleted.equals(false)))
+            .write(InkStrokesCompanion(deleted: const Value(true), updatedAt: Value(DateTime.now())));
         await (_db.delete(_db.questionCards)..where((c) => c.id.equals(cardId))).go();
       });
 

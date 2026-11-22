@@ -200,15 +200,12 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
 
   void _onSaved(QuestionCard card) {
     setState(_clearPending);
+    // Yönlendirici şimdi alınır: eylem, sayfadan çıkıldıktan sonra basılırsa
+    // `context` ölü olur ve GoRouter.of(context) fırlatır.
+    final router = GoRouter.maybeOf(context);
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(
-        content: const Text('Soru kaydedildi.'),
-        action: SnackBarAction(
-          label: 'Çöz',
-          onPressed: () => GoRouter.of(context).push(AppRoutes.pdfSolve(widget.info.record.id, card.id)),
-        ),
-      ));
+      ..showSnackBar(savedQuestionSnackBar(router, widget.info.record.id, card.id));
   }
 
   List<Widget> _overlays(BuildContext context, Rect rect, r.PdfPage page) => [
@@ -560,3 +557,14 @@ class _ThumbStrip extends StatelessWidget {
     );
   }
 }
+
+/// "Soru kaydedildi" ileti çubuğu; "Çöz" eylemi önceden alınmış [router] ile
+/// çalışır (sayfadan çıkılmış olsa da `context` kullanılmaz).
+@visibleForTesting
+SnackBar savedQuestionSnackBar(GoRouter? router, String documentId, String cardId) => SnackBar(
+      content: const Text('Soru kaydedildi.'),
+      action: SnackBarAction(
+        label: 'Çöz',
+        onPressed: () => router?.push(AppRoutes.pdfSolve(documentId, cardId)),
+      ),
+    );

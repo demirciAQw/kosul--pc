@@ -379,7 +379,7 @@ class PdfInkSession extends ChangeNotifier {
     final stroke = PenStroke(
       viewBrush.copyWith(width: viewBrush.width * coords.pageUnitsPerViewPx),
       pts,
-    )..startedAtMs = _clock().millisecondsSinceEpoch;
+    )..startedAtMs = _clock().millisecondsSinceEpoch - pts.last.tMs.round(); // saat çizgi SONUNDA okunur
     penFor(page)._add(stroke);
     unawaited(_enqueue(() => _save(page, stroke)));
   }

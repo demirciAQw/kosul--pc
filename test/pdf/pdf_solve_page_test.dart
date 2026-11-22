@@ -12,7 +12,7 @@ import 'package:kocum/features/ink/domain/stroke_codec.dart';
 import 'package:kocum/features/pdf/data/pdfrx_engine.dart';
 import 'package:kocum/features/pdf/domain/pdf_document_record.dart';
 import 'package:kocum/features/pdf/domain/pdf_engine.dart';
-import 'package:kocum/features/pdf/domain/solve.dart' show defaultOldOpacity;
+import 'package:kocum/features/pdf/domain/solve.dart' show defaultOldOpacity, solveRegion;
 import 'package:drift/drift.dart' show Value;
 import 'package:kocum/features/pdf/pdf_providers.dart';
 import 'package:kocum/features/pdf/presentation/pdf_solve_page.dart';
@@ -81,6 +81,17 @@ void main() {
     }
   }
 
+  /// Ekran noktası -> sayfa noktası (zum dahil: dönüşümlü kutudan oranla).
+  Offset expectedPage(WidgetTester t, Offset screen) {
+    final f = find.byKey(const Key('solve-canvas'));
+    final tl = t.getTopLeft(f), br = t.getBottomRight(f);
+    final region = solveRegion(_box, const PdfPageSize(612, 792))!;
+    return Offset(
+      region.left + (screen.dx - tl.dx) / (br.dx - tl.dx) * region.width,
+      region.top + (screen.dy - tl.dy) / (br.dy - tl.dy) * region.height,
+    );
+  }
+
   Future<void> draw(WidgetTester t) async {
     final c = t.getCenter(find.byKey(const Key('solve-canvas')));
     final pen = await t.startGesture(c, kind: PointerDeviceKind.stylus);
@@ -127,10 +138,40 @@ void main() {
     final r = await rows(t);
     expect(r, hasLength(1));
     expect((r.single.questionId, r.single.attemptNo), ('q1', 1));
-    // Çizgi bölge koordinatından SAYFA koordinatına çevrilmiş: bölge sol-üstü (60, 88) civarı.
-    expect(r.single.points.first.x, greaterThan(60));
-    expect(r.single.points.first.y, greaterThan(88));
+    // Çizgi bölge koordinatından SAYFA koordinatına çevrilmiş (ekran -> bölge -> sayfa).
+    final e = expectedPage(t, t.getCenter(find.byKey(const Key('solve-canvas'))));
+    expect(r.single.points.first.x, closeTo(e.dx, 1));
+    expect(r.single.points.first.y, closeTo(e.dy, 1));
     expect(find.byKey(const Key('pdf-undo')), findsOneWidget);
+  });
+
+  testWidgets('yakınlaştırılmış görünümde de çizgi doğru SAYFA koordinatına düşer', (t) async {
+    await open(t);
+    final canvas = find.byKey(const Key('solve-canvas'));
+    final c = t.getCenter(canvas);
+    final a = await t.startGesture(c - const Offset(20, 0), pointer: 1);
+    final b = await t.startGesture(c + const Offset(20, 0), pointer: 2);
+    await t.pump();
+    await a.moveBy(const Offset(-60, 0));
+    await b.moveBy(const Offset(60, 0));
+    await a.up();
+    await b.up();
+    await settle(t, 200);
+    final big = t.getBottomRight(canvas) - t.getTopLeft(canvas);
+    expect(big.dx, greaterThan(t.getSize(canvas).width * 1.5)); // gerçekten yakınlaştı
+    // Çizim: tuvalin görünen kısmında, merkezden kaymış bir noktadan.
+    final start = c + const Offset(-70, -50);
+    final pen = await t.startGesture(start, kind: PointerDeviceKind.stylus);
+    for (var i = 0; i < 6; i++) {
+      await pen.moveBy(const Offset(12, 4));
+    }
+    await pen.up();
+    await settle(t, 300);
+    final r = await rows(t);
+    expect(r, hasLength(1));
+    final e = expectedPage(t, start);
+    expect(r.single.points.first.x, closeTo(e.dx, 1));
+    expect(r.single.points.first.y, closeTo(e.dy, 1));
   });
 
   testWidgets('yeniden çöz: yeni boş katman, eski çizgiler yerinde; boş denemede uyarır', (t) async {

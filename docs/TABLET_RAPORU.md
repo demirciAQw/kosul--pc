@@ -96,6 +96,7 @@ Dal: `tablet-1`. Her adım: saat, sonuç, ölçüm, "Ahmet elle denesin".
 - Süre (`solveDuration`): çizgi aralıkları birleşir, 30 sn'den uzun boşluk sayılmaz, tek çizgi en çok 5 dk. Mevcut `avgSecondsPerQuestion` dokunulmadı.
 - Giriş: okuyucuda "Çöz", kayıt snackbar'ında "Çöz", soru ayrıntısında "Çöz" ve "Çözüm süresi".
 - Karar: ekran son denemede açılır (yanlışlıkla kapatınca çizim kaybolmasın); yeni deneme yalnız "Yeniden çöz" ile.
+- Bilinen sınır: iki cihaz çevrimdışıyken aynı soruda "Yeniden çöz" derse ikisi de aynı deneme numarasını alır; çizgiler karışır, süre birleşir (veri kaybı yok). Kart silinirse çizgileri yumuşak silinir; kutu değişirse çizgiler sayfa koordinatında olduğundan yerinde kalır.
 - 542 test, APK ve Linux debug derlendi. Kalem hissi tablette denenmedi.
 
 ### Ahmet elle denesin (T5)
