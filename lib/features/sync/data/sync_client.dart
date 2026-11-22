@@ -7,6 +7,7 @@ import 'dart:typed_data';
 import '../domain/ledger_protocol.dart';
 import '../domain/media_rules.dart';
 import '../domain/network_rules.dart';
+import '../domain/pdf_rules.dart';
 import '../domain/sync_crypto.dart';
 import '../domain/sync_protocol.dart';
 import 'phone_sync_store.dart';
@@ -21,6 +22,26 @@ class DiscoveredComputer {
   final int port;
 
   String get address => '$host:$port';
+}
+
+/// Kullanıcı uzun bir aktarımı (PDF) durdurabilsin diye.
+class SyncCancelToken {
+  bool _cancelled = false;
+
+  bool get cancelled => _cancelled;
+
+  void cancel() => _cancelled = true;
+}
+
+class SyncCancelledException extends SyncException {
+  const SyncCancelledException() : super('PDF gönderimi iptal edildi.');
+}
+
+/// [SyncClient.sendPdf] sonucu: bilgisayarda zaten varsa gövde gitmemiştir.
+class PdfSendResult {
+  const PdfSendResult({required this.alreadyThere});
+
+  final bool alreadyThere;
 }
 
 /// Açık oturum: her imzalı istek bir sonraki sıra numarasını alır.
@@ -213,6 +234,52 @@ class SyncClient {
     await _signed(connection, 'PUT', SyncPaths.photo, file: file, mediaPath: entry.path);
   }
 
+  /// PDF'i bilgisayara yollar (`pdfs/<sha256>.pdf`). Dosyanın özeti önce yerelde
+  /// doğrulanır (bozuk dosya yollanmaz). Sonra bilgisayara "bu özet sende var mı?"
+  /// diye gövdesiz bir PUT ile sorulur; varsa gövde hiç yollanmaz. [onProgress]: (giden, toplam).
+  /// [cancel] iptal edilirse istek yarıda kesilir; bilgisayar `.part` dosyasını siler.
+  Future<PdfSendResult> sendPdf(
+    SyncConnection connection,
+    PdfOffer offer,
+    File file, {
+    void Function(int sent, int total)? onProgress,
+    SyncCancelToken? cancel,
+  }) async {
+    final name = pdfNameOfSha(offer.sha256);
+    if (name == null) throw SyncException('PDF adı kurallara uymuyor: ${offer.sha256}');
+    if (offer.size <= 0 || offer.size > SyncLimits.pdf) {
+      throw SyncException('PDF boyutu sınırı aşıyor (en çok ${formatPdfSize(SyncLimits.pdf)}).');
+    }
+    final hash = StreamingSha256();
+    var n = 0;
+    await for (final chunk in file.openRead()) {
+      if (cancel?.cancelled == true) throw const SyncCancelledException();
+      hash.add(chunk);
+      n += chunk.length;
+    }
+    if (hash.close() != offer.sha256 || n != offer.size) {
+      throw const SyncException('PDF dosyası değişmiş ya da bozuk; gönderilmedi.');
+    }
+    // Önce tek özetlik soru (gövdesiz PUT): bilgisayarda varsa gövde hiç gitmez.
+    final probe = await _signed(connection, 'PUT', SyncPaths.pdf, body: const <int>[], mediaPath: name, verifyResponse: true);
+    if (probe is Map && probe['zatenVar'] == true) return const PdfSendResult(alreadyThere: true);
+    if (cancel?.cancelled == true) throw const SyncCancelledException();
+    final json = await _signed(
+      connection,
+      'PUT',
+      SyncPaths.pdf,
+      file: file,
+      mediaPath: name,
+      fileHash: offer.sha256,
+      fileLength: n,
+      onBytes: onProgress,
+      cancel: cancel,
+      verifyResponse: true,
+      timeout: const Duration(minutes: 30),
+    );
+    return PdfSendResult(alreadyThere: json is Map && json['zatenVar'] == true);
+  }
+
   Future<BackupResponse> sendBackup(SyncConnection connection, File zip) async => BackupResponse.fromJson(
       await _signed(connection, 'PUT', SyncPaths.backup, file: zip, timeout: const Duration(minutes: 10)));
 
@@ -309,12 +376,19 @@ class SyncClient {
     String mediaPath = '',
     Duration timeout = const Duration(minutes: 2),
     bool verifyResponse = false,
+    String? fileHash,
+    int? fileLength,
+    void Function(int sent, int total)? onBytes,
+    SyncCancelToken? cancel,
   }) async {
     final computer = connection.computer;
     _checkHost(computer.host);
     final String hash;
     final int length;
-    if (file != null) {
+    if (file != null && fileHash != null && fileLength != null) {
+      hash = fileHash; // çağıran dosyayı zaten özetledi (büyük PDF'i iki kez okumayalım)
+      length = fileLength;
+    } else if (file != null) {
       final h = StreamingSha256();
       var n = 0;
       await for (final chunk in file.openRead()) {
@@ -348,7 +422,23 @@ class SyncClient {
     if (mediaPath.isNotEmpty) request.headers.set(SyncHeaders.mediaPath, mediaPath);
     request.contentLength = length;
     if (file != null) {
-      await request.addStream(file.openRead(0, length));
+      var sent = 0;
+      final stream = file.openRead(0, length).map((chunk) {
+        if (cancel?.cancelled == true) throw const SyncCancelledException();
+        sent += chunk.length;
+        onBytes?.call(sent, length);
+        return chunk;
+      });
+      try {
+        await request.addStream(stream);
+      } on SyncCancelledException {
+        request.abort();
+        rethrow;
+      } on Object {
+        // Bilgisayar gövdeyi beklemeden yanıtladı ve bağlantıyı kapattı ("zaten var"
+        // ya da ret); asıl yanıt aşağıda okunur, okunamazsa hata fırlar.
+        if (fileHash == null) rethrow;
+      }
     } else if (body != null) {
       request.add(body);
     }

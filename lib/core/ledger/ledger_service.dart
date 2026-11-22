@@ -231,20 +231,33 @@ class LedgerService {
 
   /// Karşıya gönderilecek değişiklikler: [afterSeq]'ten sonrakiler; karşıdan
   /// gelenler ve yedek birleştirmesinden doğanlar gönderilmez.
-  Future<List<LedgerChange>> pendingFor(int afterSeq, {int limit = 300}) async => [
+  ///
+  /// [relayExcept] (yalnızca bilgisayar, yani merkez): karşıdan gelen satırlar
+  /// da, KARŞI cihazın kendi yazdıkları hariç, aktarılır. Böylece telefon ve
+  /// tablet birbirini görmeden de bilgisayar üzerinden aynı satırlara yakınsar.
+  /// Kimlikler değişmediği için alan cihaz çift kayıt yapmaz.
+  Future<List<LedgerChange>> pendingFor(int afterSeq, {int limit = 300, String? relayExcept}) async => [
         for (final r in await _db.customSelect(
-          "SELECT * FROM degisiklikler WHERE yerel_sira > ? AND uzak = 0 AND kaynak <> 'senkron' "
-          'ORDER BY yerel_sira LIMIT ?',
-          variables: [Variable<int>(afterSeq), Variable<int>(limit)],
+          relayExcept == null
+              ? "SELECT * FROM degisiklikler WHERE yerel_sira > ? AND uzak = 0 AND kaynak <> 'senkron' "
+                  'ORDER BY yerel_sira LIMIT ?'
+              : "SELECT * FROM degisiklikler WHERE yerel_sira > ? AND kaynak <> 'senkron' AND cihaz_id <> ? "
+                  'ORDER BY yerel_sira LIMIT ?',
+          variables: [
+            Variable<int>(afterSeq),
+            if (relayExcept != null) Variable<String>(relayExcept),
+            Variable<int>(limit),
+          ],
         ).get())
           _fromRow(r),
       ];
 
   /// Bu fotoğraf yolu, bu cihazın kendi değişikliklerinden birinde geçiyor mu?
   /// (Karşıya yalnızca bu cihazın eklediği fotoğraflar verilir.)
-  Future<bool> mentionsOwnPhoto(String path) async {
+  /// [relayed]: merkez olarak, öbür eşleşmiş cihazdan gelen satırlar da sayılır.
+  Future<bool> mentionsOwnPhoto(String path, {bool relayed = false}) async {
     final r = await _db.customSelect(
-      "SELECT 1 FROM degisiklikler WHERE uzak = 0 AND kaynak <> 'senkron' AND yeni LIKE ? ESCAPE '\\' LIMIT 1",
+      "SELECT 1 FROM degisiklikler WHERE ${relayed ? '' : 'uzak = 0 AND '}kaynak <> 'senkron' AND yeni LIKE ? ESCAPE '\\' LIMIT 1",
       variables: [Variable<String>('%"${path.replaceAll(r'\', r'\\').replaceAll('%', r'\%').replaceAll('_', r'\_')}"%')],
     ).get();
     return r.isNotEmpty;

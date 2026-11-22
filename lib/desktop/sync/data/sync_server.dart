@@ -9,6 +9,7 @@ import 'package:path/path.dart' as p;
 import '../../../features/sync/domain/media_rules.dart';
 import '../../../features/sync/domain/network_rules.dart';
 import '../../../features/sync/domain/pairing_window.dart';
+import '../../../features/sync/domain/pdf_rules.dart';
 import '../../../features/sync/domain/sync_crypto.dart';
 import '../../../features/sync/domain/sync_protocol.dart';
 import '../../../features/sync/domain/sync_session.dart';
@@ -20,7 +21,7 @@ import 'desktop_sync_store.dart';
 /// Kullanıcıya gösterilecek hatalar [SyncException] olarak fırlatılır.
 typedef BackupImporter = Future<String> Function(File zip);
 
-enum SyncEventKind { paired, pairingClosed, session, photo, backupReceived, imported, rejected, warning }
+enum SyncEventKind { paired, pairingClosed, session, photo, pdf, backupReceived, imported, rejected, warning }
 
 class SyncEvent {
   const SyncEvent(this.kind, this.message);
@@ -43,6 +44,7 @@ class SyncServer {
     required this.importBackup,
     required this.platform,
     this.ledger,
+    this.pdfRoot,
     Random? random,
     DateTime Function()? now,
     this.allowLoopback = false,
@@ -63,6 +65,10 @@ class SyncServer {
 
   /// İki yönlü değişiklik alışverişi (yoksa yalnızca yedek alınır).
   final LedgerExchange? ledger;
+
+  /// PDF dosyalarının klasörü (`<veri klasörü>/pdfs`, masaüstü okuyucunun baktığı
+  /// yer). Null ise PDF aktarımı kapalıdır (404).
+  final Directory? pdfRoot;
 
   /// Yalnızca testler: aynı bilgisayardan (127.0.0.1) gelen isteği kabul et.
   final bool allowLoopback;
@@ -212,6 +218,7 @@ class SyncServer {
         'POST ${SyncPaths.session}': () => _startSession(ctx),
         'POST ${SyncPaths.photoList}': () => _photoList(ctx),
         'PUT ${SyncPaths.photo}': () => _photo(ctx),
+        'PUT ${SyncPaths.pdf}': () => _pdf(ctx),
         'PUT ${SyncPaths.backup}': () => _backup(ctx),
         'POST ${SyncPaths.ledger}': () => _ledger(ctx),
       };
@@ -222,7 +229,7 @@ class SyncServer {
     } on _Reject catch (e) {
       if (e.counts && address.isNotEmpty) _guard.record(address);
       await _drain(ctx);
-      await _respond(request, e.status, syncErrorJson(e.message));
+      await _respond(request, e.status, syncErrorJson(e.message), close: ctx.closeAfter);
     } on SyncException catch (e) {
       await _drain(ctx);
       await _respond(request, e.status ?? 409, syncErrorJson(e.message));
@@ -372,6 +379,69 @@ class SyncServer {
     return {'tamam': true};
   }
 
+  /// PDF dosyası (T7, isteğe bağlı): `pdfs/<sha256>.pdf`.
+  ///
+  /// İki biçim, ikisi de `PUT`, ikisi de imzalı:
+  ///  - **Gövdesiz (Content-Length 0) = "bu özet sende var mı?"** Gönderen kendi
+  ///    elindeki tek bir özeti sorar; listeleme ya da okuma değildir. Yanıt
+  ///    `zatenVar`. İmza geçerli değilse varlık bilgisi sızmaz. (dart:io, gövde
+  ///    okunmadan verilen yanıtı güvenle iletemez; bu yüzden önce soru, sonra yükleme.)
+  ///  - **Gövdeli = yükleme.** İmza, gövde okunmadan ADIN özetiyle doğrulanır
+  ///    (dürüst istemcide gövde özeti = adın özeti). Gövde `.part` dosyasına
+  ///    akıtılır; özeti adla (ve imzayla) tutmazsa reddedilir ve silinir; tutarsa
+  ///    atomik yeniden adlandırılır. Dosya aradan varsa yeniden yazılmaz.
+  ///    Boyut üst sınırı [SyncLimits.pdf].
+  Future<Map<String, Object?>> _pdf(_Ctx ctx) async {
+    final root = pdfRoot;
+    if (root == null) throw const _Reject(404, 'Bu bilgisayar PDF almıyor.', counts: false);
+    final request = ctx.request;
+    final signed = await _claim(request);
+    final name = request.headers.value(SyncHeaders.mediaPath) ?? '';
+    final sha = shaOfPdfName(name);
+    if (sha == null) throw const _Reject(400, 'PDF adı kurallara uymuyor; alınmadı.');
+    final length = request.contentLength;
+    if (length < 0) throw const _Reject(411, 'PDF boyutu bildirilmedi.');
+    final probe = length == 0;
+    _verify(request, signed, probe ? sha256Hex(const <int>[]) : sha, mediaPath: name);
+    ctx.signed = signed;
+    if (length > SyncLimits.pdf) {
+      throw _Reject(413, 'PDF çok büyük (en çok ${formatPdfSize(SyncLimits.pdf)}).', counts: false);
+    }
+    final target = File(p.join(root.path, name));
+    var exists = false;
+    if (await root.exists()) {
+      await _ensureInside(root, target, 'PDF klasörü uygulamanın alanı dışını gösteriyor; alınmadı.');
+      exists = await FileSystemEntity.type(target.path, followLinks: false) == FileSystemEntityType.file;
+    }
+    if (probe) return {'tamam': true, 'zatenVar': exists};
+    if (exists) {
+      // Aradan başka yoldan gelmiş: yeniden yazılmaz.
+      _emit(SyncEventKind.pdf, 'PDF bilgisayarda zaten var; yeniden alınmadı.');
+      return {'tamam': true, 'zatenVar': true};
+    }
+    final temp = File(p.join(_incoming.path, '${randomToken(_random)}.part'));
+    File? sideCopy;
+    try {
+      final hash = await _readToFile(ctx, temp, SyncLimits.pdf);
+      if (hash != sha) throw const _Reject(400, 'PDF içeriği adındaki özetle uyuşmuyor; alınmadı.');
+      await root.create(recursive: true);
+      await _ensureInside(root, target, 'PDF klasörü uygulamanın alanı dışını gösteriyor; alınmadı.');
+      try {
+        await temp.rename(target.path);
+      } on FileSystemException {
+        // Farklı disk bölümü: hedef klasöre geçici kopya, sonra atomik yeniden adlandırma.
+        sideCopy = File('${target.path}.${randomToken(_random)}.part');
+        await temp.copy(sideCopy.path);
+        await sideCopy.rename(target.path);
+      }
+    } finally {
+      if (await temp.exists()) await temp.delete();
+      if (sideCopy != null && await sideCopy.exists()) await sideCopy.delete();
+    }
+    _emit(SyncEventKind.pdf, 'PDF alındı (${formatPdfSize(length)}).');
+    return {'tamam': true, 'zatenVar': false};
+  }
+
   /// Değişiklik defteri alışverişi: telefonun satırlarını uygular, kendi
   /// satırlarını döner. Yanıt imzalıdır; telefon doğrulamadan uygulamaz.
   Future<Map<String, Object?>> _ledger(_Ctx ctx) async {
@@ -500,11 +570,14 @@ class SyncServer {
 
   /// Yol kurallara uysa da klasörlerden biri bağlantıyla (symlink) dışarıyı
   /// gösteriyorsa yazılmaz; hedefin kendisi bağlantıysa da.
-  Future<void> _ensureInsideMedia(File target) async {
-    final root = await mediaRoot.resolveSymbolicLinks();
+  Future<void> _ensureInsideMedia(File target) => _ensureInside(
+      mediaRoot, target, 'Fotoğraf klasörü uygulamanın alanı dışını gösteriyor; alınmadı.');
+
+  Future<void> _ensureInside(Directory rootDir, File target, String message) async {
+    final root = await rootDir.resolveSymbolicLinks();
     final dir = await target.parent.resolveSymbolicLinks();
-    if (!p.isWithin(root, dir) || await FileSystemEntity.isLink(target.path)) {
-      throw const _Reject(403, 'Fotoğraf klasörü uygulamanın alanı dışını gösteriyor; alınmadı.');
+    if ((!p.isWithin(root, dir) && root != dir) || await FileSystemEntity.isLink(target.path)) {
+      throw _Reject(403, message);
     }
   }
 
@@ -542,13 +615,25 @@ class SyncServer {
     return hash.close();
   }
 
+  /// Gövde hiç okunmayacak: yanıt yazılırken dinleme bırakılır (dart:io yanıtı
+  /// ancak gövde bitince ya da dinleme bırakılınca yollar) ve yanıttan sonra
+  /// bağlantı kapanır; kalan baytlar kabul edilmez. Bkz. `_respond`.
+  void _abandonBody(_Ctx ctx) {
+    ctx.bodyTaken = true;
+    ctx.closeAfter = true;
+  }
+
   /// Okunmamış gövde boşaltılır ki telefon hata mesajını alabilsin (gönderim
   /// yarıda kesilmesin). Çok büyükse bağlantı kapanır.
   Future<void> _drain(_Ctx ctx) async {
     if (ctx.bodyTaken) return;
     ctx.bodyTaken = true;
     final length = ctx.request.contentLength;
-    if (length <= 0 || length > SyncLimits.photo) return;
+    if (length <= 0) return;
+    if (length > SyncLimits.photo) {
+      _abandonBody(ctx); // büyük gövde okunmaz
+      return;
+    }
     try {
       await ctx.request.drain<void>().timeout(const Duration(seconds: 30));
     } on Exception {
@@ -556,9 +641,19 @@ class SyncServer {
     }
   }
 
-  Future<void> _respond(HttpRequest request, int status, Map<String, Object?> body, {_Signed? sign}) async {
+  Future<void> _respond(HttpRequest request, int status, Map<String, Object?> body,
+      {_Signed? sign, bool close = false}) async {
     final response = request.response;
     try {
+      if (close) {
+        response.persistentConnection = false;
+        // Aynı eşzamanlı blokta: yanıt yazılmadan bağlantı kapanmasın.
+        try {
+          unawaited(request.listen((_) {}, onError: (Object _) {}).cancel());
+        } on StateError {
+          // Gövde zaten okunmuş.
+        }
+      }
       final bytes = utf8.encode(jsonEncode(body));
       response
         ..statusCode = status
@@ -608,6 +703,9 @@ class _Ctx {
 
   /// İmzalı bir istek kabul edildiyse: yanıt da imzalanır.
   _Signed? signed;
+
+  /// Gövde okunmadan yanıtlandı: yanıttan sonra bağlantı kapatılır.
+  bool closeAfter = false;
 }
 
 class _Signed {

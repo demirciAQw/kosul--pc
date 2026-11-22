@@ -91,11 +91,19 @@ flutter build linux --release      # build/linux/x64/release/bundle/kocum
 - Eşleştirme: bilgisayar ekranında 6 haneli tek seferlik kod (5 dk, 5 hak).
   Anahtar Diffie-Hellman (RFC 7919 ffdhe2048) + kodla iki tarafta ayrı
   hesaplanır, ağdan geçmez. Her istek HMAC imzalı ve sıra numaralı.
-- Kısıtlar: en fazla bir telefon ve bir bilgisayar; yalnızca Android telefon
+- Kısıtlar: en fazla bir telefon (ya da tablet) ve bir bilgisayar; yalnızca Android telefon/tablet
   eşleşir, yalnızca Linux bilgisayar alır; yalnızca yerel ağ adresleri
   (100.64/10 ve 127.0.0.1 hayır); tarayıcı başlıkları ve alan adıyla Host
   reddedilir; yalnızca `questions|solutions|notes/yyyy/mm/ad.uzantı`
   fotoğrafları yazılır. Okuma/listeleme isteği yoktur.
+- Merkez: bilgisayar telefon ve tablet arasında aracıdır (doğrudan telefon↔tablet
+  eşleşme YOK). Tek eşleşme yuvası: cihazlar sırayla gezer; bilgisayar aldığı
+  satırları özgün kimlikle öbürüne de verir (`pendingFor(relayExcept:)`).
+  Testi `test/sync_hub_test.dart`. Sınır: ilk tam yedekle gelen eski veri deftere
+  girmediği için sonradan eşleşen öbür cihaza gitmez.
+- PDF dosyası (isteğe bağlı, ayar varsayılan KAPALI, yalnızca telefon/tablet → bilgisayar):
+  `PUT /kocum/v1/pdf`, ad `^[0-9a-f]{64}\.pdf$`, `pdfs/<sha256>.pdf`, sha256 iki uçta,
+  300 MB sınırı, `.part`+atomik ad, gövdesiz PUT = "bu özet var mı". Test `test/sync_pdf_test.dart`.
 - Anahtarlar veritabanında değil ayrı dosyada (`esitleme.json`): telefonun
   veritabanı kopyası bilgisayara ve yedeklere gider, anahtar gitmemeli.
 - Veri içeriği şifrelenmez (yalnızca imzalı); ortak Wi-Fi için uyarı var.

@@ -15,3 +15,6 @@ final phoneSyncStoreProvider = Provider<PhoneSyncStore>((ref) => PhoneSyncStore(
 /// Telefonun eşleştiği bilgisayar; yoksa null.
 final pairedComputerProvider =
     FutureProvider<PairedComputer?>((ref) => ref.watch(phoneSyncStoreProvider).computer());
+
+/// "PDF dosyalarını da gönder" ayarı (varsayılan kapalı).
+final sendPdfsProvider = FutureProvider<bool>((ref) => ref.watch(phoneSyncStoreProvider).sendPdfs());

@@ -127,6 +127,7 @@ class WirelessController extends Notifier<WirelessState> {
     final server = SyncServer(
       store: _store,
       mediaRoot: Directory(p.join(dir.path, desktopMediaFolder)),
+      pdfRoot: Directory(p.join(dir.path, 'pdfs')),
       workDir: dir,
       importBackup: _import,
       platform: platformName,

@@ -119,6 +119,15 @@ class PhoneSyncStore {
 
   Future<String> phoneId() async => (await _load())['id']! as String;
 
+  /// PDF dosyalarını da bilgisayara gönder (T7). Varsayılan KAPALI: dosyalar
+  /// büyük olabilir; kullanıcı kendi açar. Satırlar (belge, çizgi) bundan bağımsız gider.
+  Future<bool> sendPdfs() async => (await _load())['pdfGonder'] == true;
+
+  Future<void> setSendPdfs(bool value) async {
+    (await _load())['pdfGonder'] = value;
+    await _save();
+  }
+
   Future<PairedComputer?> computer() async => PairedComputer.tryParse((await _load())['bilgisayar']);
 
   /// En fazla bir bilgisayar: başka bir bilgisayar varken yenisi kaydedilmez

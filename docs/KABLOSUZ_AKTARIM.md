@@ -6,9 +6,9 @@ Protokol v1, düz HTTP (`dart:io`). Portlar: TCP **47321**, UDP **47322** (bulma
 
 | Kural | Nasıl sağlanır |
 |---|---|
-| Yalnızca uygulamanın alanı | Sunucuda okuma/listeleme yok. Yazma yalnızca `media/` altına, `^(questions\|solutions\|notes)/\d{4}/\d{2}/[A-Za-z0-9_-]{1,80}(\.[A-Za-z0-9]{1,8})?$` yollarıyla. `../` ve symlink kaçışı reddedilir. Telefon yalnızca kendi listesindeki dosyaları gönderir. |
+| Yalnızca uygulamanın alanı | Sunucuda okuma/listeleme yok. Yazma yalnızca `media/` altına, `^(questions\|solutions\|notes)/\d{4}/\d{2}/[A-Za-z0-9_-]{1,80}(\.[A-Za-z0-9]{1,8})?$` yollarıyla; ve (isteğe bağlı) `pdfs/` altına yalnızca `^[0-9a-f]{64}\.pdf$`. `../` ve symlink kaçışı reddedilir. Telefon yalnızca kendi listesindeki dosyaları gönderir. |
 | Yalnızca eşleşmiş cihaz | Eşleşmemiş istek reddedilir. |
-| En fazla iki cihaz | Bir bilgisayar, bir telefon. Yenisi için eskisi elle kaldırılır (veri silinmez). |
+| En fazla iki cihaz | Bir bilgisayar, bir telefon **ya da** tablet (aynı anda biri). Yenisi için eskisi elle kaldırılır (veri silinmez); bkz. "Merkez mimarisi". |
 | Windows reddi | Yalnızca `android` telefon eşleşir; alma yalnızca `linux` bilgisayarda açılır. |
 | Atlatma yolları | Aşağıda. |
 
@@ -89,3 +89,33 @@ Karşıdan gelen değişikliğin `eski` değeri, yereldeki satırla aynıysa do�
 ### Testler
 
 `test/ledger_test.dart` (tetikleyiciler, iki cihaz, çakışma, saat farkı, geri alma), `test/sync_ledger_e2e_test.dart` (gerçek sunucu ve istemci 127.0.0.1'de: iki yön, fotoğraf, çift gönderim, çok tur, sürüm farkı), `test/ledger_views_test.dart`.
+
+
+## Merkez mimarisi: telefon, tablet, bilgisayar (T7)
+
+Tablet de bir Android cihazdır (`platform = android`); bilgisayarla telefonla aynı yoldan eşleşir ve eşitlenir. **Telefon ↔ tablet doğrudan eşleşme yoktur** (güvenlik modeli: bir cihaz yalnızca eşleştiği bilgisayarla konuşur). Bilgisayar MERKEZDİR:
+
+- Bilgisayarın yalnızca **bir** eşleşme yuvası vardır. Telefon ve tablet **sırayla** gezer: biri eşleşir, eşitler; eşleşme bilgisayarda kaldırılır; öbürü eşleşir, eşitler. Cihazların imleçleri (`gonderilen_sira`, `alinan_sira`) kendi veritabanlarındadır ve eşleşme kalkınca silinmez; bu yüzden her ziyaret kaldığı yerden devam eder.
+- Bilgisayar bir cihazdan aldığı satırları (`uzak = 1`, **özgün `cihazId` ve kimlikle**) öbür cihaza da verir: `LedgerService.pendingFor(…, relayExcept: karşıCihaz)`. Karşı cihazın kendi yazdıkları ona geri dönmez. Alan cihaz kimliğe bakıp çift kayıt yapmaz. İlk sürümde bu aktarım yoktu (bilgisayar yalnız kendi yazdıklarını veriyordu; tablet telefonun verisini göremezdi): `test/sync_hub_test.dart` bunu yakalar.
+- Aynı satırı iki cihaz ayrı değiştirirse HLC'si yeni olan kazanır, kaybeden `cakismalar`'da kalır; üç cihaz da aynı sonuca yakınsar (test).
+- Fotoğraflar da merkezden geçer: `fotograf-al`, bilgisayarın defterindeki herhangi bir satırda (öbür cihazdan gelen dahil) geçen kurala uyan yolu verir.
+- Kapsam: `ink_strokes` (BLOB nokta verisi dahil), `pdf_documents`, PDF alanlı `question_cards`, `ink_notebooks`, `ink_note_pages`, `ink_notebook_tags|people`, `tags` hepsi senkron tablosudur ve iki yönde taşınır (testli).
+- **Bilinen sınırlar:** (1) İlk eşitlemede gelen **tam yedek** satır olarak deftere yazılmaz (tetikleyiciler susturulur); bu yüzden bir cihazın ilk yedeğiyle bilgisayara geçen eski veri, sonradan eşleşen öbür cihaza **gitmez** (yalnızca defter satırları gider). Yeni kurulmuş tablette sorun yok; tablete telefondaki eski veriyi taşımak ayrı bir iş. (2) Cihaz başına eşleşme yuvası tek olduğu için her geçişte eşleşmeyi kaldırıp yeniden kod girmek gerekir; iki yuva (telefon + tablet birden) istenirse `DesktopSyncStore` ve tek `_session` değişmeli.
+
+## PDF dosyası aktarımı (T7, isteğe bağlı, yalnızca telefon/tablet → bilgisayar)
+
+Satırlar (belge, çizgi, kutu, soru) defterle her zaman gider; PDF **dosyası** ayrıdır, büyüktür ve yalnızca kullanıcı açarsa gider.
+
+| Konu | Kural |
+|---|---|
+| Ayar | Tablet/telefon, Bilgisayarla eşitle ekranı → "PDF dosyalarını da gönder". Varsayılan **kapalı** (`esitleme.json` içinde `pdfGonder`); kapalıyken istemci hiç PDF isteği yapmaz. |
+| Uç | `PUT /kocum/v1/pdf`, başlık `x-kocum-yol: <sha256>.pdf`. İmza (`yöntem|yol|oturum|sıra|yol|gövdeÖzeti`) ve sıra numarası her zamanki gibi. |
+| Ad | `^[0-9a-f]{64}\.pdf$`; başka her şey (`..`, alt klasör, büyük harf, başka uzantı) 400. Hedef `<veri klasörü>/pdfs/<sha256>.pdf`: `PdfImportService.fileOf` ile aynı düzen, masaüstü okuyucu doğrudan bulur. Hedef ya da klasör symlink ise yazılmaz. |
+| Var mı? | **Gövdesiz PUT** = "bu özet sende var mı?" (listeleme/okuma değil; gönderen yalnızca elindeki tek özeti sorar, imza şart, imzasız ya da yanlış imzalı soru 401 ve varlık bilgisi sızmaz). Varsa gövde hiç gitmez. (dart:io gövde okunmadan verilen yanıtı güvenle iletemediği için doğrudan PUT + kesme yerine bu seçildi.) |
+| Doğrulama | İki uçta sha256: istemci göndermeden dosyanın özetini hesaplar (bozuksa yollamaz); sunucu imzayı gövde okunmadan ADIN özetiyle doğrular, gövdeyi `kablosuz/*.part`'a akıtırken özet hesaplar, adla uyuşmazsa 400 ile reddedip siler. |
+| Boyut | En çok 300 MB (`SyncLimits.pdf`); fazlası Content-Length'ten 413 (gövde okunmaz, bağlantı kapanır), istemci de göndermez ve "sınırı aştı" yazar. |
+| Yarım kalma | `.part` + atomik yeniden adlandırma (farklı disk bölümünde hedef klasörde ikinci `.part` ve yeniden adlandırma); hata, kopma, iptalde her `.part` silinir; sunucu açılışta `kablosuz/` klasörünü temizler. |
+| İlerleme/iptal | Ekran "PDF i / n: x MB / y MB" ve "İptal et" gösterir; iptal isteği yarıda keser. Satırların eşitlenmesi PDF aşaması başarısız ya da iptal olsa da bozulmaz. |
+| Ters yön | **Yapılmadı:** bilgisayar → telefon/tablet PDF yok. "Sunucuda okuma/listeleme yok" kuralını bozmazdı ama gerek de yok: PDF'i kullanıcı cihazda kendisi içe aktarır; ters yön yeni bir okuma ucu ve hangi dosyaların verileceği kararı demektir. İstenirse `fotograf-al` gibi "defterde geçen belge" kuralıyla ayrıca tasarlanır. |
+
+Testler: `test/sync_pdf_test.dart` (başarı, yinelenen, özet uyuşmazlığı, aşırı boyut, yol enjeksiyonu, symlink, yarım kesilme, iptal, anahtarsız/imzasız/tekrar, ayar kapalı), `test/sync_hub_test.dart` (3 cihaz yakınsaması).

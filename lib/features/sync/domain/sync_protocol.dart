@@ -33,6 +33,10 @@ abstract final class SyncPaths {
   /// telefona gönderdiği fotoğraflar (yalnızca kendi değişikliklerinde geçenler).
   static const ledger = '$prefix/degisiklikler';
   static const photoGet = '$prefix/fotograf-al';
+
+  /// PDF dosyası (T7): yalnızca telefon/tablet → bilgisayar, `PUT`, isteğe bağlı.
+  /// Ad `x-kocum-yol` başlığında `<sha256>.pdf`; imzaya girer.
+  static const pdf = '$prefix/pdf';
 }
 
 /// İmzalı isteklerin başlıkları (küçük harf; HTTP başlıkları harf duyarsız).
@@ -55,6 +59,9 @@ abstract final class SyncLimits {
 
   /// Fotoğrafsız yedek ZIP (JSON + veritabanı kopyası).
   static const backup = 512 * 1024 * 1024;
+
+  /// Tek PDF dosyası (T7).
+  static const pdf = 300 * 1024 * 1024;
 
   static const photoListLength = 200000;
   static const pairingCodeTtl = Duration(minutes: 5);

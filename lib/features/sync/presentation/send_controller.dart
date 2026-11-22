@@ -11,13 +11,15 @@ import '../../tools/data/full_export.dart';
 import '../../tools/full_backup.dart';
 import '../../../core/ledger/ledger_service.dart';
 import '../data/ledger_sync.dart';
+import '../data/pdf_sync.dart';
 import '../data/phone_sync_store.dart';
 import '../data/sync_client.dart';
 import '../domain/media_rules.dart';
+import '../domain/pdf_rules.dart';
 import '../domain/sync_protocol.dart';
 import '../sync_providers.dart';
 
-enum SendStage { idle, connecting, photos, uploading, done, failed }
+enum SendStage { idle, connecting, photos, uploading, pdfs, done, failed }
 
 class SendState {
   const SendState({this.stage = SendStage.idle, this.done = 0, this.total = 0, this.message});
@@ -27,7 +29,8 @@ class SendState {
   final int total;
   final String? message;
 
-  bool get busy => stage == SendStage.connecting || stage == SendStage.photos || stage == SendStage.uploading;
+  bool get busy =>
+      stage == SendStage.connecting || stage == SendStage.photos || stage == SendStage.uploading || stage == SendStage.pdfs;
 }
 
 /// Bilgisayara gönderme. Ekrandan çıkılsa da iş sürer. Bağlantı koparsa iki
@@ -40,6 +43,16 @@ class SendController extends Notifier<SendState> {
   SendState build() => const SendState();
 
   PhoneSyncStore get _store => ref.read(phoneSyncStoreProvider);
+
+  SyncCancelToken? _pdfCancel;
+
+  /// Süren PDF gönderimini durdurur (istek yarıda kesilir; bilgisayar geçici dosyayı siler).
+  void cancelPdf() => _pdfCancel?.cancel();
+
+  Future<void> setSendPdfs(bool value) async {
+    await _store.setSendPdfs(value);
+    ref.invalidate(sendPdfsProvider);
+  }
 
   // ───────────── Eşleştirme ─────────────
 
@@ -183,6 +196,14 @@ class SendController extends Notifier<SendState> {
           await Future<void>.delayed(const Duration(seconds: 2));
         }
       }
+      // PDF dosyaları (isteğe bağlı, varsayılan kapalı). Satırlar zaten gitti; bu
+      // aşama başarısız olsa da eşitleme bozulmaz, yalnızca dosya gitmez.
+      var pdfSummary = '';
+      try {
+        pdfSummary = await _sendPdfs(client, computer);
+      } on Object catch (e) {
+        pdfSummary = 'PDF dosyaları gönderilemedi: ${describeSyncError(e)} Satırlar eşitlendi; PDF için yeniden eşitle.';
+      }
       await _store.saveComputer(computer.copyWith(lastSentAt: DateTime.now()));
       ref.invalidate(pairedComputerProvider);
       _set(SendStage.done, [
@@ -191,6 +212,7 @@ class SendController extends Notifier<SendState> {
           'Bilgisayar: $backupSummary',
         ],
         'Eşitleme: ${synced.summary}.',
+        if (pdfSummary.isNotEmpty) pdfSummary.endsWith('.') ? pdfSummary : '$pdfSummary.',
         if (notOnPhone > 0) '$notOnPhone fotoğraf telefonda bulunamadı.',
         if (skipped > 0) '$skipped fotoğrafın adı kurallara uymadığı için gönderilmedi.',
       ].join(' '));
@@ -199,6 +221,36 @@ class SendController extends Notifier<SendState> {
     } finally {
       client.close();
       if (zipFile != null && await zipFile.exists()) await zipFile.delete();
+    }
+  }
+
+  Future<String> _sendPdfs(SyncClient client, PairedComputer computer) async {
+    if (!await _store.sendPdfs()) return '';
+    final phoneId = await _store.phoneId();
+    final (_, connection) = await _connect(client, computer, phoneId);
+    final db = ref.read(appDatabaseProvider);
+    final shas = [
+      for (final d in await (db.select(db.pdfDocuments)..where((t) => t.deleted.equals(false))).get()) d.sha256,
+    ];
+    if (shas.isEmpty) return '';
+    final cancel = _pdfCancel = SyncCancelToken();
+    final dir = Directory(p.join((await getApplicationSupportDirectory()).path, 'pdfs'));
+    try {
+      final result = await PdfSync(
+        client: client,
+        pdfDir: dir,
+        enabled: _store.sendPdfs,
+        cancel: cancel,
+        onProgress: (i, n, name, sent, total) => _set(
+          SendStage.pdfs,
+          'PDF $i / $n: ${formatPdfSize(sent)} / ${formatPdfSize(total)}',
+          done: sent,
+          total: total,
+        ),
+      ).run(connection, shas);
+      return result.summary;
+    } finally {
+      _pdfCancel = null;
     }
   }
 

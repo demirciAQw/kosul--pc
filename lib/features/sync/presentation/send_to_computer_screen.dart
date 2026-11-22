@@ -266,10 +266,30 @@ class _SendView extends ConsumerWidget {
           icon: const Icon(Icons.send),
           label: const Text('Eşitle'),
         ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: ref.watch(sendPdfsProvider).value ?? false,
+          onChanged: send.busy ? null : (v) => unawaited(controller.setSendPdfs(v)),
+          title: const Text('PDF dosyalarını da gönder'),
+          subtitle: const Text(
+            'Kapalıyken yalnızca çizgiler, kutular ve notlar gider; PDF\'in kendisi gitmez '
+            '(bilgisayarda sayfa görünmez). Dosyalar büyük olabilir (en çok 300 MB); aynı dosya '
+            'bilgisayarda varsa yeniden gönderilmez.',
+          ),
+        ),
         const SizedBox(height: 12),
         if (send.busy) ...[
           LinearProgressIndicator(value: send.total > 0 ? send.done / send.total : null),
           const SizedBox(height: 8),
+          if (send.stage == SendStage.pdfs)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: controller.cancelPdf,
+                icon: const Icon(Icons.close),
+                label: const Text('PDF gönderimini iptal et'),
+              ),
+            ),
         ],
         if (send.message case final message?)
           Row(

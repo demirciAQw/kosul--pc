@@ -5,8 +5,13 @@ import '../domain/ledger_protocol.dart';
 import '../domain/media_rules.dart';
 import '../domain/sync_protocol.dart';
 
-/// Bilgisayar tarafı: telefondan gelen değişiklikleri uygular, telefonun
-/// görmediği kendi değişikliklerini döner. Telefon yine istemcidir.
+/// Bilgisayar tarafı: telefondan (ya da tabletten) gelen değişiklikleri uygular,
+/// karşının görmediği kendi değişikliklerini döner. Telefon yine istemcidir.
+///
+/// Bilgisayar MERKEZDİR: telefon ve tablet birbiriyle eşleşmez; sırayla
+/// bilgisayarla alışveriş ederler. Bilgisayar bir cihazdan aldığı satırları
+/// (kimlikleri değişmeden) öbürüne de aktarır; karşı cihazın kendi satırları
+/// ona geri dönmez.
 ///
 /// Okuma ya da listeleme ucu yoktur: telefon bilgisayarın tamamını
 /// göremez; yalnızca kendi gönderdiğine karşılık, bilgisayarın telefona
@@ -30,7 +35,7 @@ class LedgerExchange {
     }
     final result = await ledger.applyRemote(req.changes);
 
-    var out = await ledger.pendingFor(req.received, limit: ledgerBatch);
+    var out = await ledger.pendingFor(req.received, limit: ledgerBatch, relayExcept: req.device);
     // Yanıt gövde sınırını aşmasın.
     var bytes = 0;
     final keep = <LedgerChange>[];
@@ -41,7 +46,7 @@ class LedgerExchange {
     }
     out = keep;
     final lastOut = out.isEmpty ? req.received : out.last.seq;
-    final more = (await ledger.pendingFor(lastOut, limit: 1)).isNotEmpty;
+    final more = (await ledger.pendingFor(lastOut, limit: 1, relayExcept: req.device)).isNotEmpty;
 
     final photos = <MediaEntry>[];
     for (final path in mediaPathsOfChanges(out)) {
@@ -60,8 +65,9 @@ class LedgerExchange {
   }
 
   /// Telefon bu fotoğrafı isteyebilir mi? Yalnızca yol kurala uyuyorsa ve
-  /// bilgisayarın kendi bir değişikliğinde geçiyorsa (genel dosya okuma yok).
-  Future<bool> maySend(String path) async => isTransferableMediaPath(path) && await ledger.mentionsOwnPhoto(path);
+  /// bilgisayarın defterindeki bir değişiklikte (kendisinin ya da eşleşmiş
+  /// öbür cihazın) geçiyorsa (genel dosya okuma yok).
+  Future<bool> maySend(String path) async => isTransferableMediaPath(path) && await ledger.mentionsOwnPhoto(path, relayed: true);
 
   static String _summary(ApplyResult r) => [
         '${r.applied} uygulandı',

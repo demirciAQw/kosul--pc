@@ -626,8 +626,10 @@ class InkStrokes extends Table {
   Set<Column> get primaryKey => {id};
 }
 
-/// PDF belgeleri (T3). Yalnızca SATIR senkron olur; PDF dosyası olmaz
-/// (`<veri klasörü>/pdfs/<sha256>.pdf`, her cihaz kendisi ekler).
+/// PDF belgeleri (T3). Yalnızca SATIR defterle senkron olur. PDF dosyası
+/// (`<veri klasörü>/pdfs/<sha256>.pdf`) defterle gitmez: her cihaz kendisi ekler
+/// ya da kullanıcı isterse telefon/tablet → bilgisayar yönünde ayrıca aktarılır
+/// (`SyncPaths.pdf`, isteğe bağlı; bkz. docs/KABLOSUZ_AKTARIM.md).
 /// `id` = `sha256` (CHECK ile zorlanır): iki cihazda aynı PDF aynı satır olur.
 /// İki cihaz aynı PDF'i senkrondan ÖNCE ayrı içe aktarırsa iki "ekle" gelir ve
 /// defter satırı HLC'si yeni olan sürümle tümden yazar; kaybeden sürüm
