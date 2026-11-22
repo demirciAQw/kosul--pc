@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:drift/drift.dart' show Value;
@@ -6,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:kocum/core/database/app_database.dart';
 import 'package:kocum/core/ledger/hlc.dart';
 import 'package:kocum/core/ledger/ledger_service.dart';
+import 'package:kocum/core/ledger/ledger_triggers.dart';
 
 final _t = DateTime(2026, 10, 20, 9);
 
@@ -348,5 +350,45 @@ void main() {
       isNull,
     );
     expect(LedgerChange.tryParse('metin'), isNull);
+  });
+
+  group('BLOB', () {
+    test('NULL BLOB defterde null kalır, dolu BLOB hex olur; BLOB\'suz tetikleyici değişmez', () async {
+      final (db, _) = await _open('telefon');
+      await db.customStatement('CREATE TABLE tmp_blob (id TEXT PRIMARY KEY, b BLOB)');
+      for (final sql in ledgerTriggerSql('tmp_blob', ['id', 'b'], 'id', blobs: {'b'})) {
+        await db.customStatement(sql);
+      }
+      await db.customStatement("INSERT INTO tmp_blob VALUES ('a', NULL)");
+      await db.customStatement("INSERT INTO tmp_blob VALUES ('b', x'0aff')");
+      await db.customStatement("INSERT INTO tmp_blob VALUES ('c', x'')");
+      Future<Object?> b(String id) async => (jsonDecode(await db
+              .customSelect("SELECT yeni FROM degisiklikler WHERE tablo = 'tmp_blob' AND satir_id = '$id'")
+              .getSingle()
+              .then((r) => r.read<String>('yeni'))) as Map)['b'];
+      expect(await b('a'), isNull);
+      expect(await b('b'), '0AFF');
+      expect(await b('c'), '');
+      expect(rowJson('NEW', ['id', 'x']), "json_object('id', NEW.\"id\", 'x', NEW.\"x\")");
+    });
+
+    test('bozuk onaltılık BLOB satırı kaybolmaz: Çakışmalar\'a düşer, tablo yazılmaz', () {
+      expect(() => LedgerService.unhex('abc'), throwsFormatException);
+      expect(() => LedgerService.unhex('zz'), throwsFormatException);
+      expect(LedgerService.unhex('0aFF'), [10, 255]);
+    });
+
+    test('uygulanamayan uzak değişiklik Çakışmalar listesine yazılır', () async {
+      final (db, ledger) = await _open('telefon');
+      const neu = '{"id":"x","points":"ABC"}';
+      final r = await ledger.applyRemote([
+        const LedgerChange(
+            id: 'u1', device: 'pc', source: 'pc', table: 'ink_strokes', rowId: 'x', op: 'ekle', clock: '0000000000001-0000-pc', neu: neu),
+      ]);
+      expect(r.failed, 1);
+      final c = await db.select(db.cakismalar).get();
+      expect(c.single.kaybeden, neu);
+      expect(await db.select(db.inkStrokes).get(), isEmpty);
+    });
   });
 }

@@ -59,6 +59,20 @@ void main() {
     expect(await repo.forPage(doc), hasLength(2));
   });
 
+  test('depo: bozuk tek blob sayfayı düşürmez, atlanır ve işaretlenir; veri durur', () async {
+    final db = await _open();
+    final repo = InkStrokeRepository(db);
+    const owner = NotePageOwner('n', 7);
+    final good = await repo.add(owner: owner, points: _pts, startedAtMs: 1);
+    final bad = await repo.add(owner: owner, points: _pts, startedAtMs: 2);
+    await db.customStatement("UPDATE ink_strokes SET points = x'0102' WHERE id = ?", [bad]);
+    expect((await repo.forPage(owner)).map((s) => s.id), [good]);
+    expect(repo.corruptIds, {bad});
+    final emitted = await repo.watchPage(owner).first;
+    expect(emitted.map((s) => s.id), [good]);
+    expect(await db.select(db.inkStrokes).get(), hasLength(2)); // silinmedi
+  });
+
   test('depo: akış değişince yenilenir', () async {
     final db = await _open();
     final repo = InkStrokeRepository(db);

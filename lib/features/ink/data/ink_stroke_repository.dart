@@ -68,10 +68,28 @@ class InkStrokeRepository {
 
   /// Sayfadaki (silinmemiş) çizgiler, çizim sırasıyla.
   Future<List<InkStroke>> forPage(StrokeOwner owner, {int? attemptNo, int? layer}) async =>
-      [for (final r in await _query(owner, attemptNo: attemptNo, layer: layer).get()) _toStroke(r)];
+      _decodeAll(await _query(owner, attemptNo: attemptNo, layer: layer).get());
 
   Stream<List<InkStroke>> watchPage(StrokeOwner owner, {int? attemptNo, int? layer}) =>
-      _query(owner, attemptNo: attemptNo, layer: layer).watch().map((rows) => [for (final r in rows) _toStroke(r)]);
+      _query(owner, attemptNo: attemptNo, layer: layer).watch().map(_decodeAll);
+
+  final Set<String> _corruptIds = {};
+
+  /// Çözülemeyen (bozuk blob) çizgilerin kimlikleri. Satırlara dokunulmaz,
+  /// yalnızca listeden atlanır; kullanıcıya bildirmek çağıranın işidir.
+  Set<String> get corruptIds => Set.unmodifiable(_corruptIds);
+
+  List<InkStroke> _decodeAll(List<InkStrokeRow> rows) {
+    final out = <InkStroke>[];
+    for (final r in rows) {
+      try {
+        out.add(_toStroke(r));
+      } on FormatException {
+        _corruptIds.add(r.id);
+      }
+    }
+    return out;
+  }
 
   /// Yumuşak silme; satır senkronla karşıya gider. Bulunamazsa false.
   Future<bool> softDelete(String id) async => await softDeleteMany([id]) == 1;

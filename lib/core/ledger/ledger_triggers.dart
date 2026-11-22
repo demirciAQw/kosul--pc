@@ -27,9 +27,9 @@ const _now = "COALESCE((SELECT saat_ms FROM _baglam WHERE id = 1), "
     "CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER))";
 
 /// [blobs]: BLOB sütunları. `json_object` BLOB'u taşıyamaz (hata verir); bu
-/// sütunlar `hex()` ile onaltılık metin olarak yazılır, uygulanırken çözülür.
+/// sütunlar `hex()` ile onaltılık metin olarak yazılır, uygulanırken çözülür; NULL BLOB NULL kalır (`hex(NULL)` boş metin verirdi).
 String rowJson(String prefix, List<String> columns, {Set<String> blobs = const {}}) =>
-    'json_object(${[for (final c in columns) blobs.contains(c) ? "'$c', hex($prefix.${_q(c)})" : "'$c', $prefix.${_q(c)}"].join(', ')})';
+    'json_object(${[for (final c in columns) blobs.contains(c) ? "'$c', CASE WHEN $prefix.${_q(c)} IS NULL THEN NULL ELSE hex($prefix.${_q(c)}) END" : "'$c', $prefix.${_q(c)}"].join(', ')})';
 
 /// [table] için tetikleyici adları (ekle, güncelle, sil).
 List<String> ledgerTriggerNames(String table) =>

@@ -44,6 +44,10 @@ class StrokeCodec {
   static const int pressureLevels = 1023;
   static const int tiltSteps = 512; // radyan başına
 
+  /// Kodlanabilen en büyük |x|, |y| (ölçekle çarpınca 64 bitte taşmasın) ve |eğim|.
+  static const double maxCoordinate = 1e7;
+  static const double maxTilt = 2 * math.pi + 0.5;
+
   /// En büyük nicelleme hataları (ölçeğe göre konum).
   static double positionError(int scale) => 0.5 / scale;
   static const double pressureError = 0.5 / pressureLevels;
@@ -59,6 +63,9 @@ class StrokeCodec {
     for (final p in points) {
       if (!p.x.isFinite || !p.y.isFinite || !p.pressure.isFinite || !p.tilt.isFinite) {
         throw ArgumentError('Nokta sonlu sayı olmalı: $p');
+      }
+      if (p.x.abs() > maxCoordinate || p.y.abs() > maxCoordinate || p.tilt.abs() > maxTilt) {
+        throw ArgumentError('Nokta sınır dışı (|x|,|y| ≤ $maxCoordinate, |eğim| ≤ $maxTilt): $p');
       }
       final x = (p.x * scale).round();
       final y = (p.y * scale).round();

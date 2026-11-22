@@ -345,14 +345,16 @@ class LedgerService {
     await _db.customStatement(
       'INSERT INTO "$table" (${cols.map((c) => '"$c"').join(', ')}) VALUES (${List.filled(cols.length, '?').join(', ')}) '
       'ON CONFLICT("$pk") DO ${set.isEmpty ? 'NOTHING' : 'UPDATE SET ${set.join(', ')}'}',
-      [for (final c in cols) blobs.contains(c) && m[c] is String ? _unhex(m[c]! as String) : m[c]],
+      [for (final c in cols) blobs.contains(c) && m[c] is String ? unhex(m[c]! as String) : m[c]],
     );
   }
 
   /// `hex()` ile yazılmış BLOB'u çözer (bkz. `rowJson`). Boş BLOB `''` olur.
-  static Uint8List _unhex(String h) => Uint8List.fromList([
-        for (var i = 0; i + 1 < h.length; i += 2) int.parse(h.substring(i, i + 2), radix: 16),
-      ]);
+  /// Tek haneli ya da geçersiz karakterde [FormatException] fırlatır.
+  static Uint8List unhex(String h) {
+    if (h.length.isOdd || !RegExp(r'^[0-9a-fA-F]*$').hasMatch(h)) throw FormatException('Bozuk onaltılık BLOB', h);
+    return Uint8List.fromList([for (var i = 0; i < h.length; i += 2) int.parse(h.substring(i, i + 2), radix: 16)]);
+  }
 
   Future<String?> _latestLocalClock(String table, String rowId) async {
     final r = await _db.customSelect(
@@ -421,8 +423,9 @@ class LedgerService {
       await _logRemote(c);
       return const ApplyResult(failed: 1);
     }
+    String? cur;
     try {
-      final cur = await currentRowJson(c.table, c.rowId);
+      cur = await currentRowJson(c.table, c.rowId);
       if (cur == c.neu) {
         await _logRemote(c);
         return const ApplyResult(alreadySame: 1);
@@ -445,6 +448,10 @@ class LedgerService {
       return const ApplyResult(conflicts: 1);
     } catch (_) {
       // Tek bir satır (ör. silinmiş bir ana kayda bağlı) tüm toplu bozmasın.
+      // Uygulanamayan sürüm sessizce kaybolmasın: Çakışmalar'a düşer (kaybeden).
+      try {
+        await _recordConflict(table: c.table, rowId: c.rowId, winner: cur, loser: c.neu, side: 'uzak', clock: c.clock);
+      } catch (_) {}
       await _logRemote(c);
       return const ApplyResult(failed: 1);
     }

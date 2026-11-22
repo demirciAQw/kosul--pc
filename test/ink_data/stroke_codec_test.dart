@@ -46,8 +46,8 @@ void main() {
 
   test('uç değerler: negatif, çok büyük, baskı dışı, geriye giden zaman', () {
     const pts = [
-      StrokePoint(-1e9, 1e9, pressure: -0.5, tilt: -1.5, t: 5),
-      StrokePoint(1e9, -1e9, pressure: 2, tilt: 1.5, t: 3),
+      StrokePoint(-1e7, 1e7, pressure: -0.5, tilt: -1.5, t: 5),
+      StrokePoint(1e7, -1e7, pressure: 2, tilt: 1.5, t: 3),
       StrokePoint(0, 0, t: 1 << 40),
       StrokePoint(-0.0, 0.049, pressure: 1, t: 0),
     ];
@@ -61,6 +61,15 @@ void main() {
     expect(() => StrokeCodec.encode([const StrokePoint(double.nan, 0)]), throwsArgumentError);
     expect(() => StrokeCodec.encode([const StrokePoint(0, double.infinity)]), throwsArgumentError);
     expect(() => StrokeCodec.encode(const [], scale: 0), throwsArgumentError);
+  });
+
+  test('sınır dışı değer sessizce bozulmaz, ArgumentError verir', () {
+    expect(() => StrokeCodec.encode([const StrokePoint(1e18, 0)]), throwsArgumentError);
+    expect(() => StrokeCodec.encode([const StrokePoint(0, -1e8)]), throwsArgumentError);
+    expect(() => StrokeCodec.encode([const StrokePoint(0, 0, tilt: 100)]), throwsArgumentError);
+    expect(() => StrokeCodec.encode([const StrokePoint(0, 0, tilt: double.nan)]), throwsArgumentError);
+    expect(() => StrokeCodec.encode([const StrokePoint(double.nan, 0)]), throwsArgumentError);
+    expect(StrokeCodec.decode(StrokeCodec.encode([const StrokePoint(1e7, -1e7, tilt: 6.5)])), hasLength(1));
   });
 
   test('bozuk veri FormatException verir', () {
