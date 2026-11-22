@@ -26,15 +26,17 @@ String _q(String name) => '"${name.replaceAll('"', '""')}"';
 const _now = "COALESCE((SELECT saat_ms FROM _baglam WHERE id = 1), "
     "CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER))";
 
-String rowJson(String prefix, List<String> columns) =>
-    'json_object(${[for (final c in columns) "'$c', $prefix.${_q(c)}"].join(', ')})';
+/// [blobs]: BLOB sütunları. `json_object` BLOB'u taşıyamaz (hata verir); bu
+/// sütunlar `hex()` ile onaltılık metin olarak yazılır, uygulanırken çözülür.
+String rowJson(String prefix, List<String> columns, {Set<String> blobs = const {}}) =>
+    'json_object(${[for (final c in columns) blobs.contains(c) ? "'$c', hex($prefix.${_q(c)})" : "'$c', $prefix.${_q(c)}"].join(', ')})';
 
 /// [table] için tetikleyici adları (ekle, güncelle, sil).
 List<String> ledgerTriggerNames(String table) =>
     ['${ledgerTriggerPrefix}${table}_ai', '${ledgerTriggerPrefix}${table}_au', '${ledgerTriggerPrefix}${table}_ad'];
 
 /// CREATE TRIGGER deyimleri (ad sırasıyla). [pk]: tek sütunlu birincil anahtar.
-List<String> ledgerTriggerSql(String table, List<String> columns, String pk) {
+List<String> ledgerTriggerSql(String table, List<String> columns, String pk, {Set<String> blobs = const {}}) {
   final t = _q(table);
   String body(String op, String ref, String? oldJson, String? newJson) => '''
   UPDATE _baglam SET
@@ -50,11 +52,11 @@ List<String> ledgerTriggerSql(String table, List<String> columns, String pk) {
   final names = ledgerTriggerNames(table);
   return [
     'CREATE TRIGGER IF NOT EXISTS ${names[0]} AFTER INSERT ON $t WHEN $quiet BEGIN\n'
-        '${body('ekle', 'NEW', null, rowJson('NEW', columns))}\nEND',
+        '${body('ekle', 'NEW', null, rowJson('NEW', columns, blobs: blobs))}\nEND',
     'CREATE TRIGGER IF NOT EXISTS ${names[1]} AFTER UPDATE ON $t WHEN $quiet AND '
-        '${rowJson('OLD', columns)} IS NOT ${rowJson('NEW', columns)} BEGIN\n'
-        '${body('degistir', 'NEW', rowJson('OLD', columns), rowJson('NEW', columns))}\nEND',
+        '${rowJson('OLD', columns, blobs: blobs)} IS NOT ${rowJson('NEW', columns, blobs: blobs)} BEGIN\n'
+        '${body('degistir', 'NEW', rowJson('OLD', columns, blobs: blobs), rowJson('NEW', columns, blobs: blobs))}\nEND',
     'CREATE TRIGGER IF NOT EXISTS ${names[2]} AFTER DELETE ON $t WHEN $quiet BEGIN\n'
-        '${body('sil', 'OLD', rowJson('OLD', columns), null)}\nEND',
+        '${body('sil', 'OLD', rowJson('OLD', columns, blobs: blobs), null)}\nEND',
   ];
 }

@@ -572,3 +572,37 @@ class SilmeOnerileri extends Table {
   @override
   Set<Column> get primaryKey => {id};
 }
+
+// ───────────── Çizgi verisi (v15) ─────────────
+
+/// Kalemle çizilmiş tek çizgi (T2). Sahibi ya bir PDF sayfası (`pdfDocumentId` +
+/// `pdfPage`) ya da bir not sayfasıdır (`noteId` + `notePage`); koordinatlar
+/// sayfa/not koordinatındadır. Belge ve not tabloları sonraki adımlarda
+/// gelecek: şimdilik düz metin sütunları (yabancı anahtar yok).
+/// `points`: `stroke_codec.dart` ikilisi (delta + zigzag + varint).
+/// Silme yumuşaktır (`deleted`): defterle senkronda satır kalır.
+@DataClassName('InkStrokeRow')
+class InkStrokes extends Table {
+  TextColumn get id => text()();
+  TextColumn get pdfDocumentId => text().nullable()();
+  IntColumn get pdfPage => integer().nullable()();
+  TextColumn get noteId => text().nullable()();
+  IntColumn get notePage => integer().nullable()();
+  IntColumn get layer => integer().withDefault(const Constant(0))();
+
+  /// Çözüm denemesi (1, 2, …); not çizgilerinde 0.
+  IntColumn get attemptNo => integer().withDefault(const Constant(0))();
+  TextColumn get tool => text().withDefault(const Constant('pen'))();
+  IntColumn get color => integer().withDefault(const Constant(0xFF000000))(); // ARGB
+  RealColumn get width => real().withDefault(const Constant(1.0))();
+  IntColumn get startedAtMs => integer()(); // epoch ms
+  IntColumn get durationMs => integer().withDefault(const Constant(0))();
+  BlobColumn get points => blob()();
+  IntColumn get pointCount => integer().withDefault(const Constant(0))();
+  BoolColumn get deleted => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}

@@ -170,12 +170,15 @@ class LedgerService {
       final cols = [for (final c in t.$columns) c.$name];
       final pk = t.$primaryKey.length == 1 ? t.$primaryKey.single.$name : null;
       if (pk == null) continue; // bileşik anahtarlı tablo yok; varsa deftere girmez
-      final sql = ledgerTriggerSql(t.actualTableName, cols, pk);
+      final sql = ledgerTriggerSql(t.actualTableName, cols, pk, blobs: _blobColumns(t));
       for (var i = 0; i < 3; i++) {
         if (!have.contains(names[i])) await _db.customStatement(sql[i]);
       }
     }
   }
+
+  static Set<String> _blobColumns(TableInfo<Table, Object?> t) =>
+      {for (final c in t.$columns) if (c.type == DriftSqlType.blob) c.$name};
 
   Future<String> deviceId() async =>
       (await _db.customSelect('SELECT cihaz_id FROM _baglam WHERE id = 1').getSingle()).read<String>('cihaz_id');
@@ -321,7 +324,7 @@ class LedgerService {
     final cols = [for (final c in t.$columns) c.$name];
     final pk = t.$primaryKey.single.$name;
     final r = await _db
-        .customSelect('SELECT ${rowJson('"$table"', cols)} AS j FROM "$table" WHERE "$pk" = ?',
+        .customSelect('SELECT ${rowJson('"$table"', cols, blobs: _blobColumns(t))} AS j FROM "$table" WHERE "$pk" = ?',
             variables: [Variable<String>(rowId)])
         .get();
     return r.isEmpty ? null : r.first.read<String>('j');
@@ -336,14 +339,20 @@ class LedgerService {
       return;
     }
     final m = jsonDecode(json) as Map<String, Object?>;
+    final blobs = _blobColumns(t);
     final cols = [for (final c in t.$columns) c.$name];
     final set = [for (final c in cols) if (c != pk) '"$c" = excluded."$c"'];
     await _db.customStatement(
       'INSERT INTO "$table" (${cols.map((c) => '"$c"').join(', ')}) VALUES (${List.filled(cols.length, '?').join(', ')}) '
       'ON CONFLICT("$pk") DO ${set.isEmpty ? 'NOTHING' : 'UPDATE SET ${set.join(', ')}'}',
-      [for (final c in cols) m[c]],
+      [for (final c in cols) blobs.contains(c) && m[c] is String ? _unhex(m[c]! as String) : m[c]],
     );
   }
+
+  /// `hex()` ile yazılmış BLOB'u çözer (bkz. `rowJson`). Boş BLOB `''` olur.
+  static Uint8List _unhex(String h) => Uint8List.fromList([
+        for (var i = 0; i + 1 < h.length; i += 2) int.parse(h.substring(i, i + 2), radix: 16),
+      ]);
 
   Future<String?> _latestLocalClock(String table, String rowId) async {
     final r = await _db.customSelect(

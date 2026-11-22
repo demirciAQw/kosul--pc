@@ -35,6 +35,7 @@ part 'app_database.g.dart';
   Cakismalar,
   EsitlemeDurum,
   SilmeOnerileri,
+  InkStrokes,
 ])
 class AppDatabase extends _$AppDatabase {
   /// Testlerde: `AppDatabase(NativeDatabase.memory())`
@@ -52,8 +53,9 @@ class AppDatabase extends _$AppDatabase {
   /// v12: anlık notlar, ortak etiketler, kişiler ve bağlar.
   /// v13: değişiklik defteri, bağlam, çakışmalar, senkron imleçleri; tetikleyiciler.
   /// v14: silme önerileri (Claude silmez, işaretler).
+  /// v15: kalem çizgileri (ink_strokes), noktalar sıkıştırılmış BLOB.
   @override
-  int get schemaVersion => 14;
+  int get schemaVersion => 15;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -66,6 +68,7 @@ class AppDatabase extends _$AppDatabase {
           );
           await _createV2Indexes();
           await _createLedgerTables(m);
+          await _createInkIndexes();
         },
         onUpgrade: (m, from, to) async {
           if (from < 2) {
@@ -146,6 +149,10 @@ class AppDatabase extends _$AppDatabase {
           }
           if (from < 13) await _createLedgerTables(m);
           if (from < 14) await m.createTable(silmeOnerileri);
+          if (from < 15) {
+            await m.createTable(inkStrokes);
+            await _createInkIndexes();
+          }
           // Tablolar yeniden kurulmuş ya da sütun eklenmiş olabilir: tetikleyiciler baştan.
           await LedgerService(this).installTriggers(rebuild: true);
         },
@@ -162,6 +169,11 @@ class AppDatabase extends _$AppDatabase {
     await m.createTable(esitlemeDurum);
     await customStatement('CREATE INDEX IF NOT EXISTS ix_degisiklik_satir ON degisiklikler(tablo, satir_id)');
     await customStatement('CREATE INDEX IF NOT EXISTS ix_degisiklik_oturum ON degisiklikler(oturum_id)');
+  }
+
+  Future<void> _createInkIndexes() async {
+    await customStatement('CREATE INDEX IF NOT EXISTS ix_ink_pdf ON ink_strokes(pdf_document_id, pdf_page)');
+    await customStatement('CREATE INDEX IF NOT EXISTS ix_ink_note ON ink_strokes(note_id, note_page)');
   }
 
   Future<void> _createV2Indexes() async {
