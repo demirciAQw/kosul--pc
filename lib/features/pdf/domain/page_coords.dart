@@ -17,7 +17,15 @@ class PageCoords {
     this.pageHeight,
     this.viewWidth,
     this.viewHeight,
+    this.originX,
+    this.originY,
   );
+
+  /// Görünümün sol-üst köşesinin sayfa koordinatı. Tam sayfa görünümünde 0;
+  /// çözüm ekranında (soru bölgesi) bölgenin sol-üstü. Bu durumda [pageWidth] /
+  /// [pageHeight] görünen BÖLGENİN boyutudur.
+  final double originX;
+  final double originY;
 
   final double pageWidth;
   final double pageHeight;
@@ -30,11 +38,14 @@ class PageCoords {
     required double pageHeight,
     required double viewWidth,
     required double viewHeight,
+    double originX = 0,
+    double originY = 0,
   }) {
     for (final v in [pageWidth, pageHeight, viewWidth, viewHeight]) {
       if (!v.isFinite || v <= 0) return null;
     }
-    return PageCoords._(pageWidth, pageHeight, viewWidth, viewHeight);
+    if (!originX.isFinite || !originY.isFinite) return null;
+    return PageCoords._(pageWidth, pageHeight, viewWidth, viewHeight, originX, originY);
   }
 
   /// Dönmemiş sayfa boyutu ve `/Rotate` (derece) → görünen boyut.
@@ -58,14 +69,14 @@ class PageCoords {
 
   /// Görünüm (sayfa dikdörtgenine göre yerel) noktası → sayfa noktası.
   Offset toPage(Offset view) => Offset(
-    view.dx * pageWidth / viewWidth,
-    view.dy * pageHeight / viewHeight,
+    originX + view.dx * pageWidth / viewWidth,
+    originY + view.dy * pageHeight / viewHeight,
   );
 
   /// Sayfa noktası → görünüm noktası.
   Offset toView(Offset page) => Offset(
-    page.dx * viewWidth / pageWidth,
-    page.dy * viewHeight / pageHeight,
+    (page.dx - originX) * viewWidth / pageWidth,
+    (page.dy - originY) * viewHeight / pageHeight,
   );
 
   /// Ekran noktası → sayfa noktası; [pageOrigin] sayfanın ekrandaki sol-üst köşesi.

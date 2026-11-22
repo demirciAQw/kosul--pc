@@ -16,8 +16,12 @@ abstract final class AppRoutes {
   static String pdfReader(String id) => '/pdf/$id';
 
   /// Soru kartından PDF'e: sayfa (0'dan) ve kutu `sol,üst,sağ,alt` (sayfa birimi).
-  static String pdfReaderAt(String id, int page, double l, double t, double r, double b) =>
-      '/pdf/$id?page=$page&box=$l,$t,$r,$b';
+  /// [questionId] verilirse okuyucuda "Çöz" düğmesi çıkar.
+  static String pdfReaderAt(String id, int page, double l, double t, double r, double b, {String? questionId}) =>
+      '/pdf/$id?page=$page&box=$l,$t,$r,$b${questionId == null ? '' : '&q=${Uri.encodeQueryComponent(questionId)}'}';
+
+  /// Çözüm ekranı: sorunun PDF kutusu + çevresi, her deneme ayrı katman.
+  static String pdfSolve(String id, String questionId) => '/pdf/$id/soru/${Uri.encodeComponent(questionId)}';
 
   // Tam ekran sayfalar
   static const newSession = '/session/new';

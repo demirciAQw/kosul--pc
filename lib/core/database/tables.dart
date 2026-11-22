@@ -606,6 +606,9 @@ class InkStrokes extends Table {
 
   /// Çözüm denemesi (1, 2, …); not çizgilerinde 0.
   IntColumn get attemptNo => integer().withDefault(const Constant(0))();
+
+  /// Çözüm çizgisinin ait olduğu soru kartı (T5); not ve sayfa çizgilerinde null.
+  TextColumn get questionId => text().nullable()();
   TextColumn get tool => text().withDefault(const Constant('pen'))();
   IntColumn get color => integer().withDefault(const Constant(0xFF000000))(); // ARGB
   RealColumn get width => real().withDefault(const Constant(1.0))();

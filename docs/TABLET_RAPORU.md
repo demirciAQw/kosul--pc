@@ -89,3 +89,15 @@ Dal: `tablet-1`. Her adım: saat, sonuç, ölçüm, "Ahmet elle denesin".
 - PDF'te "Soru seç" ile bir soruyu çerçevele, Yanlış işaretle; Defter'de kart görünüyor mu, dokununca PDF'e gidiyor mu?
 - Taranmış (metinsiz) PDF'te ders/konu önerisi ML Kit'ten geliyor mu?
 - Telefon (PDF'siz): kart önizleme resmiyle görünüyor mu?
+
+## T5: Çözüm katmanları (v9.6)
+- `ink_strokes.question_id` (şema 18, `from < 18` + PRAGMA, indeks `ix_ink_question`); eski çizgilerde null. Okuyucu oturumu yalnız soruya bağlı olmayan çizgileri görür; çözüm çizgileri ayrı katman.
+- Çözüm ekranı `/pdf/:id/soru/:questionId`: kırpılmış soru bölgesi + çizim payı; "Yeniden çöz" (yeni boş deneme), "Eski çözümü göster" (seçici + saydamlık), "İki denemeyi üst üste bindir"; deneme başına süre.
+- Süre (`solveDuration`): çizgi aralıkları birleşir, 30 sn'den uzun boşluk sayılmaz, tek çizgi en çok 5 dk. Mevcut `avgSecondsPerQuestion` dokunulmadı.
+- Giriş: okuyucuda "Çöz", kayıt snackbar'ında "Çöz", soru ayrıntısında "Çöz" ve "Çözüm süresi".
+- Karar: ekran son denemede açılır (yanlışlıkla kapatınca çizim kaybolmasın); yeni deneme yalnız "Yeniden çöz" ile.
+- 542 test, APK ve Linux debug derlendi. Kalem hissi tablette denenmedi.
+
+### Ahmet elle denesin (T5)
+- Bir soruda "Çöz": yaz, kapat, tekrar aç (çizim duruyor mu); "Yeniden çöz": temiz sayfa mı; eski çözümü saydam göster; iki denemeyi üst üste bindir.
+- Süre makul mu (duraksayınca sayılmıyor)?

@@ -22,6 +22,7 @@ class InkStrokeRepository {
     required int startedAtMs,
     int layer = 0,
     int attemptNo = 0,
+    String? questionId,
     String tool = 'pen',
     int color = 0xFF000000,
     double width = 1.0,
@@ -37,6 +38,7 @@ class InkStrokeRepository {
           notePage: Value(owner is NotePageOwner ? owner.page : null),
           layer: Value(layer),
           attemptNo: Value(attemptNo),
+          questionId: Value(questionId),
           tool: Value(tool),
           color: Value(color),
           width: Value(width),
@@ -50,7 +52,8 @@ class InkStrokeRepository {
     return id;
   }
 
-  SimpleSelectStatement<$InkStrokesTable, InkStrokeRow> _query(StrokeOwner owner, {int? attemptNo, int? layer}) {
+  SimpleSelectStatement<$InkStrokesTable, InkStrokeRow> _query(StrokeOwner owner,
+      {int? attemptNo, int? layer, String? questionId, bool noQuestion = false}) {
     return _db.select(_db.inkStrokes)
       ..where((s) {
         Expression<bool> w = s.deleted.equals(false);
@@ -61,17 +64,42 @@ class InkStrokeRepository {
             };
         if (attemptNo != null) w = w & s.attemptNo.equals(attemptNo);
         if (layer != null) w = w & s.layer.equals(layer);
+        if (questionId != null) w = w & s.questionId.equals(questionId);
+        if (noQuestion) w = w & s.questionId.isNull();
         return w;
       })
       ..orderBy([(s) => OrderingTerm.asc(s.startedAtMs), (s) => OrderingTerm.asc(s.id)]);
   }
 
   /// Sayfadaki (silinmemiş) çizgiler, çizim sırasıyla.
-  Future<List<InkStroke>> forPage(StrokeOwner owner, {int? attemptNo, int? layer}) async =>
-      _decodeAll(await _query(owner, attemptNo: attemptNo, layer: layer).get());
+  ///
+  /// [questionId]: yalnızca o sorunun çözüm çizgileri; [noQuestion]: yalnızca
+  /// bir soruya bağlı OLMAYAN çizgiler (okuyucunun serbest çizgileri).
+  Future<List<InkStroke>> forPage(StrokeOwner owner,
+          {int? attemptNo, int? layer, String? questionId, bool noQuestion = false}) async =>
+      _decodeAll(await _query(owner, attemptNo: attemptNo, layer: layer, questionId: questionId, noQuestion: noQuestion)
+          .get());
 
-  Stream<List<InkStroke>> watchPage(StrokeOwner owner, {int? attemptNo, int? layer}) =>
-      _query(owner, attemptNo: attemptNo, layer: layer).watch().map(_decodeAll);
+  Stream<List<InkStroke>> watchPage(StrokeOwner owner,
+          {int? attemptNo, int? layer, String? questionId, bool noQuestion = false}) =>
+      _query(owner, attemptNo: attemptNo, layer: layer, questionId: questionId, noQuestion: noQuestion)
+          .watch()
+          .map(_decodeAll);
+
+  /// Sorunun (silinmemiş) çizgi zamanları, tüm denemeler; noktalar çözülmez.
+  Stream<List<StrokeTime>> watchSolveTimes(String questionId) {
+    final q = _db.selectOnly(_db.inkStrokes)
+      ..addColumns([_db.inkStrokes.attemptNo, _db.inkStrokes.startedAtMs, _db.inkStrokes.durationMs])
+      ..where(_db.inkStrokes.questionId.equals(questionId) & _db.inkStrokes.deleted.equals(false));
+    return q.watch().map((rows) => [
+          for (final r in rows)
+            StrokeTime(
+              attemptNo: r.read(_db.inkStrokes.attemptNo)!,
+              startedAtMs: r.read(_db.inkStrokes.startedAtMs)!,
+              durationMs: r.read(_db.inkStrokes.durationMs)!,
+            ),
+        ]);
+  }
 
   final Set<String> _corruptIds = {};
 
@@ -116,6 +144,7 @@ class InkStrokeRepository {
         startedAtMs: r.startedAtMs,
         layer: r.layer,
         attemptNo: r.attemptNo,
+        questionId: r.questionId,
         tool: r.tool,
         color: r.color,
         width: r.width,

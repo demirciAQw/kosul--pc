@@ -44,6 +44,7 @@ class _FlakyRepo extends InkStrokeRepository {
     required int startedAtMs,
     int layer = 0,
     int attemptNo = 0,
+    String? questionId,
     String tool = 'pen',
     int color = 0xFF000000,
     double width = 1.0,
@@ -60,6 +61,7 @@ class _FlakyRepo extends InkStrokeRepository {
       startedAtMs: startedAtMs,
       layer: layer,
       attemptNo: attemptNo,
+      questionId: questionId,
       tool: tool,
       color: color,
       width: width,
@@ -79,7 +81,59 @@ class _FlakyRepo extends InkStrokeRepository {
 
 const _fast = [Duration.zero, Duration.zero];
 
+/// Çözüm oturumu (soru + deneme) da aynı altyapıyı kullanır.
+void _solveTests() {
+  test('çözüm oturumu: questionId ve denemeNo ile kaydeder; serbest oturum görmez; geri al yalnız o denemeyi', () async {
+    final (_, repo) = await _open();
+    final s1 = PdfInkSession(documentId: _doc, repository: repo, attemptNo: 1, questionId: 'q1', retryDelays: _fast);
+    final s2 = PdfInkSession(documentId: _doc, repository: repo, attemptNo: 2, questionId: 'q1', retryDelays: _fast);
+    final free = PdfInkSession(documentId: _doc, repository: repo, retryDelays: _fast);
+    addTearDown(s1.dispose);
+    addTearDown(s2.dispose);
+    addTearDown(free.dispose);
+    s1.addStroke(0, const InkBrush(width: 2), _line(10, 10), _coords(1));
+    s2.addStroke(0, const InkBrush(width: 2), _line(20, 20), _coords(1));
+    free.addStroke(0, const InkBrush(width: 2), _line(30, 30), _coords(1));
+    await Future.wait([s1.flush(), s2.flush(), free.flush()]);
+    expect((await repo.forPage(PdfPageOwner(_doc, 0), questionId: 'q1', attemptNo: 2)).single.questionId, 'q1');
+    expect(s1.hasStrokes, isTrue);
+
+    final r1 = PdfInkSession(documentId: _doc, repository: repo, attemptNo: 1, questionId: 'q1');
+    final rf = PdfInkSession(documentId: _doc, repository: repo);
+    addTearDown(r1.dispose);
+    addTearDown(rf.dispose);
+    final p1 = r1.penFor(0), pf = rf.penFor(0);
+    await Future.wait([r1.flush(), rf.flush()]);
+    expect(p1.strokes, hasLength(1));
+    expect(pf.strokes, hasLength(1)); // yalnız serbest çizgi
+
+    await s2.undo();
+    expect(await repo.forPage(PdfPageOwner(_doc, 0), questionId: 'q1', attemptNo: 2), isEmpty);
+    expect(await repo.forPage(PdfPageOwner(_doc, 0), questionId: 'q1', attemptNo: 1), hasLength(1));
+    await s2.redo();
+    expect(await repo.forPage(PdfPageOwner(_doc, 0), questionId: 'q1', attemptNo: 2), hasLength(1));
+  });
+
+  test('çözüm oturumunda kayıt hatası yeniden denenir, kayıp olmaz ve questionId korunur', () async {
+    final (db, _) = await _open();
+    final repo = _FlakyRepo(db)..addFailures = 5;
+    final s = PdfInkSession(documentId: _doc, repository: repo, attemptNo: 3, questionId: 'q7', retryDelays: _fast);
+    addTearDown(s.dispose);
+    final errors = <String>[];
+    s.errors.listen(errors.add);
+    s.addStroke(0, const InkBrush(width: 2), _line(10, 10), _coords(1));
+    await s.flush();
+    await Future<void>.delayed(Duration.zero);
+    expect(errors, isNotEmpty);
+    expect(s.hasStrokes, isTrue); // ekranda duruyor
+    await s.flush(); // 2 hata kaldı; _fast = 2 yeniden deneme (3 çağrı) -> bu turda biter
+    final rows = await repo.forPage(PdfPageOwner(_doc, 0), questionId: 'q7', attemptNo: 3);
+    expect(rows, hasLength(1));
+  });
+}
+
 void main() {
+  _solveTests();
   test(
     'çizgi sayfa birimine çevrilip kaydedilir, yeni oturum aynı çizgiyi yükler',
     () async {

@@ -113,6 +113,23 @@ void main() {
     });
   });
 
+  test('bölge görünümü: sol-üst başlangıcı sayfa koordinatına eklenir ve geri döner', () {
+    // Sayfada (100, 200) başlayan 300x150'lik bölge, 600x300 pikselde (2x).
+    final c = PageCoords.tryCreate(
+      pageWidth: 300,
+      pageHeight: 150,
+      viewWidth: 600,
+      viewHeight: 300,
+      originX: 100,
+      originY: 200,
+    )!;
+    expect(c.toPage(const Offset(0, 0)), const Offset(100, 200));
+    expect(c.toPage(const Offset(600, 300)), const Offset(400, 350));
+    expect(c.toView(const Offset(150, 225)), const Offset(100, 50));
+    expect(c.pageUnitsPerViewPx, 0.5);
+    expect(PageCoords.tryCreate(pageWidth: 1, pageHeight: 1, viewWidth: 1, viewHeight: 1, originX: double.nan), isNull);
+  });
+
   group('InkHistory', () {
     test('geri al / yinele sırası, yeni eylem yinele yığınını boşaltır', () {
       final h = InkHistory();

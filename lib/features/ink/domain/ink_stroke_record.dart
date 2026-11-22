@@ -28,6 +28,7 @@ class InkStroke {
     required this.startedAtMs,
     this.layer = 0,
     this.attemptNo = 0,
+    this.questionId,
     this.tool = 'pen',
     this.color = 0xFF000000,
     this.width = 1.0,
@@ -41,9 +42,20 @@ class InkStroke {
   final int startedAtMs;
   final int layer;
   final int attemptNo;
+
+  /// Çözüm çizgisinin sorusu (soru kartı kimliği); yoksa null.
+  final String? questionId;
   final String tool;
   final int color;
   final double width;
   final int durationMs;
   final bool deleted;
+}
+
+/// Bir çizginin yalnızca zamanları (noktalar çözülmeden): süre hesabı için.
+class StrokeTime {
+  const StrokeTime({required this.attemptNo, required this.startedAtMs, required this.durationMs});
+  final int attemptNo;
+  final int startedAtMs;
+  final int durationMs;
 }

@@ -94,9 +94,10 @@ class PagePen extends ChangeNotifier {
   }
 
   /// [canvas]'ı sayfa birimli çizer; [scaleX]/[scaleY] görünüm piksel / sayfa birimi.
-  void paint(ui.Canvas canvas, double scaleX, double scaleY) {
+  void paint(ui.Canvas canvas, double scaleX, double scaleY, {double originX = 0, double originY = 0}) {
     canvas.save();
     canvas.scale(scaleX, scaleY);
+    canvas.translate(-originX, -originY);
     for (final s in _strokes) {
       canvas.drawPicture(s.picture);
     }
@@ -122,6 +123,7 @@ class PdfInkSession extends ChangeNotifier {
     required this.repository,
     DateTime Function()? clock,
     this.attemptNo = 1,
+    this.questionId,
     this.layer = 0,
     this.retryDelays = const [
       Duration(milliseconds: 300),
@@ -135,6 +137,10 @@ class PdfInkSession extends ChangeNotifier {
   final InkStrokeRepository repository;
   final DateTime Function() _clock;
   final int attemptNo;
+
+  /// Verilirse oturum yalnızca o sorunun çözüm çizgilerini okur/yazar (çözüm
+  /// ekranı); null ise yalnızca soruya bağlı OLMAYAN çizgileri (okuyucu).
+  final String? questionId;
   final int layer;
 
   /// Kayıt hatasında bekleme süreleri (sınırlı yeniden deneme; sonra kullanıcıya ikaz).
@@ -279,6 +285,9 @@ class PdfInkSession extends ChangeNotifier {
     pen.dispose();
   }
 
+  /// Bellekteki sayfalarda (kaydı bitmemiş olanlar dahil) çizgi var mı.
+  bool get hasStrokes => _pens.values.any((p) => p._strokes.isNotEmpty);
+
   @visibleForTesting
   int get cachedPages => _pens.length;
 
@@ -313,6 +322,8 @@ class PdfInkSession extends ChangeNotifier {
       _owner(pen.page),
       attemptNo: attemptNo,
       layer: layer,
+      questionId: questionId,
+      noQuestion: questionId == null,
     );
     if (_disposed || pen._disposed) return;
     pen._replaceLoaded([
@@ -398,6 +409,7 @@ class PdfInkSession extends ChangeNotifier {
         startedAtMs: stroke.startedAtMs,
         layer: layer,
         attemptNo: attemptNo,
+        questionId: questionId,
         tool: stroke.brush.tool.name,
         color: stroke.brush.color,
         width: stroke.brush.width,

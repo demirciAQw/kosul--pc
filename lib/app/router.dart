@@ -7,6 +7,7 @@ import '../features/ink/presentation/ink_lab_page.dart';
 import '../features/pdf/domain/pdf_engine.dart' show PdfBox;
 import '../features/pdf/presentation/pdf_library_page.dart';
 import '../features/pdf/presentation/pdf_reader_page.dart';
+import '../features/pdf/presentation/pdf_solve_page.dart';
 import '../features/ledger/presentation/ledger_screens.dart';
 import '../features/home/home_screen.dart';
 import '../features/library/presentation/book_detail_screen.dart';
@@ -123,8 +124,18 @@ final routerProvider = Provider<GoRouter>((ref) {
             documentId: state.pathParameters['id']!,
             initialPage: ok ? page : null,
             highlight: ok ? PdfBox(parts[0]!, parts[1]!, parts[2]!, parts[3]!) : null,
+            questionId: ok ? state.uri.queryParameters['q'] : null,
           );
         },
+        routes: [
+          GoRoute(
+            path: 'soru/:questionId',
+            builder: (context, state) => PdfSolvePage(
+              documentId: state.pathParameters['id']!,
+              questionId: state.pathParameters['questionId']!,
+            ),
+          ),
+        ],
       ),
       GoRoute(path: AppRoutes.sendToComputer, builder: (context, state) => const SendToComputerScreen()),
       GoRoute(

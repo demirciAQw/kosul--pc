@@ -2,8 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:pdfrx/pdfrx.dart' as r; // pdfrx YALNIZ data/ ve bu dosyada
 
+import '../../../app/routes.dart';
 import '../../ink/domain/ink_models.dart';
 import '../../question_bank/domain/question_card.dart';
 import '../domain/pdf_engine.dart' show PdfBox, PdfPageSize;
@@ -19,8 +21,11 @@ import 'pdf_page_ink_layer.dart';
 /// PDF okuyucu: dikey kaydırma, parmakla yakınlaştırma, küçük resim şeridi,
 /// sayfa göstergesi ve her sayfanın üstünde kalem katmanı.
 class PdfReaderPage extends ConsumerWidget {
-  const PdfReaderPage({super.key, required this.documentId, this.initialPage, this.highlight});
+  const PdfReaderPage({super.key, required this.documentId, this.initialPage, this.highlight, this.questionId});
   final String documentId;
+
+  /// Vurgulanan kutunun soru kartı: varsa "Çöz" düğmesi görünür.
+  final String? questionId;
 
   /// Soru kartından gelince: açılacak sayfa (0'dan) ve vurgulanacak kutu.
   final int? initialPage;
@@ -60,7 +65,12 @@ class PdfReaderPage extends ConsumerWidget {
         }
         // Bağlantıdan gelen sayfa belgede yoksa başa açılır, kutu yok sayılır.
         final page = validReaderPage(initialPage, i.record.pageCount);
-        return PdfReaderView(info: i, initialPage: page, highlight: page == null ? null : highlight);
+        return PdfReaderView(
+          info: i,
+          initialPage: page,
+          highlight: page == null ? null : highlight,
+          questionId: page == null ? null : questionId,
+        );
       },
     );
   }
@@ -76,8 +86,9 @@ const _colors = <int>[
 const _widths = <double>[2, 4, 8];
 
 class PdfReaderView extends ConsumerStatefulWidget {
-  const PdfReaderView({super.key, required this.info, this.initialPage, this.highlight});
+  const PdfReaderView({super.key, required this.info, this.initialPage, this.highlight, this.questionId});
   final PdfOpenInfo info;
+  final String? questionId;
   final int? initialPage;
   final PdfBox? highlight;
 
@@ -191,7 +202,13 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
     setState(_clearPending);
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(const SnackBar(content: Text('Soru kaydedildi.')));
+      ..showSnackBar(SnackBar(
+        content: const Text('Soru kaydedildi.'),
+        action: SnackBarAction(
+          label: 'Çöz',
+          onPressed: () => GoRouter.of(context).push(AppRoutes.pdfSolve(widget.info.record.id, card.id)),
+        ),
+      ));
   }
 
   List<Widget> _overlays(BuildContext context, Rect rect, r.PdfPage page) => [
@@ -230,7 +247,7 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
       ),
       body: Column(
         children: [
-          _Toolbar(
+          PdfInkToolbar(
             session: _session,
             tool: _tool,
             selecting: _selecting,
@@ -311,6 +328,19 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
                             ),
                           ),
                         ),
+                      if (widget.questionId != null && widget.highlight != null)
+                        Positioned(
+                          right: 16,
+                          bottom: 56,
+                          child: FloatingActionButton.extended(
+                            key: const Key('pdf-solve-button'),
+                            heroTag: null,
+                            onPressed: () =>
+                                context.push(AppRoutes.pdfSolve(widget.info.record.id, widget.questionId!)),
+                            icon: const Icon(Icons.draw_outlined),
+                            label: const Text('Çöz'),
+                          ),
+                        ),
                       Positioned(
                         bottom: 12,
                         left: 0,
@@ -350,12 +380,15 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
   }
 }
 
-class _Toolbar extends StatelessWidget {
-  const _Toolbar({
+/// Kalem araç çubuğu (okuyucu ve çözüm ekranı ortak). [onSelect] null ise
+/// "Soru seç" düğmesi gösterilmez.
+class PdfInkToolbar extends StatelessWidget {
+  const PdfInkToolbar({
+    super.key,
     required this.session,
     required this.tool,
-    required this.selecting,
-    required this.onSelect,
+    this.selecting = false,
+    this.onSelect,
     required this.color,
     required this.width,
     required this.onTool,
@@ -366,7 +399,7 @@ class _Toolbar extends StatelessWidget {
   final PdfInkSession session;
   final InkTool tool;
   final bool selecting;
-  final VoidCallback onSelect;
+  final VoidCallback? onSelect;
   final int color;
   final double width;
   final ValueChanged<InkTool> onTool;
@@ -391,6 +424,7 @@ class _Toolbar extends StatelessWidget {
           toolBtn(InkTool.pen, Icons.edit_outlined, 'Kalem'),
           toolBtn(InkTool.highlighter, Icons.border_color_outlined, 'Fosforlu'),
           toolBtn(InkTool.eraser, Icons.auto_fix_normal_outlined, 'Silgi'),
+          if (onSelect != null)
           IconButton(
             key: const Key('pdf-tool-select'),
             tooltip: 'Soru seç',

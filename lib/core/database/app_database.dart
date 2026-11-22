@@ -57,8 +57,9 @@ class AppDatabase extends _$AppDatabase {
   /// v15: kalem çizgileri (ink_strokes), noktalar sıkıştırılmış BLOB.
   /// v16: PDF belgeleri (pdf_documents): satır senkron olur, dosya olmaz.
   /// v17: soru kartında PDF koordinatı (pdf_document_id, pdf_page, pdf_box_*).
+  /// v18: çizgi -> soru bağı (ink_strokes.question_id), çözüm katmanları.
   @override
-  int get schemaVersion => 17;
+  int get schemaVersion => 18;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -169,6 +170,13 @@ class AppDatabase extends _$AppDatabase {
             if (!names.contains('pdf_box_right')) await m.addColumn(questionCards, questionCards.pdfBoxRight);
             if (!names.contains('pdf_box_bottom')) await m.addColumn(questionCards, questionCards.pdfBoxBottom);
           }
+          // v18: çizgi -> soru bağı. ink_strokes v15'te güncel tanımla kurulmuş olabilir.
+          if (from < 18) {
+            final cols = await customSelect('PRAGMA table_info(ink_strokes)').get();
+            final names = {for (final c in cols) c.read<String>('name')};
+            if (!names.contains('question_id')) await m.addColumn(inkStrokes, inkStrokes.questionId);
+            await customStatement('CREATE INDEX IF NOT EXISTS ix_ink_question ON ink_strokes(question_id, attempt_no)');
+          }
           // Tablolar yeniden kurulmuş ya da sütun eklenmiş olabilir: tetikleyiciler baştan.
           await LedgerService(this).installTriggers(rebuild: true);
         },
@@ -190,6 +198,7 @@ class AppDatabase extends _$AppDatabase {
   Future<void> _createInkIndexes() async {
     await customStatement('CREATE INDEX IF NOT EXISTS ix_ink_pdf ON ink_strokes(pdf_document_id, pdf_page)');
     await customStatement('CREATE INDEX IF NOT EXISTS ix_ink_note ON ink_strokes(note_id, note_page)');
+    await customStatement('CREATE INDEX IF NOT EXISTS ix_ink_question ON ink_strokes(question_id, attempt_no)');
   }
 
   Future<void> _createV2Indexes() async {

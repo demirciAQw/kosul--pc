@@ -24,6 +24,8 @@ class PdfPageInkLayer extends StatefulWidget {
     required this.page,
     required this.pageWidth,
     required this.pageHeight,
+    this.originX = 0,
+    this.originY = 0,
   });
 
   final PdfInkSession session;
@@ -34,6 +36,11 @@ class PdfPageInkLayer extends StatefulWidget {
   /// Sayfa boyutu, PDF birimi, döndürme uygulanmış.
   final double pageWidth;
   final double pageHeight;
+
+  /// Çözüm ekranı: katman yalnız sayfanın bir bölgesini kaplar. [pageWidth] /
+  /// [pageHeight] bölgenin boyutu, [originX]/[originY] bölgenin sayfadaki sol-üstü.
+  final double originX;
+  final double originY;
 
   @override
   State<PdfPageInkLayer> createState() => PdfPageInkLayerState();
@@ -240,6 +247,8 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
             pageHeight: widget.pageHeight,
             viewWidth: box.maxWidth,
             viewHeight: box.maxHeight,
+            originX: widget.originX,
+            originY: widget.originY,
           );
           final coords = _coords;
           if (coords == null) return const SizedBox.shrink();
@@ -289,11 +298,15 @@ class _SavedPainter extends CustomPainter {
     canvas,
     coords.viewWidth / coords.pageWidth,
     coords.viewHeight / coords.pageHeight,
+    originX: coords.originX,
+    originY: coords.originY,
   );
 
   @override
   bool shouldRepaint(_SavedPainter old) =>
       old.pen != pen ||
+      old.coords.originX != coords.originX ||
+      old.coords.originY != coords.originY ||
       old.coords.viewWidth != coords.viewWidth ||
       old.coords.viewHeight != coords.viewHeight;
 }

@@ -9,6 +9,7 @@ import 'package:kocum/core/database/app_database.dart';
 import 'package:kocum/core/di/core_providers.dart';
 import 'package:kocum/features/ink/domain/ink_stroke_record.dart';
 import 'package:kocum/features/pdf/domain/pdf_document_record.dart';
+import 'package:kocum/features/pdf/domain/pdf_engine.dart' show PdfBox;
 import 'package:kocum/features/pdf/pdf_providers.dart';
 import 'package:kocum/features/pdf/presentation/pdf_reader_page.dart';
 import 'package:pdfrx/pdfrx.dart' show pdfrxInitialize;
@@ -32,7 +33,8 @@ void main() {
     await t.pump(const Duration(milliseconds: 100));
   }
 
-  Future<void> open(WidgetTester t, {String? filePath}) async {
+  Future<void> open(WidgetTester t,
+      {String? filePath, int? initialPage, PdfBox? highlight, String? questionId}) async {
     tmp = await t.runAsync(
       () => Directory.systemTemp.createTemp('okuyucu'),
     ) as Directory;
@@ -70,7 +72,9 @@ void main() {
           appDatabaseProvider.overrideWithValue(db),
           pdfOpenInfoProvider(_id).overrideWith((ref) async => info),
         ],
-        child: MaterialApp(home: PdfReaderPage(documentId: _id)),
+        child: MaterialApp(
+          home: PdfReaderPage(documentId: _id, initialPage: initialPage, highlight: highlight, questionId: questionId),
+        ),
       ),
     );
     for (var i = 0; i < 6; i++) {
@@ -264,6 +268,17 @@ void main() {
     await t.pump();
     await t.pump();
     expect(find.textContaining('dosyası bu cihazda yok'), findsOneWidget);
+  });
+
+  testWidgets('soru çerçevesi ve soru kimliği varsa Çöz düğmesi görünür', (t) async {
+    await open(t, initialPage: 0, highlight: const PdfBox(72, 100, 300, 300), questionId: 'q1');
+    expect(find.byKey(const Key('pdf-solve-button')), findsOneWidget);
+    expect(find.text('Çöz'), findsOneWidget);
+  });
+
+  testWidgets('Çöz düğmesi kutu olmadan ya da soru kimliği olmadan çıkmaz', (t) async {
+    await open(t, initialPage: 0, highlight: const PdfBox(72, 100, 300, 300));
+    expect(find.byKey(const Key('pdf-solve-button')), findsNothing);
   });
 }
 

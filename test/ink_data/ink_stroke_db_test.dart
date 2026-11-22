@@ -146,7 +146,7 @@ void main() {
     expect((await db.select(db.anlikNotes).getSingle()).body, 'eski not');
     expect((await db.customSelect('PRAGMA user_version').getSingle()).read<int>('user_version'), db.schemaVersion);
     final idx = await db.customSelect("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'ix_ink_%'").get();
-    expect(idx, hasLength(2));
+    expect(idx, hasLength(3));
     // Tetikleyici kurulu: yeni çizgi deftere yazılır.
     await InkStrokeRepository(db).add(owner: const PdfPageOwner('d', 0), points: _pts, startedAtMs: 1);
     expect((await LedgerService(db).history()).any((c) => c.table == 'ink_strokes'), isTrue);

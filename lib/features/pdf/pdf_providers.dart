@@ -18,6 +18,7 @@ import 'data/pdf_question_service.dart';
 import 'data/pdfrx_engine.dart';
 import 'domain/pdf_document_record.dart';
 import 'domain/pdf_engine.dart';
+import 'domain/solve.dart';
 
 final pdfEngineProvider = Provider<PdfEngine>((ref) => const PdfrxEngine());
 
@@ -32,6 +33,10 @@ final pdfImportServiceProvider = FutureProvider<PdfImportService>((ref) async {
     pdfDir: dir,
   );
 });
+
+/// Sorunun deneme listesi (çizgi zamanlarından: deneme no, çizgi sayısı, süre).
+final solveAttemptsProvider = StreamProvider.autoDispose.family<List<SolveAttempt>, String>(
+    (ref, questionId) => ref.watch(inkStrokeRepositoryProvider).watchSolveTimes(questionId).map(solveAttempts));
 
 final inkStrokeRepositoryProvider =
     Provider((ref) => InkStrokeRepository(ref.watch(appDatabaseProvider), clock: ref.watch(clockProvider)));

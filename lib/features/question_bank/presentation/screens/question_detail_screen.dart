@@ -9,6 +9,7 @@ import '../../../../core/utils/formatters.dart';
 import '../../../curriculum/curriculum_providers.dart';
 import '../../../curriculum/domain/curriculum.dart';
 import '../../../pdf/pdf_providers.dart';
+import '../../../pdf/presentation/solve_time_section.dart';
 import '../../domain/question_card.dart';
 import '../../question_bank_providers.dart';
 import '../widgets/media_image.dart';
@@ -69,9 +70,17 @@ class _QuestionDetailScreenState extends ConsumerState<QuestionDetailScreen> {
               tooltip: 'PDF\'te göster',
               onPressed: () {
                 final b = card.pdfBox!;
-                context.push(AppRoutes.pdfReaderAt(card.pdfDocumentId!, card.pdfPage!, b.left, b.top, b.right, b.bottom));
+                context.push(AppRoutes.pdfReaderAt(card.pdfDocumentId!, card.pdfPage!, b.left, b.top, b.right, b.bottom,
+                    questionId: card.id));
               },
               icon: const Icon(Icons.picture_as_pdf_outlined),
+            ),
+          if (card.hasPdfAnchor && (ref.watch(pdfAvailableProvider(card.pdfDocumentId!)).value ?? false))
+            IconButton(
+              key: const Key('detail-solve'),
+              tooltip: 'Çöz',
+              onPressed: () => context.push(AppRoutes.pdfSolve(card.pdfDocumentId!, card.id)),
+              icon: const Icon(Icons.draw_outlined),
             ),
           IconButton(
             tooltip: 'Düzenle',
@@ -125,6 +134,7 @@ class _QuestionDetailScreenState extends ConsumerState<QuestionDetailScreen> {
           ),
           const SizedBox(height: 12),
           CardTagsSection(cardId: card.id),
+          if (card.hasPdfAnchor) SolveTimeSection(questionId: card.id),
           const SizedBox(height: 16),
           if (!card.hasSolution)
             OutlinedButton.icon(
