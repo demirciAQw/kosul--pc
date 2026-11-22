@@ -225,7 +225,7 @@ class SyncServer {
       final handler = handlers['${request.method} ${request.uri.path}'];
       if (handler == null) throw const _Reject(404, 'Bilinmeyen istek.');
       final body = await handler();
-      await _respond(request, 200, body, sign: ctx.signed);
+      await _respond(request, 200, body, sign: ctx.signed, close: ctx.closeAfter);
     } on _Reject catch (e) {
       if (e.counts && address.isNotEmpty) _guard.record(address);
       await _drain(ctx);
@@ -415,7 +415,8 @@ class SyncServer {
     }
     if (probe) return {'tamam': true, 'zatenVar': exists};
     if (exists) {
-      // Aradan başka yoldan gelmiş: yeniden yazılmaz.
+      // Aradan başka yoldan gelmiş: yeniden yazılmaz; gövde okunmaz, yanıttan sonra bağlantı kapanır.
+      _abandonBody(ctx);
       _emit(SyncEventKind.pdf, 'PDF bilgisayarda zaten var; yeniden alınmadı.');
       return {'tamam': true, 'zatenVar': true};
     }

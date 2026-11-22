@@ -95,7 +95,9 @@ flutter build linux --release      # build/linux/x64/release/bundle/kocum
   eşleşir, yalnızca Linux bilgisayar alır; yalnızca yerel ağ adresleri
   (100.64/10 ve 127.0.0.1 hayır); tarayıcı başlıkları ve alan adıyla Host
   reddedilir; yalnızca `questions|solutions|notes/yyyy/mm/ad.uzantı`
-  fotoğrafları yazılır. Okuma/listeleme isteği yoktur.
+  fotoğrafları yazılır. Genel okuma/listeleme isteği yoktur; yalnızca iki dar istisna
+  var: `fotograf-al` (bilgisayarın defterinde geçen, kurala uyan tek fotoğraf) ve
+  imzalı, gövdesiz "bu PDF özeti var mı?" sorusu (tek özet, imza şart).
 - Merkez: bilgisayar telefon ve tablet arasında aracıdır (doğrudan telefon↔tablet
   eşleşme YOK). Tek eşleşme yuvası: cihazlar sırayla gezer; bilgisayar aldığı
   satırları özgün kimlikle öbürüne de verir (`pendingFor(relayExcept:)`).

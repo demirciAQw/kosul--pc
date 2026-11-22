@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:drift/drift.dart' show Value, driftRuntimeOptions;
+import 'package:drift/drift.dart' show Value, Variable, driftRuntimeOptions;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kocum/core/database/app_database.dart';
@@ -11,6 +11,7 @@ import 'package:kocum/desktop/sync/data/sync_server.dart';
 import 'package:kocum/features/sync/data/ledger_exchange.dart';
 import 'package:kocum/features/sync/data/ledger_sync.dart';
 import 'package:kocum/features/sync/data/sync_client.dart';
+import 'package:kocum/features/sync/domain/ledger_protocol.dart';
 
 /// Bilgisayar MERKEZDİR: telefon ve tablet birbiriyle eşleşmez, sırayla (en
 /// fazla bir eşleşme) bilgisayarla alışveriş eder. Üç gerçek veritabanı, gerçek
@@ -260,5 +261,122 @@ void main() {
     }
     final conflicts = [...await phone.db.select(phone.db.cakismalar).get(), ...await tablet.db.select(tablet.db.cakismalar).get()];
     expect(conflicts.where((c) => c.kaybeden?.contains('telefon') ?? false), isNotEmpty);
+  });
+
+  LedgerExchange exchangeOf() => LedgerExchange(
+        ledger: pc.ledger,
+        schemaVersion: pc.db.schemaVersion,
+        mediaFile: (p) => File('${pcMedia.path}/$p'),
+      );
+
+  test('yankı süzgeci: bilgisayarın yanıtında karşı cihazın kendi satırları yoktur, öbür cihazınkiler vardır', () async {
+    await pdfDoc(phone.db, sha1, 'telefon belgesi');
+    await pdfDoc(tablet.db, sha2, 'tablet belgesi');
+    await visit(phone);
+    await visit(tablet);
+    final phoneDevice = await phone.ledger.deviceId();
+    final tabletDevice = await tablet.ledger.deviceId();
+    expect(phoneDevice, isNot(tabletDevice));
+    Future<List<String>> devicesFor(String requester) async {
+      final r = await exchangeOf().handle(
+          LedgerRequest(schema: pc.db.schemaVersion, device: requester, received: 0, changes: const [], lastSeq: 0));
+      return [for (final c in r.changes) c.device];
+    }
+
+    final toPhone = await devicesFor(phoneDevice);
+    expect(toPhone, isNotEmpty);
+    expect(toPhone, isNot(contains(phoneDevice)), reason: 'telefona kendi satırı dönmez');
+    expect(toPhone, contains(tabletDevice));
+    final toTablet = await devicesFor(tabletDevice);
+    expect(toTablet, isNot(contains(tabletDevice)));
+    expect(toTablet, contains(phoneDevice));
+  });
+
+  test('çakışmayı kaybeden satır öbür cihaza aktarılmaz (kaynak senkron); kazanan aktarılır', () async {
+    for (final d in [phone, tablet, pc]) {
+      await d.ledger.setTestClock(1_000_000);
+    }
+    await pc.db.into(pc.db.pdfDocuments).insert(PdfDocumentsCompanion.insert(
+        id: sha1, sha256: sha1, title: 'ilk', pageCount: 3, fileName: 'a.pdf', createdAt: t0, updatedAt: t0));
+    await visit(phone);
+    await visit(tablet);
+    await phone.ledger.setTestClock(3_000_000);
+    await (phone.db.update(phone.db.pdfDocuments)..where((d) => d.id.equals(sha1))).write(const PdfDocumentsCompanion(title: Value('telefon')));
+    await tablet.ledger.setTestClock(2_000_000); // tabletin saati eski: kaybeder
+    await (tablet.db.update(tablet.db.pdfDocuments)..where((d) => d.id.equals(sha1))).write(const PdfDocumentsCompanion(title: Value('tablet')));
+    await visit(phone);
+    await visit(tablet); // bilgisayarda çakışma: tablet kaybeder
+    final lost = await pc.db.customSelect('SELECT kaynak FROM degisiklikler WHERE yeni LIKE \'%"tablet"%\' AND cihaz_id <> ?',
+        variables: [Variable<String>(await pc.ledger.deviceId())]).get();
+    expect(lost.map((r) => r.read<String>('kaynak')), ['senkron']);
+    final phoneConflictsBefore = (await phone.db.select(phone.db.cakismalar).get()).length;
+    final r = await visit(phone);
+    expect(r.received, 0, reason: 'kaybeden tablet satırı telefona gitmedi');
+    expect((await phone.db.select(phone.db.cakismalar).get()).length, phoneConflictsBefore);
+    await visit(tablet);
+    for (final d in [phone, tablet, pc]) {
+      expect((await d.db.select(d.db.pdfDocuments).get()).single.title, 'telefon', reason: d.name);
+    }
+  });
+
+  test('uygulanamayan (bilinmeyen tablo) satır deftere işlenir ama aktarılmaz', () async {
+    const clock = '0000001000000-0000-tablet00002bb';
+    final bad = LedgerChange(
+        id: 'bozuk-1', device: 'tablet00002bb', source: 'telefon', table: 'yok_tablo', rowId: 'x', op: 'ekle', clock: clock, neu: '{"id":"x"}');
+    final applied = await pc.ledger.applyRemote([bad]);
+    expect(applied.failed, 1);
+    final stored = await pc.db.customSelect("SELECT kaynak FROM degisiklikler WHERE id = 'bozuk-1'").getSingle();
+    expect(stored.read<String>('kaynak'), 'senkron');
+    final out = await pc.ledger.pendingFor(0, relayExcept: 'baska0000000');
+    expect(out.map((c) => c.id), isNot(contains('bozuk-1')));
+    // Tekrar gelirse kimlikten atlanır.
+    expect((await pc.ledger.applyRemote([bad])).duplicates, 1);
+  });
+
+  test('v9.10 ilk eşitlemesinde eski imleç bir kez sıfırlanır: kaçan tablet satırı gelir, ikinci eşitlemede yeniden sıfırlanmaz', () async {
+    await pdfDoc(tablet.db, sha2, 'tablet belgesi');
+    await visit(tablet);
+    // Eski sürüm simülasyonu: telefonun imleci bilgisayardaki tablet satırının ötesinde, işaret yok.
+    final beyond = (await pc.ledger.maxSeq()) + 5;
+    await phone.ledger.setIntState(LedgerService.keyReceivedSeq, beyond);
+    expect(await phone.ledger.intState(LedgerService.keyRelayReset), 0);
+    final first = await visit(phone);
+    expect(first.received, greaterThan(0));
+    expect((await phone.db.select(phone.db.pdfDocuments).get()).map((d) => d.id), contains(sha2));
+    expect(await phone.ledger.intState(LedgerService.keyRelayReset), 1);
+    // İşaret konduktan sonra imleç korunur.
+    await phone.ledger.setIntState(LedgerService.keyReceivedSeq, 100000);
+    await visit(phone);
+    expect(await phone.ledger.intState(LedgerService.keyReceivedSeq), 100000);
+  });
+
+  test('başka kurulumdan gelen veritabanında defter cihaz kimliği yenilenir; aynı kurulumda değişmez', () async {
+    final before = await phone.ledger.deviceId();
+    expect(await phone.ledger.bindToInstall('kurulum-A'), isFalse);
+    expect(await phone.ledger.deviceId(), before);
+    expect(await phone.ledger.bindToInstall('kurulum-A'), isFalse);
+    expect(await phone.ledger.deviceId(), before);
+    // Veritabanı kopyası başka kurulumda açıldı (yedekten geri yükleme): aynı kimlik çift olurdu.
+    expect(await phone.ledger.bindToInstall('kurulum-B'), isTrue);
+    final after = await phone.ledger.deviceId();
+    expect(after, isNot(before));
+    expect(await phone.ledger.bindToInstall('kurulum-B'), isFalse);
+    expect(await phone.ledger.deviceId(), after);
+  });
+
+  test('yedekten geri yüklenen cihazın kimliği çiftse öbür cihazın satırları süzülürdü; kimlik yenilenince gelir', () async {
+    await pdfDoc(tablet.db, sha2, 'tablet belgesi');
+    await visit(tablet);
+    // Telefon, tabletin veritabanı kopyasıyla kurulmuş gibi: aynı defter kimliği.
+    final tabletDevice = await tablet.ledger.deviceId();
+    await phone.db.customStatement('UPDATE _baglam SET cihaz_id = ? WHERE id = 1', [tabletDevice]);
+    await phone.ledger.bindToInstall('eski-kurulum');
+    final r = await exchangeOf().handle(LedgerRequest(
+        schema: pc.db.schemaVersion, device: await phone.ledger.deviceId(), received: 0, changes: const [], lastSeq: 0));
+    expect(r.changes, isEmpty, reason: 'çift kimlik: tablet satırları süzülüyor (sorun)');
+    expect(await phone.ledger.bindToInstall('yeni-kurulum'), isTrue);
+    final fixed = await exchangeOf().handle(LedgerRequest(
+        schema: pc.db.schemaVersion, device: await phone.ledger.deviceId(), received: 0, changes: const [], lastSeq: 0));
+    expect(fixed.changes, isNotEmpty);
   });
 }

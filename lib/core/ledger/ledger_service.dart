@@ -124,6 +124,14 @@ class LedgerService {
   static const keyReceivedSeq = 'alinan_sira'; // karşıdan aldığım son sıra
   static const keyStarted = 'defter_basladi';
 
+  /// v9.10: bilgisayar artık tablet satırlarını da aktarır; eski sürüm `uzak=1`
+  /// satırları atlayıp imleci ilerletmişti. İlk eşitlemede `alinan_sira` bir kez
+  /// sıfırlanır (tekrar gelen satırlar kimlikten atlanır). İşaret bir kez yazılır.
+  static const keyRelayReset = 'aktarma_imleci_sifirlandi';
+
+  /// Veritabanının hangi uygulama kurulumuna (`esitleme.json` kimliği) ait olduğu.
+  static const keyInstall = 'kurulum_kimligi';
+
   // ───────────── Kurulum ─────────────
 
   /// Bağlam satırını ve tetikleyicileri hazırlar; her açılışta çalışır.
@@ -138,6 +146,27 @@ class LedgerService {
       await _db.customStatement('UPDATE _baglam SET varsayilan = ?, kaynak = ? WHERE id = 1', [defaultSource, defaultSource]);
     }
     await installTriggers();
+  }
+
+  /// Bu veritabanını bir uygulama kurulumuna bağlar. Veritabanı başka bir
+  /// kurulumdan geldiyse (yedekten geri yükleme, kopya) defter cihaz kimliği
+  /// ÇİFT olabilir: bilgisayar `cihaz_id <> gönderen` ile süzdüğünden öbür
+  /// cihazın satırları sessizce atlanırdı. Bu yüzden kimlik yenilenir.
+  /// [installId] veritabanının DIŞINDA (ayrı dosyada) durmalıdır. Yenilendiyse true.
+  Future<bool> bindToInstall(String installId) async {
+    final rows = await _db.customSelect('SELECT value FROM esitleme_durum WHERE key = ?', variables: [Variable<String>(keyInstall)]).get();
+    final known = rows.isEmpty ? null : rows.first.read<String>('value');
+    var renewed = false;
+    if (known != null && known != installId) {
+      await _db.customStatement('UPDATE _baglam SET cihaz_id = ? WHERE id = 1', [_newDeviceId()]);
+      renewed = true;
+    }
+    if (known != installId) {
+      await _db.customStatement(
+          'INSERT INTO esitleme_durum (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+          [keyInstall, installId]);
+    }
+    return renewed;
   }
 
   static String _newDeviceId() {
@@ -235,7 +264,9 @@ class LedgerService {
   /// [relayExcept] (yalnızca bilgisayar, yani merkez): karşıdan gelen satırlar
   /// da, KARŞI cihazın kendi yazdıkları hariç, aktarılır. Böylece telefon ve
   /// tablet birbirini görmeden de bilgisayar üzerinden aynı satırlara yakınsar.
-  /// Kimlikler değişmediği için alan cihaz çift kayıt yapmaz.
+  /// Kimlikler değişmediği için alan cihaz çift kayıt yapmaz. Yalnızca
+  /// bilgisayarda UYGULANAN satırlar aktarılır: çakışmayı kaybeden ya da
+  /// uygulanamayan satır `kaynak = 'senkron'` ile işlenir (bkz. `_logRemote`) ve öbür cihaza gitmez (orada ayrı çakışma/ayrışma çıkmasın).
   Future<List<LedgerChange>> pendingFor(int afterSeq, {int limit = 300, String? relayExcept}) async => [
         for (final r in await _db.customSelect(
           relayExcept == null
@@ -377,11 +408,17 @@ class LedgerService {
     return r.isEmpty ? null : r.first.read<String>('saat');
   }
 
-  Future<void> _logRemote(LedgerChange c) => _db.customStatement(
+  /// Karşıdan gelen satırı deftere işler (kimlikten tekrar atlanır; `uzak = 1`).
+  /// [applied] false ise (çakışmayı kaybetti, uygulanamadı, bilinmeyen tablo)
+  /// `kaynak` 'senkron' yazılır: bu değer zaten "aktarılmaz" demektir
+  /// (`pendingFor`, `mentionsOwnPhoto` süzer). `uzak` sütunu Drift'te
+  /// `CHECK (uzak IN (0, 1))` olduğundan üçüncü bir değer yazılamaz (INSERT OR
+  /// IGNORE sessizce düşürürdü); şema değişmeden bu yol seçildi.
+  Future<void> _logRemote(LedgerChange c, {bool applied = true}) => _db.customStatement(
         'INSERT OR IGNORE INTO degisiklikler '
         '(id, cihaz_id, kaynak, oturum_id, tablo, satir_id, islem, eski, yeni, saat, uzak, geri_alinan) '
         'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)',
-        [c.id, c.device, c.source, c.session, c.table, c.rowId, c.op, c.old, c.neu, c.clock, c.undoes],
+        [c.id, c.device, applied ? c.source : 'senkron', c.session, c.table, c.rowId, c.op, c.old, c.neu, c.clock, c.undoes],
       );
 
   Future<void> _recordConflict({
@@ -433,7 +470,7 @@ class LedgerService {
     await _advanceClock(c.clock);
     if (_table(c.table) == null) {
       // Bilinmeyen tablo (daha yeni sürüm): kaydı tut, uygulama.
-      await _logRemote(c);
+      await _logRemote(c, applied: false);
       return const ApplyResult(failed: 1);
     }
     String? cur;
@@ -457,7 +494,7 @@ class LedgerService {
       } else {
         await _recordConflict(table: c.table, rowId: c.rowId, winner: cur, loser: c.neu, side: 'yerel', clock: c.clock);
       }
-      await _logRemote(c);
+      await _logRemote(c, applied: remoteWins);
       return const ApplyResult(conflicts: 1);
     } catch (_) {
       // Tek bir satır (ör. silinmiş bir ana kayda bağlı) tüm toplu bozmasın.
@@ -465,7 +502,7 @@ class LedgerService {
       try {
         await _recordConflict(table: c.table, rowId: c.rowId, winner: cur, loser: c.neu, side: 'uzak', clock: c.clock);
       } catch (_) {}
-      await _logRemote(c);
+      await _logRemote(c, applied: false);
       return const ApplyResult(failed: 1);
     }
   }

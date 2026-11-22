@@ -266,6 +266,37 @@ void main() {
       await expectLater(client.sendPdf(conn, PdfOffer(sha256Hex([9]), 1), f), throwsA(isA<SyncException>())); // özet tutmaz
     });
 
+    test('bilgisayarda varsa yerel dosya hiç özetlenmez (adın özeti güvenilir); yoksa tek okumayla özet doğrulanır', () async {
+      final body = bytesOf(2000);
+      final sha = sha256Hex(body);
+      await pdfRoot.create(recursive: true);
+      File('${pdfRoot.path}/$sha.pdf').writeAsBytesSync(body);
+      // Yerel dosya adla uyuşmuyor: özetlenseydi hata verirdi. Soru adla sorulur, dosya okunmaz.
+      final f = File('${phonePdfs.path}/$sha.pdf')..writeAsBytesSync([7, 7, 7]);
+      expect((await client.sendPdf(conn, PdfOffer(sha, body.length), f)).alreadyThere, isTrue);
+      // Bilgisayarda yok ve dosya adla uyuşmuyor: yollanmaz.
+      final other = bytesOf(2000, 9);
+      final sha2 = sha256Hex(other);
+      final g = File('${phonePdfs.path}/$sha2.pdf')..writeAsBytesSync(bytesOf(2000, 10));
+      await expectLater(client.sendPdf(conn, PdfOffer(sha2, other.length), g), throwsA(isA<SyncException>()));
+      expect(File('${pdfRoot.path}/$sha2.pdf').existsSync(), isFalse);
+    });
+
+    test('"zaten var" dalı büyük gövdeyi okumaz: 200 gelir, bağlantı kapanır, geçici dosya kalmaz', () async {
+      final body = bytesOf(5 * 1024 * 1024);
+      final sha = sha256Hex(body);
+      await pdfRoot.create(recursive: true);
+      final stored = File('${pdfRoot.path}/$sha.pdf')..writeAsBytesSync(body);
+      final r = await raw(signedHeaders('$sha.pdf', sha, 1), declared: body.length, body: body);
+      // Gövde okunmadığı için bağlantı yanıttan hemen sonra kapanır; gövde metni kapanışla yarışabilir, durum kodu yeter.
+      expect(r!.$1, 200);
+      expect(stored.readAsBytesSync(), body);
+      expect(leftovers(), isEmpty);
+      // Sunucu ayakta ve sonraki istek çalışır.
+      final again = await client.connect(computer, phoneId: phoneId);
+      expect((await client.missingPhotos(again, const [])).missing, isEmpty);
+    });
+
     test('yol enjeksiyonu: kalıba uymayan ad hiçbir şey yazmaz', () async {
       final body = bytesOf(100);
       final sha = sha256Hex(body);

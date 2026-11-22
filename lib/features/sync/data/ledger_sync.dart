@@ -62,6 +62,12 @@ class LedgerSync {
   final int maxRounds;
 
   Future<LedgerSyncResult> run(SyncConnection connection) async {
+    // Tek seferlik (v9.10): eski sürümden kalan alınan-sıra imleci bilgisayarın
+    // aktarmadığı tablet satırlarını atlamış olabilir; bir kez sıfırlanır.
+    if (await ledger.intState(LedgerService.keyRelayReset) == 0) {
+      await ledger.setIntState(LedgerService.keyReceivedSeq, 0);
+      await ledger.setIntState(LedgerService.keyRelayReset, 1);
+    }
     final device = await ledger.deviceId();
     var result = const LedgerSyncResult();
     for (var round = 1; round <= maxRounds; round++) {

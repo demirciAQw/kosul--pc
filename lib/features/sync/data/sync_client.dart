@@ -234,9 +234,10 @@ class SyncClient {
     await _signed(connection, 'PUT', SyncPaths.photo, file: file, mediaPath: entry.path);
   }
 
-  /// PDF'i bilgisayara yollar (`pdfs/<sha256>.pdf`). Dosyanın özeti önce yerelde
-  /// doğrulanır (bozuk dosya yollanmaz). Sonra bilgisayara "bu özet sende var mı?"
-  /// diye gövdesiz bir PUT ile sorulur; varsa gövde hiç yollanmaz. [onProgress]: (giden, toplam).
+  /// PDF'i bilgisayara yollar (`pdfs/<sha256>.pdf`). Önce bilgisayara "bu özet
+  /// sende var mı?" diye (ad = içe aktarmada hesaplanmış özet) gövdesiz bir PUT
+  /// ile sorulur; varsa dosya okunmaz bile. Yoksa dosya bir kez özetlenir ve
+  /// ada uymuyorsa (bozuk dosya) yollanmaz. [onProgress]: (giden, toplam).
   /// [cancel] iptal edilirse istek yarıda kesilir; bilgisayar `.part` dosyasını siler.
   Future<PdfSendResult> sendPdf(
     SyncConnection connection,
@@ -250,6 +251,12 @@ class SyncClient {
     if (offer.size <= 0 || offer.size > SyncLimits.pdf) {
       throw SyncException('PDF boyutu sınırı aşıyor (en çok ${formatPdfSize(SyncLimits.pdf)}).');
     }
+    // Önce tek özetlik soru (gövdesiz PUT, ad = özet): bilgisayarda varsa dosya
+    // hiç okunmaz ve özetlenmez, gövde hiç gitmez.
+    final probe = await _signed(connection, 'PUT', SyncPaths.pdf, body: const <int>[], mediaPath: name, verifyResponse: true);
+    if (probe is Map && probe['zatenVar'] == true) return const PdfSendResult(alreadyThere: true);
+    // Yüklenecek: dosya BİR kez özetlenir; ad ve boyutla uyuşmazsa (bozuk ya da
+    // değişmiş dosya) hiçbir şey yollanmaz.
     final hash = StreamingSha256();
     var n = 0;
     await for (final chunk in file.openRead()) {
@@ -260,9 +267,6 @@ class SyncClient {
     if (hash.close() != offer.sha256 || n != offer.size) {
       throw const SyncException('PDF dosyası değişmiş ya da bozuk; gönderilmedi.');
     }
-    // Önce tek özetlik soru (gövdesiz PUT): bilgisayarda varsa gövde hiç gitmez.
-    final probe = await _signed(connection, 'PUT', SyncPaths.pdf, body: const <int>[], mediaPath: name, verifyResponse: true);
-    if (probe is Map && probe['zatenVar'] == true) return const PdfSendResult(alreadyThere: true);
     if (cancel?.cancelled == true) throw const SyncCancelledException();
     final json = await _signed(
       connection,

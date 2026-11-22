@@ -167,6 +167,7 @@ class SendController extends Notifier<SendState> {
           final phoneId = await _store.phoneId();
           final (found, connection) = await _connect(client, computer, phoneId);
           computer = found;
+          await ledger.bindToInstall(phoneId); // başka kurulumdan gelen veritabanında defter kimliği yenilenir
           if (!firstDone) {
             final missing = await client.missingPhotos(connection, offered);
             final toSend = requestedFromOffer(offered, missing.missing);
