@@ -74,6 +74,26 @@ class InkStrokeRepository {
         return ids;
       });
 
+  /// Kement taşıma/boyutlandırma/döndürme: çizgilerin NOKTALARI yerinde yeniden yazılır
+  /// (aynı kimlik, aynı satır); tek işlem, ya hep ya hiç (yeniden deneme güvenli).
+  ///
+  /// Neden yerinde güncelleme (yumuşak sil + yeni satır değil): (1) her taşıma BLOB'u
+  /// ikiye katlamaz, defter şişmez; (2) kimlik değişmez, geri al kayıtları, soru bağı
+  /// ve defterin senkron satırı tutarlı kalır; (3) tek satırlık UPDATE atomiktir.
+  /// Bedel: özgün noktalar veritabanında kalmaz; geri al için bellekteki eylem
+  /// ([InkAction.before]) taşır. Eşleşmeyen kimlik varsa işlem geri sarılır (StateError).
+  Future<void> updatePoints(Map<String, List<StrokePoint>> byId) => _db.transaction(() async {
+        final now = _clock();
+        for (final e in byId.entries) {
+          final n = await (_db.update(_db.inkStrokes)..where((s) => s.id.equals(e.key))).write(InkStrokesCompanion(
+            points: Value(StrokeCodec.encode(e.value)),
+            pointCount: Value(e.value.length),
+            updatedAt: Value(now),
+          ));
+          if (n != 1) throw StateError('Çizgi yok: ${e.key}');
+        }
+      });
+
   /// Geri al / yinele: [deleteIds] yumuşak silinir, [restoreIds] geri gelir; tek işlem.
   Future<void> swap({required Iterable<String> deleteIds, required Iterable<String> restoreIds}) =>
       _db.transaction(() async {

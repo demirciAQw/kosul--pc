@@ -9,6 +9,7 @@ import '../../pdf/pdf_providers.dart';
 import '../data/ink_notebook_repository.dart';
 import '../domain/ink_notebook.dart';
 import '../notes_providers.dart';
+import 'ink_tags_panel.dart';
 import 'note_page_editor.dart';
 import 'note_tool_settings.dart';
 import 'page_template_painter.dart';
@@ -173,6 +174,12 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
                 key: const Key('note-page-indicator'),
               ),
             ),
+          IconButton(
+            key: const Key('note-tags-btn'),
+            tooltip: 'Etiketler ve kişiler',
+            icon: const Icon(Icons.sell_outlined),
+            onPressed: () => showInkTagsPanel(context, notebookId: widget.notebookId, pageId: current?.id),
+          ),
           IconButton(
             key: const Key('note-strip-toggle'),
             tooltip: 'Sayfalar',

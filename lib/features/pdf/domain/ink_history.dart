@@ -6,10 +6,12 @@
 /// Yeni eylem yinele yığınını boşaltır.
 library;
 
-enum InkActionKind { added, erased, replaced }
+import '../../ink/domain/ink_models.dart';
+
+enum InkActionKind { added, erased, replaced, updated }
 
 class InkAction {
-  const InkAction(this.kind, this.page, this.strokeIds, {this.addedIds = const []});
+  const InkAction(this.kind, this.page, this.strokeIds, {this.addedIds = const [], this.before, this.after});
   final InkActionKind kind;
   final int page;
 
@@ -18,6 +20,10 @@ class InkAction {
 
   /// Yalnız replaced (alan silgisi, hareket başına TEK kayıt): özgünlerin yerine eklenen parçalar.
   final List<String> addedIds;
+
+  /// Yalnız updated (kement taşıma/boyutlandırma): kimlik → noktalar, önce ve sonra.
+  /// Geri al [before]'u, yinele [after]'ı yazar.
+  final Map<String, List<InkPoint>>? before, after;
 }
 
 class InkHistory {

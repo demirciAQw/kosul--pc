@@ -19,6 +19,42 @@ Future<String?> showTagPicker(BuildContext context, WidgetRef ref, {Set<String> 
   );
 }
 
+/// "üst > alt" yolundaki etiketleri (yoksa) oluşturur; son etiketin kimliğini döner.
+/// Etiket seçici ve defter etiket paneli aynı yolu kullanır.
+Future<String?> ensureTagPath(WidgetRef ref, String raw) async {
+  final path = tagPath(raw);
+  if (path.isEmpty) return null;
+  final repo = ref.read(anlikRepositoryProvider);
+  final now = ref.read(clockProvider)();
+  final tags = await repo.allTags();
+  final byKey = {for (final t in tags) t.name: t};
+  String? parent;
+  String? last;
+  for (final label in path) {
+    var t = byKey[tagKey(label)];
+    if (t == null) {
+      t = Tag(id: ref.read(idGeneratorProvider).next(), name: tagKey(label), label: label, parentId: parent, createdAt: now);
+      await repo.saveTag(t);
+      byKey[t.name] = t;
+    }
+    parent = t.id;
+    last = t.id;
+  }
+  return last;
+}
+
+/// Adı ya da takma adı eşleşen kişiyi bulur; yoksa oluşturur. Kimliğini döner.
+Future<String?> ensurePerson(WidgetRef ref, String name) async {
+  final n = name.trim();
+  if (n.isEmpty) return null;
+  final repo = ref.read(anlikRepositoryProvider);
+  final found = matchPerson(n, await repo.allPeople());
+  if (found != null) return found.id;
+  final p = Person(id: ref.read(idGeneratorProvider).next(), name: n, createdAt: ref.read(clockProvider)());
+  await repo.savePerson(p);
+  return p.id;
+}
+
 class _TagPickerSheet extends ConsumerStatefulWidget {
   const _TagPickerSheet({required this.exclude});
   final Set<String> exclude;
@@ -37,25 +73,8 @@ class _TagPickerSheetState extends ConsumerState<_TagPickerSheet> {
   }
 
   Future<void> _create(String raw) async {
-    final path = tagPath(raw);
-    if (path.isEmpty) return;
-    final repo = ref.read(anlikRepositoryProvider);
-    final now = ref.read(clockProvider)();
-    final tags = await repo.allTags();
-    final byKey = {for (final t in tags) t.name: t};
-    String? parent;
-    String? last;
-    for (final label in path) {
-      var t = byKey[tagKey(label)];
-      if (t == null) {
-        t = Tag(id: ref.read(idGeneratorProvider).next(), name: tagKey(label), label: label, parentId: parent, createdAt: now);
-        await repo.saveTag(t);
-        byKey[t.name] = t;
-      }
-      parent = t.id;
-      last = t.id;
-    }
-    if (mounted) Navigator.pop(context, last);
+    final id = await ensureTagPath(ref, raw);
+    if (id != null && mounted) Navigator.pop(context, id);
   }
 
   @override
@@ -144,11 +163,8 @@ class _PersonPickerSheetState extends ConsumerState<_PersonPickerSheet> {
   }
 
   Future<void> _create() async {
-    final name = _ctrl.text.trim();
-    if (name.isEmpty) return;
-    final p = Person(id: ref.read(idGeneratorProvider).next(), name: name, createdAt: ref.read(clockProvider)());
-    await ref.read(anlikRepositoryProvider).savePerson(p);
-    if (mounted) Navigator.pop(context, p.id);
+    final id = await ensurePerson(ref, _ctrl.text);
+    if (id != null && mounted) Navigator.pop(context, id);
   }
 
   @override

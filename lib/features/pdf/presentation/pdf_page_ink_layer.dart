@@ -1,13 +1,16 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart' show listEquals;
+import 'package:flutter/foundation.dart' show ValueListenable, listEquals;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../../ink/data/ink_b_controller.dart';
 import '../../ink/data/ink_outline.dart';
+import '../../ink/domain/hold_detector.dart';
 import '../../ink/domain/ink_models.dart';
+import '../../ink/domain/lasso_gesture.dart';
+import '../../ink/domain/shape_recognizer.dart';
 import '../domain/page_coords.dart';
 import 'pdf_ink_session.dart';
 
@@ -61,6 +64,18 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
   final _sel = ValueNotifier<(Offset, Offset)?>(null);
   bool _selDrag = false;
 
+  // --- kement: yol (görünüm yerel noktaları) ve tutamak sürüklemesi ---
+  final _lassoPath = ValueNotifier<List<Offset>>(const []);
+  bool _lassoDraw = false;
+  LassoDrag? _lassoDrag;
+
+  // --- şekil düzeltme: basılı tutma ---
+  late HoldDetector _hold = HoldDetector(holdMs: widget.session.holdMs, tolerance: widget.session.holdTolerancePx);
+  Timer? _holdTimer;
+  final List<InkPoint> _raw = [];
+  final _shape = ValueNotifier<List<InkPoint>?>(null);
+  InkBrush? _shapeBrush;
+
   @override
   void initState() {
     super.initState();
@@ -91,9 +106,12 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
     }
     widget.session.removeListener(_syncBrush);
     widget.session.unregisterLayer(this, page: widget.page);
+    _holdTimer?.cancel();
     _sub?.cancel();
     _ctl.dispose();
     _sel.dispose();
+    _lassoPath.dispose();
+    _shape.dispose();
     super.dispose();
   }
 
@@ -132,6 +150,10 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
 
   void pointerDown(PointerDownEvent e) {
     if (_pointer != null || _box == null) return;
+    if (widget.session.lassoMode) {
+      _lassoDown(e);
+      return;
+    }
     _pointer = e.pointer;
     if (widget.session.selecting) {
       _selDrag = true;
@@ -144,22 +166,150 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
       _last!,
       eraser: e.kind == PointerDeviceKind.invertedStylus,
     );
+    _holdStart(e.kind == PointerDeviceKind.invertedStylus);
+  }
+
+  // --- şekil düzeltme ---
+
+  void _holdStop() {
+    _holdTimer?.cancel();
+    _holdTimer = null;
+  }
+
+  void _holdStart(bool inverted) {
+    _holdStop();
+    _raw.clear();
+    _shape.value = null;
+    final b = _ctl.liveBrush;
+    if (!widget.session.shapeSnap || inverted || b == null || b.tool == InkTool.eraser) return;
+    _hold = HoldDetector(holdMs: widget.session.holdMs, tolerance: widget.session.holdTolerancePx);
+    _raw.add(_last!);
+    _hold.start(_last!.x, _last!.y, 0);
+    _armHold();
+  }
+
+  void _armHold() {
+    _holdTimer?.cancel();
+    _holdTimer = Timer(Duration(milliseconds: widget.session.holdMs), _onHold);
+  }
+
+  /// Kalem [PdfInkSession.holdMs] hareketsiz kaldı: tanınırsa çizgi düzeltilmiş şekle döner
+  /// (önizleme; kalem kalkınca şekil kaydedilir), tanınmazsa serbest çizgi aynen sürer.
+  void _onHold() {
+    if (_pointer == null || _shape.value != null || _selDrag) return;
+    final brush = _ctl.liveBrush;
+    if (brush == null || !widget.session.shapeSnap || _raw.length < 5) return;
+    final r = recognizeShape(_raw);
+    if (r == null) return;
+    final t0 = _raw.first.tMs, t1 = _raw.last.tMs;
+    final n = r.points.length;
+    _shapeBrush = brush;
+    _shape.value = [
+      for (var i = 0; i < n; i++)
+        InkPoint(
+          x: r.points[i].x,
+          y: r.points[i].y,
+          pressure: r.points[i].pressure,
+          tilt: r.points[i].tilt,
+          tMs: n < 2 ? t0 : t0 + (t1 - t0) * i / (n - 1),
+        ),
+    ];
+    _ctl.cancelStroke(); // serbest çizgi önizlemeden kalkar; kaydedilmez
+  }
+
+  // --- kement ---
+
+  bool _isLassoPointer(int pointer) => pointer == _pointer && (_lassoDraw || _lassoDrag != null);
+
+  void _lassoDown(PointerDownEvent e) {
+    final s = widget.session, c = _coords;
+    if (c == null || s.selectionBusy) return;
+    _pointer = e.pointer;
+    final l = _box!.globalToLocal(e.position);
+    final o = c.toPage(l);
+    final b = s.hasSelection && s.selectionPage == widget.page ? s.selectionBoundsSaved : null;
+    if (b != null) {
+      final u = c.pageUnitsPerViewPx;
+      final h = hitLassoHandle(b, o.dx, o.dy, tol: 16 * u, rotateOffset: 32 * u);
+      if (h != null) {
+        _lassoDrag = LassoDrag(h, b, o.dx, o.dy);
+        return;
+      }
+    }
+    s.clearSelection();
+    _lassoDraw = true;
+    _lassoPath.value = [l];
+  }
+
+  void _lassoMove(PointerMoveEvent e) {
+    final c = _coords;
+    if (c == null) return;
+    final l = _box!.globalToLocal(e.position);
+    final d = _lassoDrag;
+    if (d != null) {
+      final o = c.toPage(l);
+      widget.session.previewSelection(d.apply(widget.session.selectionOriginals, o.dx, o.dy));
+    } else if (_lassoDraw) {
+      _lassoPath.value = [..._lassoPath.value, l];
+    }
+  }
+
+  void _lassoUp() {
+    final s = widget.session;
+    if (_lassoDrag != null) {
+      _lassoDrag = null;
+      unawaited(s.commitSelectionTransform());
+    } else if (_lassoDraw) {
+      _lassoDraw = false;
+      final c = _coords;
+      final path = _lassoPath.value;
+      _lassoPath.value = const [];
+      if (c == null) return;
+      s.selectLasso(widget.page, [
+        for (final v in path)
+          () {
+            final o = c.toPage(v);
+            return InkPoint(x: o.dx, y: o.dy);
+          }(),
+      ]);
+    }
   }
 
   void pointerMove(PointerMoveEvent e) {
     if (e.pointer != _pointer || _box == null) return;
+    if (_isLassoPointer(e.pointer)) {
+      _lassoMove(e);
+      return;
+    }
     if (_selDrag) {
       final s = _sel.value;
       if (s != null) _sel.value = (s.$1, _box!.globalToLocal(e.position));
       return;
     }
     _last = _point(e);
+    if (_shape.value != null) return; // şekil sabitlendi; kalem kalkana dek bekler
     _ctl.addPoint(_last!);
+    if (_holdTimer != null) {
+      _raw.add(_last!);
+      if (_hold.onPoint(_last!.x, _last!.y, 0)) _armHold();
+    }
   }
 
   void pointerUp(PointerUpEvent e) {
     if (e.pointer != _pointer) return;
     _pointer = null;
+    if (_lassoDraw || _lassoDrag != null) {
+      _lassoUp();
+      return;
+    }
+    _holdStop();
+    final shape = _shape.value;
+    if (shape != null) {
+      _shape.value = null;
+      final c = _coords, b = _shapeBrush;
+      if (c != null && b != null) widget.session.addStroke(widget.page, b, shape, c);
+      return;
+    }
     if (_selDrag) {
       _selDrag = false;
       final s = _sel.value;
@@ -176,6 +326,18 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
   void pointerCancel(PointerCancelEvent e) {
     if (e.pointer != _pointer) return;
     _pointer = null;
+    if (_lassoDrag != null) {
+      _lassoDrag = null;
+      widget.session.cancelSelectionTransform();
+      return;
+    }
+    if (_lassoDraw) {
+      _lassoDraw = false;
+      _lassoPath.value = const [];
+      return;
+    }
+    _holdStop();
+    _shape.value = null;
     if (_selDrag) {
       _selDrag = false;
       _sel.value = null;
@@ -281,6 +443,25 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
                   size: Size.infinite,
                 ),
               ),
+              // Şekil düzeltme önizlemesi.
+              ValueListenableBuilder<List<InkPoint>?>(
+                valueListenable: _shape,
+                builder: (_, pts, _) => pts == null || _shapeBrush == null
+                    ? const SizedBox.shrink()
+                    : RepaintBoundary(
+                        child: CustomPaint(
+                          key: const Key('ink-shape-preview'),
+                          painter: _ShapePainter(pts, _shapeBrush!),
+                          size: Size.infinite,
+                        ),
+                      ),
+              ),
+              // Kement yolu ve seçim çerçevesi (8 tutamak + döndürme).
+              CustomPaint(
+                key: const Key('ink-lasso-overlay'),
+                painter: _LassoPainter(widget.session, widget.page, coords, _lassoPath),
+                size: Size.infinite,
+              ),
               // "Soru seç" sürüklemesi: görünür çerçeve.
               ValueListenableBuilder<(Offset, Offset)?>(
                 valueListenable: _sel,
@@ -298,6 +479,73 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
       ),
     );
   }
+}
+
+class _ShapePainter extends CustomPainter {
+  _ShapePainter(this.points, this.brush);
+  final List<InkPoint> points;
+  final InkBrush brush;
+
+  @override
+  void paint(Canvas canvas, Size size) =>
+      canvas.drawPath(inkOutlinePath(points, brush, complete: true), inkPaintFor(brush));
+
+  @override
+  bool shouldRepaint(_ShapePainter old) => old.points != points || old.brush != brush;
+}
+
+/// Kement yolu (kesikli) ve seçimin sınır kutusu: 8 tutamak ve üstte döndürme tutamacı.
+class _LassoPainter extends CustomPainter {
+  _LassoPainter(this.session, this.page, this.coords, this.path)
+    : super(repaint: Listenable.merge([session.selectionTick, path]));
+  final PdfInkSession session;
+  final int page;
+  final PageCoords coords;
+  final ValueListenable<List<Offset>> path;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const blue = Color(0xFF1565C0);
+    final line = Paint()
+      ..color = blue
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5;
+    final pts = path.value;
+    if (pts.length > 1) {
+      final p = Path()..moveTo(pts.first.dx, pts.first.dy);
+      for (final o in pts.skip(1)) {
+        p.lineTo(o.dx, o.dy);
+      }
+      p.close();
+      canvas.drawPath(p, Paint()..color = blue.withAlpha(24));
+      canvas.drawPath(p, line);
+    }
+    if (!session.hasSelection || session.selectionPage != page) return;
+    final b = session.selectionBoundsNow;
+    if (b == null) return;
+    final tl = coords.toView(Offset(b.left, b.top)), br = coords.toView(Offset(b.right, b.bottom));
+    final r = Rect.fromPoints(tl, br);
+    canvas.drawRect(r, Paint()..color = blue.withAlpha(20));
+    canvas.drawRect(r, line);
+    final fill = Paint()..color = Colors.white;
+    for (final h in LassoHandle.values) {
+      if (h == LassoHandle.body || !isHandleUsable(b, h, tol: 16 * coords.pageUnitsPerViewPx)) continue;
+      final pos = handlePosition(b, h, rotateOffset: 32 * coords.pageUnitsPerViewPx);
+      final c = coords.toView(Offset(pos.x, pos.y));
+      if (h == LassoHandle.rotate) {
+        canvas.drawLine(coords.toView(Offset(b.centerX, b.top)), c, line);
+        canvas.drawCircle(c, 7, fill);
+        canvas.drawCircle(c, 7, line);
+      } else {
+        final hr = Rect.fromCenter(center: c, width: 10, height: 10);
+        canvas.drawRect(hr, fill);
+        canvas.drawRect(hr, line);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_LassoPainter old) => old.session != session || old.page != page || old.coords != coords;
 }
 
 class _SavedPainter extends CustomPainter {

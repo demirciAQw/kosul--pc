@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../../ink/domain/ink_models.dart';
+import '../../ink/domain/ink_object.dart';
 import '../../ink/domain/pen_profiles.dart';
 import '../../pdf/presentation/pdf_ink_session.dart';
 
@@ -9,6 +10,11 @@ import '../../pdf/presentation/pdf_ink_session.dart';
 class NoteToolSettings extends ChangeNotifier {
   PenKind _kind = PenKind.ballpoint;
   bool _eraser = false;
+  bool _lasso = false;
+  bool _shapeSnap = true;
+
+  /// Kement kopyası (sayfalar arası yapıştırma için ekran tutar).
+  List<InkObject> clipboard = const [];
   EraseMode _eraseMode = EraseMode.stroke;
   double _hardness = 0.5;
   final Map<PenKind, int> _color = {
@@ -26,6 +32,10 @@ class NoteToolSettings extends ChangeNotifier {
 
   PenKind get kind => _kind;
   bool get eraser => _eraser;
+  bool get lasso => _lasso;
+
+  /// Basılı tutunca şekil düzeltme (varsayılan açık).
+  bool get shapeSnap => _shapeSnap;
   EraseMode get eraseMode => _eraseMode;
   double get hardness => _hardness;
   int get color => _color[_kind]!;
@@ -39,17 +49,31 @@ class NoteToolSettings extends ChangeNotifier {
   void setKind(PenKind k) {
     _kind = k;
     _eraser = false;
+    _lasso = false;
     notifyListeners();
   }
 
   void setEraser(bool on) {
     _eraser = on;
+    if (on) _lasso = false;
+    notifyListeners();
+  }
+
+  void setLasso(bool on) {
+    _lasso = on;
+    if (on) _eraser = false;
+    notifyListeners();
+  }
+
+  void setShapeSnap(bool on) {
+    _shapeSnap = on;
     notifyListeners();
   }
 
   void setEraseMode(EraseMode m) {
     _eraseMode = m;
     _eraser = true;
+    _lasso = false;
     notifyListeners();
   }
 
@@ -80,6 +104,8 @@ class NoteToolSettings extends ChangeNotifier {
   void apply(PdfInkSession s) {
     s.setHardness(_hardness);
     s.setEraseMode(_eraseMode);
+    s.setShapeSnap(_shapeSnap);
+    s.setLassoMode(_lasso);
     s.setBrush(brush);
   }
 }

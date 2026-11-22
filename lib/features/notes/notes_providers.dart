@@ -39,3 +39,7 @@ final inkNotebooksProvider = StreamProvider.autoDispose<List<InkNotebookRecord>>
 
 final inkNotebookPagesProvider = StreamProvider.autoDispose.family<List<InkNotePageRecord>, String>(
     (ref, notebookId) => ref.watch(inkNotebookRepositoryProvider).watchPages(notebookId));
+
+/// Defter → etiketler (kendi + sayfa etiketleri); liste çipleri ve süzme için.
+final inkNotebookTagMapProvider = StreamProvider.autoDispose<Map<String, Set<String>>>(
+    (ref) => ref.watch(inkNotebookRepositoryProvider).watchNotebookTagMap());

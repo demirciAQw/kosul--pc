@@ -125,3 +125,11 @@ Dal: `tablet-1`. Her adım: saat, sonuç, ölçüm, "Ahmet elle denesin".
 - Defterler → yeni defter → çizgili/kareli sayfa; dört kalem türü; sertlik ayarı baskıya göre kalınlığı değiştiriyor mu?
 - Çizgi silgisi / alan silgisi / geri al / yinele; uygulamayı kapat-aç: çizgiler yerinde mi?
 - Sayfa şeridi: sayfa ekle, çoğalt, sırala.
+
+## T6b2: Kement, şekil düzeltme, etiket/kişi (v9.9 taslak)
+- Kement (araç çubuğu `note-lasso`): kalemle kapalı yol → `selectByLasso`; 8 tutamak + döndürme. Köşe orantılı, kenar tek eksen, gövde taşır; ince kutuda (tek satır yazı) kenar tutamacı kapalı (gövdeyi örtmesin). Sil/kopyala/yapıştır (yapıştırma +24 birim kayık, seçili gelir).
+- Karar: taşıma/boyutlandırma çizgileri YERİNDE günceller (`InkStrokeRepository.updatePoints`, tek işlem, aynı kimlik). Yumuşak sil + yeni satır yerine: BLOB her taşımada ikiye katlanmaz, kimlik/geri al/senkron satırı sabit kalır. Bedel: özgün noktalar yalnız bellekteki geri al kaydında (`InkAction.before`); uygulama kapanınca geri al zaten sıfırlanıyor. Hatada üç yeniden denemeden sonra ekran kayıtlı konuma döner.
+- Şekil düzeltme: kalem 600 ms (`shapeHoldMs`) ve 6 px (`shapeHoldTolerancePx`) içinde hareketsiz → `recognizeShape`; tanınırsa önizleme düz şekil, kalem kalkınca KAYDEDİLİR; tanınmazsa serbest çizgi aynen. Geri al: özgün serbest çizgi hiç kaydedilmediği için geri al düzeltilmiş şekli tamamen kaldırır (serbest çizgiye dönmez). Araç çubuğunda "Şekil" anahtarı (varsayılan açık).
+- Etiket/kişi: defter ekranında etiket simgesi → "Etiketler ve kişiler" paneli (defter + açık sayfa). Anlık'ın TagBar/PersonBar/seçicileri ve `parseTagMentions`/`matchPerson` kullanılır; yazarak (`((his > tiksinti)) @Ayşe`) eklemede yeni ad onay ister. Defter listesinde etiket çipleri ve etikete göre süzme (alt etiketler dahil, sayfa etiketi de sayılır).
+- Araç çubuğunda geri al/yinele/şablon artık sağa sabit (araçlar kayar).
+- Doğrulanmadı: gerçek kalemle his, 600 ms basılı tutma süresinin tablette rahat olup olmadığı, tutamak boyutu (16 px) parmakla/kalemle isabeti.

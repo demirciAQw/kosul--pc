@@ -3,7 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../app/routes.dart';
+import '../../anlik/anlik_providers.dart';
+import '../../anlik/domain/anlik.dart';
+import '../../anlik/domain/tag_tree.dart';
 import '../domain/ink_notebook.dart';
+import '../domain/notebook_filter.dart';
 import '../notes_providers.dart';
 
 /// Defter kapağı renkleri (ARGB).
@@ -33,6 +37,7 @@ class NotebooksScreen extends ConsumerStatefulWidget {
 
 class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
   bool _showDeleted = false;
+  String? _tagFilter;
 
   void _open(InkNotebookRecord n) {
     final f = widget.onOpen;
@@ -102,6 +107,30 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
     await ref.read(inkNotebookRepositoryProvider).reorderNotebooks(ids);
   }
 
+  Widget _subtitle(InkNotebookRecord n, Set<String> tagIds, List<Tag> allTags) {
+    final mine = [for (final t in allTags) if (tagIds.contains(t.id)) t];
+    if (mine.isEmpty) return Text('${n.pageCount} sayfa');
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('${n.pageCount} sayfa'),
+        Wrap(
+          key: Key('notebook-tags-${n.id}'),
+          spacing: 4,
+          children: [
+            for (final t in mine)
+              Chip(
+                key: Key('notebook-chip-${n.id}-${t.id}'),
+                visualDensity: VisualDensity.compact,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                label: Text(tagPathLabel(allTags, t.id), style: Theme.of(context).textTheme.labelSmall),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
   static String _name(InkNotebookRecord n) => n.title.isEmpty ? 'Adsız defter' : n.title;
 
   @override
@@ -111,7 +140,12 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => Center(child: Text('Defterler okunamadı: $e')),
       data: (list) {
-        final alive = [for (final n in list) if (!n.deleted) n];
+        final tagsOf = ref.watch(inkNotebookTagMapProvider).value ?? const <String, Set<String>>{};
+        final allTags = ref.watch(tagsProvider).value ?? const <Tag>[];
+        final aliveAll = [for (final n in list) if (!n.deleted) n];
+        final usedTagIds = {for (final n in aliveAll) ...(tagsOf[n.id] ?? const <String>{})};
+        final filtering = _tagFilter != null && allTags.any((t) => t.id == _tagFilter);
+        final alive = filterNotebooksByTag(aliveAll, tagsOf, allTags, filtering ? _tagFilter : null);
         final deleted = [for (final n in list) if (n.deleted) n];
         return ListView(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 88),
@@ -126,10 +160,31 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
                   label: const Text('Yeni defter'),
                 ),
               ),
+            if (usedTagIds.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Wrap(
+                  key: const Key('notebook-tag-filter'),
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: [
+                    for (final t in allTags.where((t) => usedTagIds.contains(t.id)))
+                      FilterChip(
+                        key: Key('notebook-filter-${t.id}'),
+                        avatar: const Icon(Icons.sell_outlined, size: 16),
+                        label: Text(tagPathLabel(allTags, t.id)),
+                        selected: _tagFilter == t.id,
+                        onSelected: (on) => setState(() => _tagFilter = on ? t.id : null),
+                      ),
+                  ],
+                ),
+              ),
             if (alive.isEmpty)
-              const Padding(
-                padding: EdgeInsets.all(32),
-                child: Center(child: Text('Henüz defter yok. "Yeni defter" ile başla.')),
+              Padding(
+                padding: const EdgeInsets.all(32),
+                child: Center(
+                  child: Text(filtering ? 'Bu etikette defter yok.' : 'Henüz defter yok. "Yeni defter" ile başla.'),
+                ),
               ),
             ReorderableListView.builder(
               key: const Key('notebook-list'),
@@ -146,7 +201,7 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
                     key: Key('notebook-${n.id}'),
                     leading: _Cover(n.coverColor),
                     title: Text(_name(n)),
-                    subtitle: Text('${n.pageCount} sayfa'),
+                    subtitle: _subtitle(n, tagsOf[n.id] ?? const {}, allTags),
                     onTap: () => _open(n),
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,

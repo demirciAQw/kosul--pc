@@ -371,6 +371,24 @@ class InkNotebookRepository {
   Future<Set<String>> pagePersonIds(String pageId) async =>
       {for (final r in await (_db.select(_db.inkPagePeople)..where((t) => t.pageId.equals(pageId))).get()) r.personId};
 
+  /// Defter kimliği → etiket kimlikleri (defterin kendi etiketleri + sayfa etiketleri; silinmemiş
+  /// defter ve sayfalar). Etiket çipleri ve etikete göre süzme bunu kullanır.
+  Stream<Map<String, Set<String>>> watchNotebookTagMap() => _db
+      .customSelect(
+        'SELECT nt.notebook_id AS nb, nt.tag_id AS tag FROM ink_notebook_tags nt '
+        'UNION SELECT p.notebook_id, pt.tag_id FROM ink_page_tags pt '
+        'JOIN ink_note_pages p ON p.id = pt.page_id WHERE p.deleted = 0',
+        readsFrom: {_db.inkNotebookTags, _db.inkPageTags, _db.inkNotePages},
+      )
+      .watch()
+      .map((rows) {
+        final out = <String, Set<String>>{};
+        for (final r in rows) {
+          (out[r.read<String>('nb')] ??= {}).add(r.read<String>('tag'));
+        }
+        return out;
+      });
+
   /// Etikete bağlı silinmemiş defterler (defter ya da sayfası bağlıysa).
   Future<Set<String>> notebookIdsWithTag(String tagId) async {
     final rows = await _db.customSelect(
