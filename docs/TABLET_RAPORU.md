@@ -133,3 +133,34 @@ Dal: `tablet-1`. Her adım: saat, sonuç, ölçüm, "Ahmet elle denesin".
 - Etiket/kişi: defter ekranında etiket simgesi → "Etiketler ve kişiler" paneli (defter + açık sayfa). Anlık'ın TagBar/PersonBar/seçicileri ve `parseTagMentions`/`matchPerson` kullanılır; yazarak (`((his > tiksinti)) @Ayşe`) eklemede yeni ad onay ister. Defter listesinde etiket çipleri ve etikete göre süzme (alt etiketler dahil, sayfa etiketi de sayılır).
 - Araç çubuğunda geri al/yinele/şablon artık sağa sabit (araçlar kayar).
 - Doğrulanmadı: gerçek kalemle his, 600 ms basılı tutma süresinin tablette rahat olup olmadığı, tutamak boyutu (16 px) parmakla/kalemle isabeti.
+
+## T7: Senkron ve sade arayüz (v9.10 – v9.10.3)
+**Senkron (T7a).** Tablet bir Android cihaz; telefonla aynı yoldan bilgisayarla eşleşir. Telefon↔tablet doğrudan eşleşme YOK, bilgisayar merkez. Keşfedilen hata: bilgisayar yalnız kendi yazdığı satırları veriyordu, telefondan aldığını tablete aktarmıyordu (yakınsama yoktu). Düzeltildi (`relayExcept`); 3 gerçek veritabanı + gerçek sunucu testiyle üç cihaz yakınsıyor. Eski sürümden kalan imleç boşluğu için ilk eşitlemede imleç bir kez sıfırlanır.
+- PDF dosyası: `PUT /kocum/v1/pdf` (`<sha256>.pdf`), imzalı, sha256 iki uçta, 300 MB sınır, `.part` + atomik ad, symlink reddi. İsteğe bağlı, varsayılan KAPALI (eşitleme ekranında anahtar). "Bu özet var mı?" imzalı, adla sorulur; var olan dosya hiç okunmaz. Bilgisayar→telefon yönü yapılmadı (okuma ucu gerekir; "okuma yok" kuralı korundu).
+- Bilinen sınırlar: tek eşleşme yuvası var, telefon ve tablet için her geçişte eşleşmeyi kaldırıp kod girmek gerekir; ilk tam yedekle gelen eski veri deftere girmediği için sonradan eşleşen cihaza gitmez; aynı `esitleme.json` ile iki cihaz kurmak çift kimlik verir. Gerçek Wi-Fi'de denenmedi (hepsi 127.0.0.1).
+
+**Arayüz (T7b).** `isTabletLayout` (Android, kısa kenar ≥ 600 dp); tablette sol ray (Kitaplık, Defterler, Notlar, Soru defteri, Daha fazla, Ayarlar), telefonda alt çubuk aynen. Araç çubukları tek satır (dar tabletde "…"), odak modu (ray + sistem çubukları gizli). İnceleme düzeltmeleri: telefon↔tablet geçişinde State korunur, geri tuşu Kitaplık/Defterler'den ana sayfaya döner, odak sızıntısı kapandı.
+
+## ÖZET (22.11.2026)
+Sürümler v9.0 → v9.10.3, 8 şema artışı (14 → 19 + question_cards/ink_strokes sütunları = şema 19), tüm testler yeşil (752), debug ve release (R8) APK derlendi, Linux debug derlendi. Her adım bağımsız `inceleyici`'den geçti; bulunan veri kaybı yolları düzeltildi (alan silgisi, kement ekran/DB ayrışması, defter BLOB'u, kart silme).
+- Release APK 78,9 MB (önceki release 66,0 MB): +12,9 MB. Ink (`libink.so` ≈ 1,3 MB/ABI) + PDFium (`libpdfium.so` 6,6 MB, arm64) ve geçişli paketler.
+- **Yapılamayan: tablet ölçümleri.** `adb devices` PADH10005831 için hep `unauthorized` kaldı. Hiçbir şey gerçek kalemle/gerçek tablette denenmedi: kalem gecikmesi, avuç, `radiusMajor` eşiği, basılı tutma süresi, 2560×1600 görünüm, uzun PDF belleği.
+- T1 seçimi: ölçüm olmadığı için Android'de A (yerel Ink), diğer platformlarda B. Ama okuyucu ve defter şimdilik B (saf Flutter) kullanıyor: A'da parmakla kaydırma/yakınlaştırma yok. A/B kararı elle karşılaştırmaya bağlı.
+
+### Ahmet için sıralı yapılacaklar
+1. Tablette "USB hata ayıklama" iznini onayla (`adb devices` → `device`).
+2. `flutter build apk --debug` → `adb install -r build/app/outputs/flutter-apk/app-debug.apk` ("Koçum (deneme)", gerçek Koçum'dan ayrı).
+3. Ayarlar → Araçlar → **Kalem denemesi**: A ve B'yi kalemle karşılaştır; `adb logcat -s KocumInk` çıktısını al (A: giris->vsync, B: giris->vsync ve giris->raster).
+4. **PDF'ler**: bir YKS PDF'i içe aktar; yaz, kaydır, yakınlaştır, avucunu koy; "Soru seç" ile bir soruyu çerçevele (Yanlış), Defter'de kart, "Çöz", "Yeniden çöz", eski çözümü saydam göster.
+5. 300+ sayfa PDF: akıcılık ve bellek (`adb shell dumpsys meminfo com.kocum.kocum.gece`).
+6. **Defterler**: dört kalem, sertlik, silgi (çizgi/alan), kement, şekil düzeltme (çizip basılı tut), etiket/kişi bağla; kapat-aç, çizgiler yerinde mi.
+7. Eşitleme: tableti bilgisayarla eşle, PDF gönderme anahtarını aç, bilgisayarda `pdfs/` klasörüne bak; sonra telefonu eşle, tablet verisi telefona (bilgisayar üzerinden) geliyor mu.
+8. Şekil/basılı tutma eşikleri (600 ms, 6 px), kement tutamacı (16 px) rahat mı? Rahat değilse söyle, sabitler tek yerde.
+
+### Açık işler (bu turda yapılmadı)
+- Telefon↔tablet aynı anda eşleşme (tek yuva); bilgisayar→tablet PDF yönü; telefondaki eski verinin tablete taşınması.
+- Çizgiler için defter boyutu: BLOB hex ile ~4x yer tutar (eski+yeni), budama yok.
+- Ink A'nın okuyucu/defterde kullanımı (parmak kaydırma sorunu çözülünce).
+- WebP önizleme Android'de üretiliyor ama cihazda doğrulanmadı; ML Kit yolu gerçek cihazda denenmedi.
+- Soru türü (Şekilli, Hesap…) kartta ayrı alan değil, OcrRecord'dan türetiliyor.
+- İki cihaz çevrimdışı "Yeniden çöz" derse aynı deneme numarası karışır (veri kaybı yok).
