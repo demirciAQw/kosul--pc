@@ -1,3 +1,4 @@
+import 'core/pen_diag_store.dart';
 import 'dart:async';
 
 import 'package:drift_flutter/drift_flutter.dart';
@@ -40,6 +41,7 @@ Future<void> main() async {
   final dbReady = database.customSelect('SELECT 1').get().then((_) => trace.mark('db-hazir'));
   final media = await LocalMediaStorage.open();
   await dbReady;
+  unawaited(loadPenDiag(database)); // kalem giriş tanısı (kapalı varsayılan)
   final chronometer = SessionChronometer();
   final reminders = ReminderService();
 

@@ -208,7 +208,7 @@ void main() {
     final names = {for (final r in await d.customSelect("SELECT name FROM sqlite_master WHERE type = 'table'").get()) r.read<String>('name')};
     expect(names, contains('pdf_page_layers'));
     expect((await d.select(d.anlikNotes).getSingle()).body, 'eski not');
-    expect((await d.customSelect('PRAGMA user_version').getSingle()).read<int>('user_version'), 22);
+    expect((await d.customSelect('PRAGMA user_version').getSingle()).read<int>('user_version'), 23);
     expect(await d.customSelect("SELECT name FROM sqlite_master WHERE name = 'ix_pdf_layer_doc'").get(), hasLength(1));
     final r2 = PdfLayersRepository(d);
     await r2.add(documentId: _doc, page: 0, kind: PdfLayerKind.watermark, params: wm.toJson());

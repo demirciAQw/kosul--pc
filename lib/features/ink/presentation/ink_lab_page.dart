@@ -53,6 +53,12 @@ class _InkLabPageState extends State<InkLabPage> {
     _b.setBrush(b);
   }
 
+  void _sendTransformToA(Matrix4 m) => _a.setTransform(
+    scale: m.getMaxScaleOnAxis(),
+    dx: m.storage[12],
+    dy: m.storage[13],
+  );
+
   void _setStylusOnly(bool v) {
     setState(() => _stylusOnly = v);
     _a.setInputMode(stylusOnly: v);
@@ -173,8 +179,13 @@ class _InkLabPageState extends State<InkLabPage> {
             child: ColoredBox(
               color: Colors.white,
               child: _useA
-                  // A: yerel görünüm; yakınlaştırma yok (dokunuşları yerel alır).
-                  ? InkSurfaceAView(controller: _a)
+                  // A: yerel görünüm sabit kalır; parmak kaydırma/yakınlaştırmayı Flutter
+                  // yapar, matrisi yerele iletir (çizgiler dünya koordinatında, vektör kalır).
+                  ? InkViewport(
+                      transformChild: false,
+                      onMatrixChanged: _sendTransformToA,
+                      child: InkSurfaceAView(controller: _a),
+                    )
                   : InkViewport(
                       drawingActive: () => _b.liveStrokeId != null,
                       child: InkSurfaceBView(controller: _b),

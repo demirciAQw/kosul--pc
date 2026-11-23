@@ -1,3 +1,5 @@
+import '../../../core/pen_diag.dart';
+import '../../../core/pen_diag_store.dart';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -370,6 +372,8 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen> {
                   () => context.push(AppRoutes.settings),
                 ),
               ),
+              const _Section('Tanı'),
+              const Card(child: _PenDiagTile()),
               if (log.isNotEmpty) ...[
                 const _Section('Claude paket geçmişi'),
                 Card(
@@ -407,5 +411,30 @@ class _Section extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(4, 18, 4, 6),
         child: Text(text,
             style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Theme.of(context).colorScheme.primary)),
+      );
+}
+
+
+/// "Kalem giriş tanısı": açıkken işaretçi olayları günlüğe yazılır
+/// (`adb logcat -s flutter | grep KocumPen`). Kapalı varsayılan.
+class _PenDiagTile extends ConsumerStatefulWidget {
+  const _PenDiagTile();
+
+  @override
+  ConsumerState<_PenDiagTile> createState() => _PenDiagTileState();
+}
+
+class _PenDiagTileState extends ConsumerState<_PenDiagTile> {
+  @override
+  Widget build(BuildContext context) => SwitchListTile(
+        key: const Key('pen-diag-switch'),
+        secondary: const Icon(Icons.edit_note_rounded),
+        title: const Text('Kalem giriş tanısı'),
+        subtitle: const Text('Kalem ve parmak olaylarını günlüğe yazar (avuç/kalem takılma incelemesi). Kapalıyken hiçbir şey yapmaz.'),
+        value: PenDiag.enabled,
+        onChanged: (v) async {
+          await savePenDiag(ref.read(appDatabaseProvider), v);
+          if (mounted) setState(() {});
+        },
       );
 }

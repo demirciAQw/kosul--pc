@@ -3,8 +3,14 @@ import 'package:flutter/material.dart';
 
 import '../../ink/data/ink_surface_b.dart' show inkPointerDraws;
 import '../../../app/platform.dart';
+import '../../../core/pen_diag.dart';
+import '../domain/palm_rejector.dart';
 import 'pdf_ink_session.dart';
 import 'pdf_page_ink_layer.dart';
+
+// Avuç koruması: boyut + MESAFE. Kalem aşağıdayken tüm dokunmalar yutulur;
+// havadayken yalnız kalem konumuna [PdfInkSession.palmNearDistance] içindeki
+// dokunma yutulur (görünüm kilidi yok), uzak parmak ve iki parmak zum geçer.
 
 /// Bu yarıçaptan (`PointerEvent.radiusMajor`) büyük dokunuş avuçtur: görünüme
 /// gitmez, yutulur. Casper PAD H10'da ölçüm: parmak ~75-143 (birimi cihaz
@@ -12,7 +18,7 @@ import 'pdf_page_ink_layer.dart';
 /// (260). Asıl avuç koruması boyut değil KALEM YAKINLIĞIDIR (havada ya da
 /// çizerken her temas yutulur); boyut yalnız çok büyük temaslar içindir.
 /// Gerçek avuç boyutu ölçülünce ayarlanır. Cihaz bildirmezse 0 gelir (işlemez).
-const double palmRadiusMajor = 260;
+const double palmRadiusMajor = palmBigRadius;
 
 /// Görünümü (PDF kaydırıcıyı) saran kalem girişi.
 ///
@@ -23,8 +29,8 @@ const double palmRadiusMajor = 260;
 ///
 /// Avuç kalemden ÖNCE değerse görünüm onu zaten izliyordur: bunu iki katman
 /// önler. (1) Büyük temas (`radiusMajor`) baştan yutulur. (2) Kalem bir sayfanın
-/// üstüne yaklaşınca (havada) ya da çizerken [PdfInkSession.viewerLocked]
-/// açılır; okuyucu görünümün kaydırma/yakınlaştırmasını kapatır.
+/// çizerken [PdfInkSession.viewerLocked] açılır (havadayken kilit yok; yakın
+/// temas tek tek yutulur).
 ///
 /// Kalem sayfalar ARASI boşluktayken (sayfa dışı) bilinçli olarak arenayı
 /// ALMAZ ve çizmez: kalem/parmak görünümü kaydırır; kilit de açıktır.
@@ -48,11 +54,42 @@ class _PdfInkInputState extends State<PdfInkInput> {
   /// olaylar ona gider; `containsGlobal` yalnızca başlangıçta bakar).
   final Map<int, PdfPageInkLayerState> _routes = {};
 
+  /// Tanı günlüğü kararı (yalnız [PenDiag.enabled] iken çağrılır).
+  String _decision(PointerEvent e) {
+    final s = widget.session;
+    if (e.kind == PointerDeviceKind.touch) {
+      return s.palm.isPalm(e.pointer) || !s.passedTouches.contains(e.pointer)
+          ? PenDecision.swallowed
+          : PenDecision.toView;
+    }
+    return _routes.containsKey(e.pointer) ? PenDecision.penTook : PenDecision.noLayer;
+  }
+
+  void _diag(String name, PointerEvent e, [String? decision]) {
+    if (!PenDiag.enabled) return;
+    PenDiag.log(
+      name,
+      tMs: e.timeStamp.inMilliseconds,
+      kind: e.kind.name,
+      device: e.device,
+      pointer: e.pointer,
+      x: e.position.dx,
+      y: e.position.dy,
+      pressure: e.pressure,
+      radiusMajor: e.radiusMajor,
+      decision: decision ?? _decision(e),
+    );
+  }
+
   void _down(PointerDownEvent e) {
-    if (!inkPointerDraws(e.kind, stylusOnly: widget.stylusOnly)) return;
+    if (!inkPointerDraws(e.kind, stylusOnly: widget.stylusOnly)) {
+      _diag('down', e);
+      return;
+    }
     final layer = widget.session.layerAt(e.position);
+    if (layer != null) _routes[e.pointer] = layer;
+    _diag('down', e);
     if (layer == null) return;
-    _routes[e.pointer] = layer;
     layer.pointerDown(e);
   }
 
@@ -61,15 +98,34 @@ class _PdfInkInputState extends State<PdfInkInput> {
       return;
     }
     final layer = widget.session.layerAt(e.position);
-    widget.session.penHover(overPage: layer != null);
+    widget.session.penHover(
+      overPage: layer != null,
+      position: e.position,
+      tMs: e.timeStamp.inMicroseconds / 1000,
+    );
+    _diag('hover', e, layer == null ? PenDecision.noLayer : PenDecision.penTook);
     layer?.pointerHover(e);
   }
 
-  void _move(PointerMoveEvent e) => _routes[e.pointer]?.pointerMove(e);
+  void _move(PointerMoveEvent e) {
+    _diag('move', e);
+    _routes[e.pointer]?.pointerMove(e);
+  }
 
-  void _up(PointerUpEvent e) => _routes.remove(e.pointer)?.pointerUp(e);
+  void _up(PointerUpEvent e) {
+    _diag('up', e);
+    widget.session.passedTouches.remove(e.pointer);
+    if (e.kind == PointerDeviceKind.touch) widget.session.palmTouchUp(e.pointer);
+    _routes.remove(e.pointer)?.pointerUp(e);
+  }
 
-  void _cancel(PointerCancelEvent e) => _routes.remove(e.pointer)?.pointerCancel(e);
+  void _cancel(PointerCancelEvent e) {
+    final pen = e.kind == PointerDeviceKind.stylus || e.kind == PointerDeviceKind.invertedStylus;
+    _diag('cancel', e, pen && _routes.containsKey(e.pointer) ? PenDecision.cancelSaved : null);
+    widget.session.passedTouches.remove(e.pointer);
+    if (e.kind == PointerDeviceKind.touch) widget.session.palmTouchUp(e.pointer);
+    _routes.remove(e.pointer)?.pointerCancel(e);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -120,8 +176,23 @@ class InkPointerClaim extends OneSequenceGestureRecognizer {
   @override
   bool isPointerAllowed(PointerDownEvent event) {
     if (event.kind == PointerDeviceKind.touch) {
-      // Avuç: kalem çiziyorsa ya da temas büyükse yut.
-      return session.penActive || session.penNear || event.radiusMajor >= palmRadiusMajor;
+      // Avuç: kalem aşağıdayken her temas; havadayken yalnız kalem konumuna
+      // yakın temas (yazan elin avucu); ya da temas çok büyükse. Uzak temas
+      // ve görünümde süren bir temasa eşlik eden ikinci parmak (zum) geçer.
+      var swallow = session.penActive ||
+          event.radiusMajor >= palmRadiusMajor ||
+          (session.passedTouches.isEmpty && session.isPalmNearPen(event.position));
+      // Geriye dönük avuç reddi: kayıt (dönüşüm anlık görüntüsü) + ≥3 temas.
+      final palm = session.palmTouchDown(
+        pointer: event.pointer,
+        tMs: event.timeStamp.inMicroseconds / 1000,
+        position: event.position,
+        radius: event.radiusMajor,
+        swallowed: swallow,
+      );
+      swallow = swallow || palm;
+      if (!swallow) session.passedTouches.add(event.pointer);
+      return swallow;
     }
     if (!inkPointerDraws(event.kind, stylusOnly: stylusOnly)) return false;
     // Sayfa dışında (sayfalar arası boşluk) arenayı alma: görünüm kayabilsin.
@@ -133,7 +204,7 @@ class InkPointerClaim extends OneSequenceGestureRecognizer {
     startTrackingPointer(event.pointer, event.transform);
     if (event.kind != PointerDeviceKind.touch) {
       _mine.add(event.pointer);
-      session.penDown(event.pointer);
+      session.penDown(event.pointer, event.position, event.timeStamp.inMicroseconds / 1000);
     }
     resolve(GestureDisposition.accepted);
   }

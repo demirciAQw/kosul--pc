@@ -455,7 +455,10 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
       _sel.value = null;
       return;
     }
-    _ctl.cancelStroke();
+    // Kalem iptali (avuç değince Android/Goodix ACTION_CANCEL yollar) çizgiyi
+    // BİTİRİR: o ana kadarki noktalar kaydedilir. Parmak/fare iptali atar.
+    final pen = e.kind == PointerDeviceKind.stylus || e.kind == PointerDeviceKind.invertedStylus;
+    _ctl.cancelStroke(keep: pen);
   }
 
   // --- silgi ---

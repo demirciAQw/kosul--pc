@@ -271,7 +271,7 @@ void main() {
     final names = {for (final r in await d.customSelect("SELECT name FROM sqlite_master WHERE type = 'table'").get()) r.read<String>('name')};
     expect(names, contains('ink_page_text'));
     expect((await d.select(d.anlikNotes).getSingle()).body, 'eski not');
-    expect((await d.customSelect('PRAGMA user_version').getSingle()).read<int>('user_version'), 22);
+    expect((await d.customSelect('PRAGMA user_version').getSingle()).read<int>('user_version'), 23);
     expect(await d.customSelect("SELECT name FROM sqlite_master WHERE name = 'ix_page_text_page'").get(), hasLength(1));
     final r2 = PageTextRepository(d);
     await r2.save(pageId: 'p', text: 'm', lines: const [], strokeSig: '');

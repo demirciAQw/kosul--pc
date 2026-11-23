@@ -11,6 +11,8 @@ class InkViewport extends StatefulWidget {
     this.minScale = 0.5,
     this.maxScale = 8,
     this.drawingActive,
+    this.transformChild = true,
+    this.onMatrixChanged,
   });
 
   /// Kalem çizerken true döner: bu sırada ikinci temas/avuç görünümü
@@ -18,6 +20,13 @@ class InkViewport extends StatefulWidget {
   final bool Function()? drawingActive;
 
   final Widget child;
+
+  /// false: çocuk Flutter dönüşümüyle ölçeklenmez (yerel görünüm bulanmasın);
+  /// dönüşümü [onMatrixChanged] ile alan çocuk kendisi uygular (A yüzeyi).
+  final bool transformChild;
+
+  /// Görünüm matrisi (dünya -> görünüm; sol-üst kaynaklı) her değiştiğinde.
+  final ValueChanged<Matrix4>? onMatrixChanged;
   final double minScale;
   final double maxScale;
 
@@ -31,7 +40,10 @@ class InkViewportState extends State<InkViewport> {
 
   Matrix4 get matrix => _m;
 
-  void reset() => setState(() => _m = Matrix4.identity());
+  void reset() {
+    setState(() => _m = Matrix4.identity());
+    widget.onMatrixChanged?.call(_m);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -52,7 +64,9 @@ class InkViewportState extends State<InkViewport> {
             ),
       },
       child: ClipRect(
-        child: Transform(transform: _m, child: widget.child),
+        child: widget.transformChild
+            ? Transform(transform: _m, child: widget.child)
+            : widget.child,
       ),
     );
   }
@@ -76,6 +90,7 @@ class InkViewportState extends State<InkViewport> {
       ..translateByDouble(-local.dx, -local.dy, 0, 1)
       ..multiply(_m);
     setState(() => _m = m);
+    widget.onMatrixChanged?.call(m);
   }
 
   Offset _focalLocal(ScaleUpdateDetails d) {

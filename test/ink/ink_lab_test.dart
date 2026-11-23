@@ -8,7 +8,9 @@ void main() {
   testWidgets('Android dışında A/B geçişi görünmez, B çalışır', (t) async {
     await t.binding.setSurfaceSize(const Size(1000, 800));
     addTearDown(() => t.binding.setSurfaceSize(null));
-    await t.pumpWidget(const MaterialApp(home: InkLabPage(androidAvailable: false)));
+    await t.pumpWidget(
+      const MaterialApp(home: InkLabPage(androidAvailable: false)),
+    );
     expect(find.byKey(const Key('ink-impl')), findsNothing);
     expect(find.byType(InkSurfaceBView), findsOneWidget);
     expect(find.text('Kalem denemesi'), findsOneWidget);

@@ -87,6 +87,9 @@ class NotePageEditorState extends ConsumerState<NotePageEditor> {
       ownerOf: (_) => NotePageOwner(p.id, p.pageNo),
       penKinds: true,
     );
+    // Geriye dönük avuç reddi: avuç kalemden önce değip sayfayı oynattıysa geri al.
+    session.readViewMatrix = () => _transform.value.clone();
+    session.writeViewMatrix = (m) => _transform.value = (m as Matrix4).clone();
     widget.tools.apply(session);
     _dockSeen = widget.tools.dockPosition;
     widget.tools.addListener(_applyTools);

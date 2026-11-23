@@ -2,9 +2,11 @@
 /// (saf Dart). Kanal adı: `kocum/ink/<viewId>`; görünüm türü
 /// `kocum/ink_surface`.
 ///
-/// Dart → yerel: `setBrush {tool,color,width}`, `clear`, `setInputMode {stylusOnly}`.
+/// Dart → yerel: `setBrush {tool,color,width}`, `clear`, `setInputMode {stylusOnly}`,
+/// `setTransform {scale,dx,dy}` (görünüm = dünya * scale + (dx,dy), mantıksal piksel; A'da
+/// parmakla kaydırma/yakınlaştırmayı Dart yapar, yerel yalnız çizgileri bu matrisle çizer).
 /// Yerel → Dart: `strokeStart|strokePoint|strokeEnd {id,x,y,pressure,tilt,t}` ve
-/// iptalde `strokeCancel {id}`. x, y, width Flutter MANTIKSAL pikselidir; tilt RADYANdır (0 = dik).
+/// iptalde `strokeCancel {id}`. x, y, width Flutter MANTIKSAL pikselidir (x, y: dünya/sayfa koordinatı, zumdan bağımsız); tilt RADYANdır (0 = dik).
 /// Silgide yerel taraf çizmez, yalnız olay yollar; silmeyi Dart yönetir.
 library;
 
@@ -16,6 +18,7 @@ String inkChannelName(int viewId) => 'kocum/ink/$viewId';
 const inkMethodSetBrush = 'setBrush';
 const inkMethodClear = 'clear';
 const inkMethodSetInputMode = 'setInputMode';
+const inkMethodSetTransform = 'setTransform';
 const inkMethodStrokeStart = 'strokeStart';
 const inkMethodStrokePoint = 'strokePoint';
 const inkMethodStrokeEnd = 'strokeEnd';
@@ -30,6 +33,17 @@ Map<String, Object> encodeBrush(InkBrush b) => {
 
 Map<String, Object> encodeInputMode({required bool stylusOnly}) => {
   'stylusOnly': stylusOnly,
+};
+
+/// `setTransform` bağımsız değişkenleri. Ölçek 0/NaN/sonsuz ise 1, öteleme NaN ise 0 olur.
+Map<String, Object> encodeTransform({
+  required double scale,
+  required double dx,
+  required double dy,
+}) => {
+  'scale': scale.isFinite && scale > 0 ? scale : 1.0,
+  'dx': dx.isFinite ? dx : 0.0,
+  'dy': dy.isFinite ? dy : 0.0,
 };
 
 /// Yerelden gelen bir çağrıyı olaya çevirir. Bilinmeyen yöntem için null;

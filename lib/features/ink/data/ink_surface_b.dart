@@ -132,8 +132,10 @@ class InkSurfaceBViewState extends State<InkSurfaceBView> {
   void _cancel(PointerCancelEvent e) {
     if (e.pointer != _activePointer) return;
     _activePointer = null;
+    // Kalem iptali (avuç değince ACTION_CANCEL) çizgiyi bitirir; parmak/fare atar.
+    final pen = e.kind == PointerDeviceKind.stylus || e.kind == PointerDeviceKind.invertedStylus;
     _activeKind = null;
-    widget.controller.cancelStroke();
+    widget.controller.cancelStroke(keep: pen);
   }
 
   void _up(PointerEvent e) {

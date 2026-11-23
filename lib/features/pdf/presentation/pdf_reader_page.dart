@@ -149,6 +149,11 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
       clock: ref.read(clockProvider),
       penKinds: true,
     );
+    // Geriye dönük avuç reddi: avuç kalemden önce değip sayfayı oynattıysa geri al.
+    _session.readViewMatrix = () => _viewer.isReady ? _viewer.value.clone() : null;
+    _session.writeViewMatrix = (m) {
+      if (_viewer.isReady) _viewer.value = (m as Matrix4).clone();
+    };
     _tools.apply(_session);
     _tools.addListener(_applyTools);
     // Kalem boyutu ve yuva konumu defterle AYNI kalıcı ayardır.

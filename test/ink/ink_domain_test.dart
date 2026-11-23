@@ -20,24 +20,41 @@ void main() {
 
   group('sözleşme', () {
     test('setBrush kodlama', () {
-      final m = encodeBrush(const InkBrush(tool: InkTool.highlighter, color: 0x80FFEB3B, width: 12));
+      final m = encodeBrush(
+        const InkBrush(tool: InkTool.highlighter, color: 0x80FFEB3B, width: 12),
+      );
       expect(m, {'tool': 'highlighter', 'color': 0x80FFEB3B, 'width': 12.0});
       expect(encodeInputMode(stylusOnly: true), {'stylusOnly': true});
       expect(inkChannelName(7), 'kocum/ink/7');
     });
 
     test('strokeStart/Point/End ayrıştırma', () {
-      final args = {'id': 3, 'x': 10, 'y': 20.5, 'pressure': 0.7, 'tilt': 0.2, 't': 1234};
+      final args = {
+        'id': 3,
+        'x': 10,
+        'y': 20.5,
+        'pressure': 0.7,
+        'tilt': 0.2,
+        't': 1234,
+      };
       final s = decodeInkCall('strokeStart', args);
       expect(s, isA<InkStrokeStart>());
       expect(s!.strokeId, 3);
-      expect(s.point, const InkPoint(x: 10, y: 20.5, pressure: 0.7, tilt: 0.2, tMs: 1234));
+      expect(
+        s.point,
+        const InkPoint(x: 10, y: 20.5, pressure: 0.7, tilt: 0.2, tMs: 1234),
+      );
       expect(decodeInkCall('strokePoint', args), isA<InkStrokePoint>());
       expect(decodeInkCall('strokeEnd', args), isA<InkStrokeEnd>());
     });
 
     test('eksik baskı varsayılan, aralık dışı kırpılır', () {
-      final e = decodeInkCall('strokePoint', {'id': 1, 'x': 0, 'y': 0, 'pressure': 4});
+      final e = decodeInkCall('strokePoint', {
+        'id': 1,
+        'x': 0,
+        'y': 0,
+        'pressure': 4,
+      });
       expect(e!.point!.pressure, 1.0);
       final f = decodeInkCall('strokePoint', {'id': 1, 'x': 0, 'y': 0});
       expect(f!.point!.pressure, 0.5);
@@ -54,9 +71,18 @@ void main() {
     test('bilinmeyen yöntem null, bozuk bağımsız değişken hata', () {
       expect(decodeInkCall('baskaBir', {}), isNull);
       expect(() => decodeInkCall('strokeStart', 'x'), throwsFormatException);
-      expect(() => decodeInkCall('strokeStart', {'x': 1, 'y': 2}), throwsFormatException);
-      expect(() => decodeInkCall('strokeStart', {'id': 1, 'x': double.nan, 'y': 2}), throwsFormatException);
-      expect(() => decodeInkCall('strokeStart', {'id': 1, 'x': 1}), throwsFormatException);
+      expect(
+        () => decodeInkCall('strokeStart', {'x': 1, 'y': 2}),
+        throwsFormatException,
+      );
+      expect(
+        () => decodeInkCall('strokeStart', {'id': 1, 'x': double.nan, 'y': 2}),
+        throwsFormatException,
+      );
+      expect(
+        () => decodeInkCall('strokeStart', {'id': 1, 'x': 1}),
+        throwsFormatException,
+      );
     });
   });
 
@@ -75,11 +101,19 @@ void main() {
     test('vsync gecikmesi raster gecikmesinden ayrı hesaplanır', () {
       final t = InkLatencyTracker();
       t.onInput(5000);
-      final r = t.onFrameDetailed(buildStartUs: 10000, rasterFinishUs: 25000, vsyncUs: 9000);
+      final r = t.onFrameDetailed(
+        buildStartUs: 10000,
+        rasterFinishUs: 25000,
+        vsyncUs: 9000,
+      );
       expect(r.raster, [20.0]);
       expect(r.vsync, [4.0]);
       t.onInput(9500);
-      final r2 = t.onFrameDetailed(buildStartUs: 10000, rasterFinishUs: 25000, vsyncUs: 9000);
+      final r2 = t.onFrameDetailed(
+        buildStartUs: 10000,
+        rasterFinishUs: 25000,
+        vsyncUs: 9000,
+      );
       expect(r2.vsync, [0.0]); // vsync'ten sonra gelen giriş: 0
     });
 

@@ -276,4 +276,47 @@ void main() {
       expect(tools.eraser, isTrue);
     },
   );
+
+  for (final size in const [Size(1250, 2000), Size(2000, 1250), Size(1280, 800)]) {
+    for (final pos in DockPosition.values) {
+      testWidgets(
+        'odak modu ${pos.name} ${size.width.toInt()}x${size.height.toInt()}: Konum ve Sayfa var, taşma yok, konum değişir',
+        (t) async {
+          debugAndroidOverride = true;
+          addTearDown(() => debugAndroidOverride = null);
+          t.view.physicalSize = size;
+          t.view.devicePixelRatio = 1;
+          addTearDown(t.view.reset);
+          final tools = NoteToolSettings()..setDockPosition(pos);
+          addTearDown(tools.dispose);
+          final focus = ValueNotifier(true);
+          addTearDown(focus.dispose);
+          await t.pumpWidget(MaterialApp(
+            home: TabletFocus(
+              focus: focus,
+              child: Scaffold(
+                body: Stack(children: [FloatingToolDock(tools: tools, session: null, page: _page())]),
+              ),
+            ),
+          ));
+          await t.pump();
+          expect(t.takeException(), isNull);
+          expect(find.byKey(const Key('note-dock-move')), findsOneWidget);
+          expect(find.byKey(const Key('note-template')), findsOneWidget);
+          final dock = t.getRect(find.byKey(const Key('note-dock')));
+          expect(dock.left, greaterThanOrEqualTo(0));
+          expect(dock.top, greaterThanOrEqualTo(0));
+          expect(dock.right, lessThanOrEqualTo(size.width));
+          expect(dock.bottom, lessThanOrEqualTo(size.height));
+          await t.tap(find.byKey(const Key('note-dock-move')));
+          await t.pumpAndSettle();
+          final target = pos == DockPosition.bottom ? DockPosition.top : DockPosition.bottom;
+          await t.tap(find.byKey(Key('note-dock-pos-${target.name}')));
+          await t.pumpAndSettle();
+          expect(tools.dockPosition, target);
+          expect(t.takeException(), isNull);
+        },
+      );
+    }
+  }
 }

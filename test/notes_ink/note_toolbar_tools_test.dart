@@ -298,10 +298,11 @@ void main() {
     expect(tools.eraserRadius, greaterThan(eraserRadiusDefault));
   });
 
-  testWidgets('odak modunda yuva küçülür: Sayfa ve ⇅ gizli, araçlar durur', (t) async {
+  testWidgets('odak modunda yuva küçülür: Sayfa ve Konum (⇅) açık kalır, araçlar durur', (t) async {
     await _open(t, narrow, small: true);
-    expect(find.byKey(const Key('note-template')), findsNothing);
-    expect(find.byKey(const Key('note-dock-move')), findsNothing);
+    expect(find.byKey(const Key('note-template')), findsOneWidget);
+    expect(find.byKey(const Key('note-dock-move')), findsOneWidget);
+    expect(t.takeException(), isNull);
     expect(find.byKey(const Key('note-undo')), findsOneWidget);
     expect(find.byKey(const Key('note-redo')), findsOneWidget);
     expect(find.byKey(const Key('note-pen')), findsOneWidget);

@@ -48,6 +48,9 @@ part 'app_database.g.dart';
   SaglikGunluk,
   SaglikStres,
   SaglikUykuOturum,
+  InkFolders,
+  InkPageLinks,
+  InkPageItems,
 ])
 class AppDatabase extends _$AppDatabase {
   /// Testlerde: `AppDatabase(NativeDatabase.memory())`
@@ -73,8 +76,9 @@ class AppDatabase extends _$AppDatabase {
   /// v20: PDF sayfa katmanları (pdf_page_layers): filigran temizleme/örtü, dosya değişmez.
   /// v21: el yazısı metni (ink_page_text): sayfa başına türev metin, çizgiler değişmez.
   /// v22: sağlık verisi (saglik_gunluk, saglik_stres, saglik_uyku_oturum); defter dışı.
+  /// v23: defter klasörleri, sayfa başlığı/konu/alt sayfa/Pano konumu, sayfa bağlantıları, sayfa öğeleri.
   @override
-  int get schemaVersion => 22;
+  int get schemaVersion => 23;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -92,6 +96,7 @@ class AppDatabase extends _$AppDatabase {
           await _createPdfLayerIndexes();
           await _createPageTextIndexes();
           await _createHealthIndexes();
+          await _createBoardIndexes();
         },
         onUpgrade: (m, from, to) async {
           if (from < 2) {
@@ -223,6 +228,24 @@ class AppDatabase extends _$AppDatabase {
             await m.createTable(saglikUykuOturum);
             await _createHealthIndexes();
           }
+          // v23: tablolar yoksa kurulur; sütunlar yalnızca eksikse eklenir (v19 öncesinden
+          // gelenlerde ink_notebooks/ink_note_pages yukarıda zaten güncel tanımla kurulmuştur).
+          if (from < 23) {
+            await m.createTable(inkFolders);
+            await m.createTable(inkPageLinks);
+            await m.createTable(inkPageItems);
+            final nb = {for (final c in await customSelect('PRAGMA table_info(ink_notebooks)').get()) c.read<String>('name')};
+            if (!nb.contains('folder_id')) await m.addColumn(inkNotebooks, inkNotebooks.folderId);
+            final pg = {for (final c in await customSelect('PRAGMA table_info(ink_note_pages)').get()) c.read<String>('name')};
+            if (!pg.contains('title')) await m.addColumn(inkNotePages, inkNotePages.title);
+            if (!pg.contains('konu_id')) await m.addColumn(inkNotePages, inkNotePages.konuId);
+            if (!pg.contains('parent_page_id')) await m.addColumn(inkNotePages, inkNotePages.parentPageId);
+            if (!pg.contains('board_x')) await m.addColumn(inkNotePages, inkNotePages.boardX);
+            if (!pg.contains('board_y')) await m.addColumn(inkNotePages, inkNotePages.boardY);
+            if (!pg.contains('board_w')) await m.addColumn(inkNotePages, inkNotePages.boardW);
+            if (!pg.contains('board_h')) await m.addColumn(inkNotePages, inkNotePages.boardH);
+            await _createBoardIndexes();
+          }
           // Tablolar yeniden kurulmuş ya da sütun eklenmiş olabilir: tetikleyiciler baştan.
           await LedgerService(this).installTriggers(rebuild: true);
         },
@@ -256,6 +279,14 @@ class AppDatabase extends _$AppDatabase {
     await customStatement('CREATE INDEX IF NOT EXISTS ix_saglik_gunluk_gun ON saglik_gunluk(gun)');
     await customStatement('CREATE INDEX IF NOT EXISTS ix_saglik_stres_zaman ON saglik_stres(zaman)');
     await customStatement('CREATE INDEX IF NOT EXISTS ix_saglik_uyku_bitis ON saglik_uyku_oturum(bitis)');
+  }
+
+  Future<void> _createBoardIndexes() async {
+    await customStatement('CREATE INDEX IF NOT EXISTS ix_klasor_ust ON ink_folders(parent_id)');
+    await customStatement('CREATE INDEX IF NOT EXISTS ix_defter_klasor ON ink_notebooks(folder_id)');
+    await customStatement('CREATE INDEX IF NOT EXISTS ix_sayfa_konu ON ink_note_pages(konu_id)');
+    await customStatement('CREATE INDEX IF NOT EXISTS ix_sayfa_baglanti ON ink_page_links(notebook_id)');
+    await customStatement('CREATE INDEX IF NOT EXISTS ix_sayfa_ogeleri ON ink_page_items(page_id)');
   }
 
   Future<void> _createPageTextIndexes() async {

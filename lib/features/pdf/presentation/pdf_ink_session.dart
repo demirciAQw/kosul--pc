@@ -16,7 +16,9 @@ import '../../ink/domain/shape_recognizer.dart' show ShapeTool;
 import '../../ink/domain/pen_profiles.dart';
 import '../../ink/domain/ink_stroke_record.dart';
 import '../../ink/domain/stroke_codec.dart';
+import '../../../core/pen_diag.dart';
 import '../domain/ink_history.dart';
+import '../domain/palm_rejector.dart';
 import '../domain/page_coords.dart';
 import 'pdf_page_ink_layer.dart';
 
@@ -562,8 +564,69 @@ class PdfInkSession extends ChangeNotifier {
 
   /// Kalem bir sayfanın üstünde havada (hover zaman aşımına kadar).
   bool get penNear => _near;
-  void penDown(int pointer) {
+  void penDown(int pointer, [ui.Offset? position, double? tMs]) {
+    if (position != null) penPosition = position;
     _activePens.add(pointer);
+    if (position != null && tMs != null) _palmPenEntered(tMs, position);
+    _updateLock();
+  }
+
+  // --- geriye dönük avuç reddi (`palm_rejector.dart`): avuç kalemden ÖNCE değdiyse ---
+
+  /// Görünüm dönüşümünü okuyan/yazan kancalar (sayfa kurar: `TransformationController`
+  /// ya da `PdfViewerController`; anlık görüntü `Matrix4`). Verilmezse geri alma
+  /// yapılmaz, yalnız avuç yutulur ve görünüm kilitlenir.
+  Object? Function()? readViewMatrix;
+  void Function(Object snapshot)? writeViewMatrix;
+
+  /// Avuç izleyici (anlık görüntü türü: sayfanın verdiği dönüşüm).
+  final PalmRejector<Object> palm = PalmRejector<Object>();
+
+  /// Kalem girdi (hover başı ya da DOWN): yakın geçmişteki yakın temaslar avuç
+  /// sayılır ve görünüm o temasların başladığı dönüşüme geri alınır.
+  void _palmPenEntered(double tMs, ui.Offset pos) {
+    final flagged = palm.penEntered(tMs: tMs, x: pos.dx, y: pos.dy);
+    _restoreFor(flagged, tMs);
+  }
+
+  void _restoreFor(List<PalmTouch<Object>> flagged, double tMs) {
+    if (flagged.isEmpty) return;
+    final target = PalmRejector.restoreTarget<Object>(flagged);
+    final write = writeViewMatrix;
+    if (target != null && write != null) write(target);
+    PenDiag.note(
+      'karar=${PenDecision.palmRetro},${target != null && write != null ? PenDecision.viewRestored : 'geri-alma-yok'} '
+      'ptr=${flagged.map((t) => t.pointer).join(',')}',
+      tMs: tMs.round(),
+    );
+    _updateLock();
+  }
+
+  /// Yeni parmak teması kaydı (`InkPointerClaim`). [swallowed]: zaten yutulacak.
+  /// Dönen: hemen avuç (yutulmalı).
+  bool palmTouchDown({
+    required int pointer,
+    required double tMs,
+    required ui.Offset position,
+    required double radius,
+    required bool swallowed,
+  }) {
+    final r = palm.touchDown(
+      pointer: pointer,
+      tMs: tMs,
+      x: position.dx,
+      y: position.dy,
+      radius: radius,
+      snapshot: swallowed ? null : readViewMatrix?.call(),
+      passed: !swallowed,
+    );
+    if (r.flagged.isNotEmpty) _restoreFor(r.flagged, tMs);
+    _updateLock();
+    return r.selfPalm;
+  }
+
+  void palmTouchUp(int pointer) {
+    palm.touchUp(pointer);
     _updateLock();
   }
 
@@ -572,20 +635,43 @@ class PdfInkSession extends ChangeNotifier {
     _updateLock();
   }
 
-  /// Görünümün kaydırma/yakınlaştırması kapalı mı: kalem çiziyor ya da bir
-  /// sayfanın üstünde havada (avuç kalemden önce değse bile sayfa kaymaz).
+  /// Görünümün kaydırma/yakınlaştırması kapalı mı: YALNIZ kalem aşağıdayken
+  /// (çizerken). Kalem havadayken kilit AÇIK: diğer elle zum/kaydırma çalışır;
+  /// yazan elin avucu temas bazında yutulur ([isPalmNearPen], `InkPointerClaim`).
   final ValueNotifier<bool> viewerLocked = ValueNotifier(false);
+
+  /// Kalemin son bilinen ekran konumu (hover ya da aşağı); avuç mesafesi için.
+  ui.Offset? penPosition;
+
+  /// Kalem konumuna bu uzaklıktan (mantıksal px) yakın parmak teması, kalem
+  /// havadayken yazan elin avucu sayılır ve yutulur. Tek sabit; uzaktaki
+  /// (öbür el) temaslar görünüme geçer.
+  static const double palmNearDistance = 350;
+
+  /// Görünüme geçirilen (yutulmayan) aktif dokunmalar: biri görünümde sürerken
+  /// gelen ikinci temas (iki parmak zum) yutulmaz.
+  final Set<int> passedTouches = {};
+
+  /// Kalem havada ve [p] kalem konumuna yakın mı (avuç adayı).
+  bool isPalmNearPen(ui.Offset p) {
+    final pos = penPosition;
+    return _near && pos != null && (p - pos).distance <= palmNearDistance;
+  }
   bool _near = false;
   Timer? _nearTimer;
 
   void _updateLock() {
     if (_disposed) return;
-    viewerLocked.value = penActive || _near;
+    // Kalem aşağıdayken ya da görünüme geçmiş bir AVUÇ basılıyken kilitli.
+    viewerLocked.value = penActive || palm.anyPassedPalmDown;
   }
 
   /// Kalem havada: [overPage] sayfanın üstündeyse görünüm [hoverHold] boyunca
   /// kilitli kalır (olay geldikçe uzar). Sayfa dışında kilit açılır.
-  void penHover({required bool overPage}) {
+  void penHover({required bool overPage, ui.Offset? position, double? tMs}) {
+    if (position != null) penPosition = position;
+    // Hover BAŞLIYOR (yeni giriş): önceden değen yakın temaslar avuçtur.
+    if (!_near && overPage && position != null && tMs != null) _palmPenEntered(tMs, position);
     _nearTimer?.cancel();
     _near = overPage;
     _updateLock();

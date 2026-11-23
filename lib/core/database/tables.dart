@@ -701,6 +701,10 @@ class InkNotebooks extends Table {
   TextColumn get title => text().withDefault(const Constant(''))();
   IntColumn get coverColor => integer().withDefault(const Constant(0xFF3F51B5))(); // ARGB
 
+  /// Defterin klasörü (v23, `ink_folders.id`); null = kökte. Yabancı anahtar yok:
+  /// sıra bozuk eşitlenirse takılmasın; klasör yoksa defter kökte gösterilir.
+  TextColumn get folderId => text().nullable()();
+
   /// Yeni sayfaların şablonu: plain | ruled | grid.
   TextColumn get defaultTemplate => text().withDefault(const Constant('ruled'))();
   IntColumn get sortOrder => integer().withDefault(const Constant(0))();
@@ -735,6 +739,89 @@ class InkNotePages extends Table {
   RealColumn get width => real().withDefault(const Constant(1404.0))();
   RealColumn get height => real().withDefault(const Constant(1984.0))();
   IntColumn get background => integer().withDefault(const Constant(0xFFFFFFFF))(); // ARGB
+
+  /// Sayfa başlığı (v23); null = başlıksız.
+  TextColumn get title => text().nullable()();
+
+  /// Bağlı MEB konusu (v23, `curriculum_nodes.id`); null = bağsız. Yabancı anahtar
+  /// yok: konu ağacı her cihazda ayrı tohumlanır, deftere girmez.
+  TextColumn get konuId => text().nullable()();
+
+  /// Bu sayfa başka sayfanın içinden açılan alt sayfaysa ebeveyn sayfa (v23).
+  TextColumn get parentPageId => text().nullable()();
+
+  /// Pano konumu ve kart boyutu (v23, pano birimi); null = yerleşim henüz yok / varsayılan boyut.
+  RealColumn get boardX => real().nullable()();
+  RealColumn get boardY => real().nullable()();
+  RealColumn get boardW => real().nullable()();
+  RealColumn get boardH => real().nullable()();
+  BoolColumn get deleted => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// Defter klasörü (v23): klasörler iç içe olur, defterler klasöre girer.
+/// `parentId` null = kök. Yabancı anahtar yok; döngüyü depo engeller, eşitlemede
+/// döngü çıkarsa okuyan taraf (`folderPath`) döngüyü keser. Silme yumuşaktır.
+@DataClassName('InkFolderRow')
+class InkFolders extends Table {
+  TextColumn get id => text()();
+  TextColumn get parentId => text().nullable()();
+  TextColumn get name => text().withDefault(const Constant(''))();
+  IntColumn get color => integer().withDefault(const Constant(0xFF607D8B))(); // ARGB
+  IntColumn get sortOrder => integer().withDefault(const Constant(0))();
+  BoolColumn get deleted => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// Sayfalar arası bağlantı (v23; Pano çizgisi). `kind`: `link` (elle), `child`
+/// (alt sayfa), `konu` (konu ağacında üst konu -> alt konu). `fromX/fromY`: kaynak
+/// sayfada düğümün/çapanın konumu (not birimi); null = sayfanın kendisi.
+@DataClassName('InkPageLinkRow')
+class InkPageLinks extends Table {
+  TextColumn get id => text()();
+  TextColumn get notebookId => text()();
+  TextColumn get fromPageId => text()();
+  TextColumn get toPageId => text()();
+  RealColumn get fromX => real().nullable()();
+  RealColumn get fromY => real().nullable()();
+  TextColumn get label => text().withDefault(const Constant(''))();
+  TextColumn get kind => text().withDefault(const Constant('link'))();
+  IntColumn get color => integer().withDefault(const Constant(0xFF607D8B))(); // ARGB
+  BoolColumn get deleted => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// Sayfa öğesi (v23): çizgilerin altında/üstünde duran metin kutusu ya da görsel.
+/// `kind`: `text` | `image`. Konum/boyut not biriminde, `rotation` radyan, `z` sıra.
+/// `payload` (JSON): text {text,fontSize,color,bold,italic,align}; image {pxW,pxH,alpha}.
+/// `mediaPath`: görselin `notes/yyyy/mm/ad.uzantı` yolu AYRI sütundadır (JSON içinde
+/// kaçışlı kalırsa kablosuz aktarım fotoğrafı fark edemez). Görsel dosyası öğe silinince
+/// SİLİNMEZ; birden çok öğe (çoğaltılan sayfa) aynı dosyayı paylaşır.
+@DataClassName('InkPageItemRow')
+class InkPageItems extends Table {
+  TextColumn get id => text()();
+  TextColumn get pageId => text()();
+  TextColumn get kind => text()();
+  RealColumn get x => real().withDefault(const Constant(0.0))();
+  RealColumn get y => real().withDefault(const Constant(0.0))();
+  RealColumn get w => real().withDefault(const Constant(200.0))();
+  RealColumn get h => real().withDefault(const Constant(80.0))();
+  RealColumn get rotation => real().withDefault(const Constant(0.0))();
+  IntColumn get z => integer().withDefault(const Constant(0))();
+  TextColumn get payload => text().withDefault(const Constant('{}'))();
+  TextColumn get mediaPath => text().nullable()();
   BoolColumn get deleted => boolean().withDefault(const Constant(false))();
   DateTimeColumn get createdAt => dateTime()();
   DateTimeColumn get updatedAt => dateTime()();

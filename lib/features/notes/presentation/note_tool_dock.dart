@@ -107,8 +107,8 @@ class FloatingToolDock extends StatelessWidget {
 ///
 /// Yuva sayfanın ÜSTÜNDE yüzer (sayfa alanı küçülmez). [axis] verilmezse konumdan
 /// türer: sol/sağ dikey sütun (ayar pencereleri yana açılır, sığmazsa kayar), üst/alt
-/// yatay. Telefonda (<600 dp) düğmeler küçülür; odak modunda ([small]) "Sayfa" ve
-/// "Konum" gizlenir, düğmeler biraz küçülür ama yuva yerinde kalır.
+/// yatay. Telefonda (<600 dp) düğmeler küçülür; odak modunda ([small]) düğmeler biraz küçülür, "Konum" sabit (kaydırma
+/// dışı) kalır; yuva yerinde kalır.
 class NoteToolDock extends StatelessWidget {
   const NoteToolDock({
     super.key,
@@ -370,8 +370,8 @@ class _DockBar extends StatelessWidget {
           (s) => s.canRedo && !s.erasing,
           (s) => s.redo(),
         ),
-      if (!small) divider(),
-      if (!small && page != null)
+      divider(),
+      if (page != null)
         _DockButton(
           key: const Key('note-template'),
           icon: templateIcon(page!.template),
@@ -385,29 +385,44 @@ class _DockBar extends StatelessWidget {
             builder: (_) => PageStylePanel(control: page!),
           ),
         ),
+      // Odak modunda ([small]) Konum düğmesi kaydırılan listenin DIŞINDA sabit
+      // durur: yuva küçülse de taşıma her zaman erişilebilir.
       if (!small) _PositionButton(tools: t, size: size, vertical: vertical),
     ];
+    final pinned = small ? _PositionButton(tools: t, size: size, vertical: vertical) : null;
 
-    final Widget content;
+    Widget content;
     final screen = MediaQuery.sizeOf(context);
     if (vertical) {
       final pad = MediaQuery.paddingOf(context);
       final maxH = math.max(120.0, screen.height - pad.vertical - 28);
       content = ConstrainedBox(
-        constraints: BoxConstraints(maxHeight: maxH),
+        constraints: BoxConstraints(maxHeight: maxH - (pinned == null ? 0 : size)),
         child: SingleChildScrollView(
           key: const Key('note-dock-scroll'),
           child: Column(mainAxisSize: MainAxisSize.min, children: items),
         ),
       );
+      if (pinned != null) {
+        content = Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [Flexible(child: content), pinned],
+        );
+      }
     } else {
       content = ConstrainedBox(
-        constraints: BoxConstraints(maxWidth: screen.width - 16),
+        constraints: BoxConstraints(maxWidth: screen.width - 16 - (pinned == null ? 0 : size + 8)),
         child: SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: Row(mainAxisSize: MainAxisSize.min, children: items),
         ),
       );
+      if (pinned != null) {
+        content = Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [Flexible(child: content), pinned],
+        );
+      }
     }
     return Material(
       key: const Key('note-dock'),

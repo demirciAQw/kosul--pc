@@ -28,6 +28,14 @@ telefon (konu düzeyi) hem tablet (soru düzeyi) için tarif edilmiştir.
   - `features/health/` sağlık verisi (şema 22; ayrıntı aşağıda "Sağlık verisi"): uyku/nabız/stres,
     Health Connect (Kotlin kanalı) + Huawei ZIP içe aktarma + elle stres. HASSAS: deftere ve
     kablosuz eşitlemeye girmez
+  - `features/notes/` (v23, şema 23): defter klasörleri (`ink_folders`, defterde `folderId`), sayfa
+    başlığı/`konuId` (MEB konu eşleme)/`parentPageId` (alt sayfa)/Pano konumu (`boardX|Y|W|H`),
+    sayfa bağlantıları (`ink_page_links`: link|child|konu), sayfa öğeleri (`ink_page_items`: metin
+    kutusu, görsel; görsel yolu AYRI `mediaPath` sütunu: JSON içinde kaçışlı kalırsa kablosuz aktarım
+    fotoğrafı fark etmez). Depolar `notes/data/ink_{folder,board,page_item}_repository.dart`,
+    `curriculum_notebook_service.dart`, `page_image_store.dart`; saf Dart `domain/board_layout.dart`,
+    `page_item_geometry.dart`, `page_board.dart`. Görsel dosyası ASLA silinmez (öğe silinince de).
+    Klasör silinince defter/alt klasör ebeveyne çıkar (gizlenmez). Ayrıntı `docs/TABLET_RAPORU.md` "T7 veri".
   - `features/anlik/` anlık notlar, ortak etiketler, kişiler (`((etiket))`, `@kişi`)
   - `features/ledger/` Claude'un değişiklikleri, çakışmalar, silme önerileri ekranları
   - `lib/cli/` + `bin/kocum.dart`: Claude'un veriye eli (`docs/KOCUM_ARACI.md`)

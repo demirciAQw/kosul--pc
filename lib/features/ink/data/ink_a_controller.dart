@@ -17,6 +17,7 @@ class InkAController implements InkSurface {
   MethodChannel? _channel;
   InkBrush _brush;
   bool _stylusOnly;
+  ({double scale, double dx, double dy}) _transform = (scale: 1, dx: 0, dy: 0);
 
   bool get attached => _channel != null;
 
@@ -35,6 +36,8 @@ class InkAController implements InkSurface {
     ch.setMethodCallHandler(_onNativeCall);
     _channel = ch;
     _invoke(inkMethodSetInputMode, encodeInputMode(stylusOnly: _stylusOnly));
+    // Yeni görünümün varsayılanı kimlik dönüşümüdür; yalnız farklıysa gönder.
+    if (_transform != (scale: 1.0, dx: 0.0, dy: 0.0)) _sendTransform();
   }
 
   void detach() {
@@ -61,6 +64,27 @@ class InkAController implements InkSurface {
   void setBrush(InkBrush brush) {
     _brush = brush;
     _invoke(inkMethodSetBrush, encodeBrush(brush));
+  }
+
+  /// Görünüm dönüşümü (parmakla kaydırma/yakınlaştırma): görünüm = dünya * scale +
+  /// (dx, dy). Yerel görünüm sabit kalır, çizgileri bu matrisle yeniden çizer.
+  void setTransform({
+    required double scale,
+    required double dx,
+    required double dy,
+  }) {
+    final next = (scale: scale, dx: dx, dy: dy);
+    if (next == _transform) return;
+    _transform = next;
+    _sendTransform();
+  }
+
+  void _sendTransform() {
+    final t = _transform;
+    _invoke(
+      inkMethodSetTransform,
+      encodeTransform(scale: t.scale, dx: t.dx, dy: t.dy),
+    );
   }
 
   @override

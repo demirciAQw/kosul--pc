@@ -58,6 +58,15 @@ class InkNotebookRepository {
     return id;
   });
 
+  /// Defteri klasöre taşır; [folderId] null = köke. Klasör yoksa ya da silinmişse [StateError].
+  Future<void> moveNotebookToFolder(String id, String? folderId) => _db.transaction(() async {
+    if (folderId != null) {
+      final f = await (_db.select(_db.inkFolders)..where((t) => t.id.equals(folderId))).getSingleOrNull();
+      if (f == null || f.deleted) throw StateError('Klasör yok: $folderId');
+    }
+    await _updateNotebook(id, InkNotebooksCompanion(folderId: Value(folderId)));
+  });
+
   Future<void> renameNotebook(String id, String title) =>
       _updateNotebook(id, InkNotebooksCompanion(title: Value(title.trim())));
 
@@ -127,6 +136,7 @@ class InkNotebookRepository {
           id: r.id,
           title: r.title,
           coverColor: r.coverColor,
+          folderId: r.folderId,
           defaultTemplate: PageTemplate.fromKey(r.defaultTemplate),
           sortOrder: r.sortOrder,
           pageCount: counts[r.id] ?? 0,
@@ -262,6 +272,20 @@ class InkNotebookRepository {
       height: src.height,
       background: src.background,
     );
+    // v23: başlık kopyalanır; konu, alt sayfa bağı ve Pano konumu kopyalanmaz (kopya bağsız ve
+    // yerleşmemiş başlar). Öğeler (metin/görsel) kopyalanır; görsel DOSYALARI paylaşılır.
+    if (src.title != null) await _touchPage(newId, InkNotePagesCompanion(title: Value(src.title)));
+    for (final it in await (_db.select(_db.inkPageItems)
+          ..where((i) => i.pageId.equals(pageId) & i.deleted.equals(false))
+          ..orderBy([(i) => OrderingTerm.asc(i.z), (i) => OrderingTerm.asc(i.createdAt), (i) => OrderingTerm.asc(i.id)]))
+        .get()) {
+      await _db.into(_db.inkPageItems).insert(it.toCompanion(false).copyWith(
+            id: Value(_ids.next()),
+            pageId: Value(newId),
+            createdAt: Value(_clock()),
+            updatedAt: Value(_clock()),
+          ));
+    }
     final newNo = (await _requirePage(newId)).pageNo;
     final now = _clock();
     final strokes =
@@ -402,6 +426,12 @@ class InkNotebookRepository {
         );
       });
 
+  /// Sayfa başlığı; boş/boşluk metin null olur.
+  Future<void> setPageTitle(String pageId, String? title) {
+    final t = title?.trim();
+    return _touchPage(pageId, InkNotePagesCompanion(title: Value(t == null || t.isEmpty ? null : t)));
+  }
+
   Future<void> setPageBackground(String pageId, int argb) =>
       _touchPage(pageId, InkNotePagesCompanion(background: Value(argb)));
 
@@ -456,6 +486,13 @@ class InkNotebookRepository {
     deleted: r.deleted,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
+    title: r.title,
+    konuId: r.konuId,
+    parentPageId: r.parentPageId,
+    boardX: r.boardX,
+    boardY: r.boardY,
+    boardW: r.boardW,
+    boardH: r.boardH,
   );
 
   static bool _sameSet(List<String> a, List<String> b) =>

@@ -42,7 +42,12 @@ Future<(PdfInkSession, InkStrokeRepository)> _host(WidgetTester t) async {
             child: SizedBox(
               width: 612,
               height: 792,
-              child: PdfPageInkLayer(session: s, page: 0, pageWidth: 612, pageHeight: 792),
+              child: PdfPageInkLayer(
+                session: s,
+                page: 0,
+                pageWidth: 612,
+                pageHeight: 792,
+              ),
             ),
           ),
         ),
@@ -52,7 +57,11 @@ Future<(PdfInkSession, InkStrokeRepository)> _host(WidgetTester t) async {
   return (s, repo);
 }
 
-Future<List<InkStroke>> _saved(WidgetTester t, PdfInkSession s, InkStrokeRepository repo) async {
+Future<List<InkStroke>> _saved(
+  WidgetTester t,
+  PdfInkSession s,
+  InkStrokeRepository repo,
+) async {
   late List<InkStroke> rows;
   await t.runAsync(() async {
     await s.flush();
@@ -84,11 +93,20 @@ void main() {
     test('daire kısa kenara sığar, elips kutuyu doldurur', () {
       final c = buildShape(ShapeTool.circle, a, b);
       final xs = c.map((p) => p.x), ys = c.map((p) => p.y);
-      expect(xs.reduce((x, y) => x > y ? x : y) - xs.reduce((x, y) => x < y ? x : y), closeTo(60, 1e-6));
-      expect(ys.reduce((x, y) => x > y ? x : y) - ys.reduce((x, y) => x < y ? x : y), closeTo(60, 1e-6));
+      expect(
+        xs.reduce((x, y) => x > y ? x : y) - xs.reduce((x, y) => x < y ? x : y),
+        closeTo(60, 1e-6),
+      );
+      expect(
+        ys.reduce((x, y) => x > y ? x : y) - ys.reduce((x, y) => x < y ? x : y),
+        closeTo(60, 1e-6),
+      );
       final e = buildShape(ShapeTool.ellipse, a, b);
       final ex = e.map((p) => p.x);
-      expect(ex.reduce((x, y) => x > y ? x : y) - ex.reduce((x, y) => x < y ? x : y), closeTo(100, 1e-6));
+      expect(
+        ex.reduce((x, y) => x > y ? x : y) - ex.reduce((x, y) => x < y ? x : y),
+        closeTo(100, 1e-6),
+      );
     });
     test('üçgen: tepe üst ortada, taban altta', () {
       final tr = buildShape(ShapeTool.triangle, a, b);
@@ -100,59 +118,85 @@ void main() {
     test('aynı nokta ve sonsuz değer boş döner', () {
       for (final tool in ShapeTool.values) {
         expect(buildShape(tool, a, a), isEmpty, reason: tool.name);
-        expect(buildShape(tool, a, const InkPoint(x: double.infinity, y: 0)), isEmpty);
+        expect(
+          buildShape(tool, a, const InkPoint(x: double.infinity, y: 0)),
+          isEmpty,
+        );
       }
     });
   });
 
   group('fosforlu', () {
-    test('profil: saydam, multiply, geniş; palet 5 renk; varsayılan kalınlık 18', () {
-      final h = penProfiles[PenKind.highlighter]!;
-      expect(h.opacity, lessThan(0.5));
-      expect(h.multiply, isTrue);
-      expect(highlighterPalette, hasLength(5));
-      expect(NoteToolSettings().setKindAndWidth(PenKind.highlighter), highlighterDefaultWidth);
-      expect(highlighterDefaultWidth, 18);
-    });
+    test(
+      'profil: saydam, multiply, geniş; palet 5 renk; varsayılan kalınlık 18',
+      () {
+        final h = penProfiles[PenKind.highlighter]!;
+        expect(h.opacity, lessThan(0.5));
+        expect(h.multiply, isTrue);
+        expect(highlighterPalette, hasLength(5));
+        expect(
+          NoteToolSettings().setKindAndWidth(PenKind.highlighter),
+          highlighterDefaultWidth,
+        );
+        expect(highlighterDefaultWidth, 18);
+      },
+    );
 
     test('boya: saydam ve multiply karışımı', () {
       final p = inkPaintFor(
-        const InkBrush(tool: InkTool.highlighter, color: 0xFFFFEB3B, width: 18, kind: PenKind.highlighter),
+        const InkBrush(
+          tool: InkTool.highlighter,
+          color: 0xFFFFEB3B,
+          width: 18,
+          kind: PenKind.highlighter,
+        ),
       );
       expect(p.blendMode, BlendMode.multiply);
       expect(p.color.a, lessThan(0.5));
       expect(p.color.a, greaterThan(0));
     });
 
-    test('kesik uç: yatay çizgide bant yüksekliği kalınlık kadar, dikeyde dar', () {
-      const br = InkBrush(tool: InkTool.highlighter, width: 18, kind: PenKind.highlighter);
-      final horiz = inkOutlinePath(
-        [for (var i = 0; i <= 10; i++) InkPoint(x: 50.0 + i * 20, y: 100)],
-        br,
-        complete: true,
-      );
-      final hb = horiz.getBounds();
-      expect(hb.height, closeTo(18, 0.01));
-      expect(hb.width, closeTo(200 + 18 * highlighterTipRatio, 0.01));
-      final vert = inkOutlinePath(
-        [for (var i = 0; i <= 10; i++) InkPoint(x: 50, y: 50.0 + i * 20)],
-        br,
-        complete: true,
-      );
-      expect(vert.getBounds().width, closeTo(18 * highlighterTipRatio, 0.01));
-      // Kesişen parçalar delik açmaz (aynı yönde sarılı): yolun ortası dolu.
-      expect(horiz.contains(const Offset(150, 100)), isTrue);
-      expect(horiz.contains(const Offset(150, 100 + 8)), isTrue);
-      expect(horiz.contains(const Offset(150, 100 + 12)), isFalse);
-    });
+    test(
+      'kesik uç: yatay çizgide bant yüksekliği kalınlık kadar, dikeyde dar',
+      () {
+        const br = InkBrush(
+          tool: InkTool.highlighter,
+          width: 18,
+          kind: PenKind.highlighter,
+        );
+        final horiz = inkOutlinePath(
+          [for (var i = 0; i <= 10; i++) InkPoint(x: 50.0 + i * 20, y: 100)],
+          br,
+          complete: true,
+        );
+        final hb = horiz.getBounds();
+        expect(hb.height, closeTo(18, 0.01));
+        expect(hb.width, closeTo(200 + 18 * highlighterTipRatio, 0.01));
+        final vert = inkOutlinePath(
+          [for (var i = 0; i <= 10; i++) InkPoint(x: 50, y: 50.0 + i * 20)],
+          br,
+          complete: true,
+        );
+        expect(vert.getBounds().width, closeTo(18 * highlighterTipRatio, 0.01));
+        // Kesişen parçalar delik açmaz (aynı yönde sarılı): yolun ortası dolu.
+        expect(horiz.contains(const Offset(150, 100)), isTrue);
+        expect(horiz.contains(const Offset(150, 100 + 8)), isTrue);
+        expect(horiz.contains(const Offset(150, 100 + 12)), isFalse);
+      },
+    );
 
-    testWidgets('gerçek çizim: kayıt fosforlu türünde; kalınlık 18 saklanır', (t) async {
+    testWidgets('gerçek çizim: kayıt fosforlu türünde; kalınlık 18 saklanır', (
+      t,
+    ) async {
       final (s, repo) = await _host(t);
       final tools = NoteToolSettings()..setKind(PenKind.highlighter);
       tools.apply(s);
       expect(s.brush.width, 18);
       expect(s.brush.kind, PenKind.highlighter);
-      final g = await t.startGesture(const Offset(100, 200), kind: PointerDeviceKind.stylus);
+      final g = await t.startGesture(
+        const Offset(100, 200),
+        kind: PointerDeviceKind.stylus,
+      );
       for (var i = 1; i <= 10; i++) {
         await g.moveTo(Offset(100.0 + i * 20, 200));
       }
@@ -166,50 +210,68 @@ void main() {
   });
 
   group('doğrudan şekil aracı (kalemle)', () {
-    testWidgets('sürüklerken canlı önizleme, bırakınca mükemmel dikdörtgen kaydedilir', (t) async {
-      final (s, repo) = await _host(t);
-      s.setBrush(const InkBrush(kind: PenKind.ballpoint));
-      s.setShapeTool(ShapeTool.rectangle);
-      final g = await t.startGesture(const Offset(100, 100), kind: PointerDeviceKind.stylus);
-      await g.moveTo(const Offset(150, 130));
-      await g.moveTo(const Offset(300, 220));
-      await t.pump();
-      expect(find.byKey(const Key('ink-shape-preview')), findsOneWidget);
-      await g.up();
-      await t.pump();
-      expect(find.byKey(const Key('ink-shape-preview')), findsNothing);
-      final rows = await _saved(t, s, repo);
-      expect(rows, hasLength(1));
-      final p = rows.single.points;
-      expect(p, hasLength(5));
-      expect((p[0].x, p[0].y), (100.0, 100.0));
-      expect((p[2].x, p[2].y), (300.0, 220.0));
-    });
+    testWidgets(
+      'sürüklerken canlı önizleme, bırakınca mükemmel dikdörtgen kaydedilir',
+      (t) async {
+        final (s, repo) = await _host(t);
+        s.setBrush(const InkBrush(kind: PenKind.ballpoint));
+        s.setShapeTool(ShapeTool.rectangle);
+        final g = await t.startGesture(
+          const Offset(100, 100),
+          kind: PointerDeviceKind.stylus,
+        );
+        await g.moveTo(const Offset(150, 130));
+        await g.moveTo(const Offset(300, 220));
+        await t.pump();
+        expect(find.byKey(const Key('ink-shape-preview')), findsOneWidget);
+        await g.up();
+        await t.pump();
+        expect(find.byKey(const Key('ink-shape-preview')), findsNothing);
+        final rows = await _saved(t, s, repo);
+        expect(rows, hasLength(1));
+        final p = rows.single.points;
+        expect(p, hasLength(5));
+        expect((p[0].x, p[0].y), (100.0, 100.0));
+        expect((p[2].x, p[2].y), (300.0, 220.0));
+      },
+    );
 
-    testWidgets('dokunuş (sürükleme yok) şekil bırakmaz; araç kapalıyken serbest çizgi', (t) async {
-      final (s, repo) = await _host(t);
-      s.setBrush(const InkBrush(kind: PenKind.ballpoint));
-      s.setShapeTool(ShapeTool.circle);
-      final g = await t.startGesture(const Offset(100, 100), kind: PointerDeviceKind.stylus);
-      await g.up();
-      await t.pump();
-      expect(await _saved(t, s, repo), isEmpty);
-      s.setShapeTool(null);
-      final g2 = await t.startGesture(const Offset(100, 100), kind: PointerDeviceKind.stylus);
-      for (var i = 1; i <= 8; i++) {
-        await g2.moveTo(Offset(100.0 + i * 10, 100.0 + i * 3));
-      }
-      await g2.up();
-      await t.pump();
-      expect((await _saved(t, s, repo)).single.points.length, greaterThan(5));
-    });
+    testWidgets(
+      'dokunuş (sürükleme yok) şekil bırakmaz; araç kapalıyken serbest çizgi',
+      (t) async {
+        final (s, repo) = await _host(t);
+        s.setBrush(const InkBrush(kind: PenKind.ballpoint));
+        s.setShapeTool(ShapeTool.circle);
+        final g = await t.startGesture(
+          const Offset(100, 100),
+          kind: PointerDeviceKind.stylus,
+        );
+        await g.up();
+        await t.pump();
+        expect(await _saved(t, s, repo), isEmpty);
+        s.setShapeTool(null);
+        final g2 = await t.startGesture(
+          const Offset(100, 100),
+          kind: PointerDeviceKind.stylus,
+        );
+        for (var i = 1; i <= 8; i++) {
+          await g2.moveTo(Offset(100.0 + i * 10, 100.0 + i * 3));
+        }
+        await g2.up();
+        await t.pump();
+        expect((await _saved(t, s, repo)).single.points.length, greaterThan(5));
+      },
+    );
 
     testWidgets('ok ve üçgen kaydedilir', (t) async {
       final (s, repo) = await _host(t);
       s.setBrush(const InkBrush(kind: PenKind.ballpoint));
       for (final (tool, n) in [(ShapeTool.arrow, 5), (ShapeTool.triangle, 4)]) {
         s.setShapeTool(tool);
-        final g = await t.startGesture(const Offset(100, 100), kind: PointerDeviceKind.stylus);
+        final g = await t.startGesture(
+          const Offset(100, 100),
+          kind: PointerDeviceKind.stylus,
+        );
         await g.moveTo(const Offset(250, 180));
         await g.up();
         await t.pump();
@@ -221,8 +283,15 @@ void main() {
 
   group('basılı tut: gerçek kalem hızı ve titremesi', () {
     // Kalem 13 ms aralıkla olay yollar; hareketsizken ±3 px titrer.
-    Future<TestGesture> drawLineThenHold(WidgetTester t, {int holdFrames = 55, double jitter = 3}) async {
-      final g = await t.startGesture(const Offset(100, 300), kind: PointerDeviceKind.stylus);
+    Future<TestGesture> drawLineThenHold(
+      WidgetTester t, {
+      int holdFrames = 55,
+      double jitter = 3,
+    }) async {
+      final g = await t.startGesture(
+        const Offset(100, 300),
+        kind: PointerDeviceKind.stylus,
+      );
       for (var i = 1; i <= 20; i++) {
         await g.moveTo(Offset(100.0 + i * 12, 300));
         await t.pump(const Duration(milliseconds: 13));
@@ -257,11 +326,16 @@ void main() {
       await t.pump();
     });
 
-    testWidgets('ilk 150 ms içindeki atılım zamanlayıcıyı sıfırlamaz', (t) async {
+    testWidgets('ilk 150 ms içindeki atılım zamanlayıcıyı sıfırlamaz', (
+      t,
+    ) async {
       final (s, _) = await _host(t);
       s.setBrush(const InkBrush(kind: PenKind.ballpoint));
       s.setShapeSnap(true);
-      final g = await t.startGesture(const Offset(100, 300), kind: PointerDeviceKind.stylus);
+      final g = await t.startGesture(
+        const Offset(100, 300),
+        kind: PointerDeviceKind.stylus,
+      );
       // 100 ms içinde 20 adım hızlı yürü, sonra dur.
       for (var i = 1; i <= 8; i++) {
         await g.moveTo(Offset(100.0 + i * 30, 300));
@@ -278,56 +352,71 @@ void main() {
   });
 
   group('silgi boyutu ve imleci', () {
-    testWidgets('yarıçap silgiye gerçekten gider: küçükle değmez, büyükle siler', (t) async {
-      final (s, repo) = await _host(t);
-      s.setBrush(const InkBrush(kind: PenKind.ballpoint));
-      final g = await t.startGesture(const Offset(100, 100), kind: PointerDeviceKind.stylus);
-      for (var i = 1; i <= 10; i++) {
-        await g.moveTo(Offset(100.0 + i * 20, 100));
-      }
-      await g.up();
-      await t.pump();
-      expect(await _saved(t, s, repo), hasLength(1));
+    testWidgets(
+      'yarıçap silgiye gerçekten gider: küçükle değmez, büyükle siler',
+      (t) async {
+        final (s, repo) = await _host(t);
+        s.setBrush(const InkBrush(kind: PenKind.ballpoint));
+        final g = await t.startGesture(
+          const Offset(100, 100),
+          kind: PointerDeviceKind.stylus,
+        );
+        for (var i = 1; i <= 10; i++) {
+          await g.moveTo(Offset(100.0 + i * 20, 100));
+        }
+        await g.up();
+        await t.pump();
+        expect(await _saved(t, s, repo), hasLength(1));
 
-      final tools = NoteToolSettings()..setEraseMode(EraseMode.stroke);
-      tools.setSize(10); // yarıçap 10 (en az 8)
-      tools.apply(s);
-      final g1 = await t.startGesture(const Offset(200, 130), kind: PointerDeviceKind.stylus);
-      await g1.moveBy(const Offset(2, 0));
-      await g1.up();
-      await t.pump();
-      expect(await _saved(t, s, repo), hasLength(1)); // 30 px uzakta, değmedi
+        final tools = NoteToolSettings()..setEraseMode(EraseMode.stroke);
+        tools.setSize(10); // yarıçap 10 (en az 8)
+        tools.apply(s);
+        final g1 = await t.startGesture(
+          const Offset(200, 130),
+          kind: PointerDeviceKind.stylus,
+        );
+        await g1.moveBy(const Offset(2, 0));
+        await g1.up();
+        await t.pump();
+        expect(await _saved(t, s, repo), hasLength(1)); // 30 px uzakta, değmedi
 
-      tools.setSize(50);
-      tools.apply(s);
-      final g2 = await t.startGesture(const Offset(200, 130), kind: PointerDeviceKind.stylus);
-      await g2.moveBy(const Offset(2, 0));
-      await g2.up();
-      await t.pump();
-      expect(await _saved(t, s, repo), isEmpty);
-    });
+        tools.setSize(50);
+        tools.apply(s);
+        final g2 = await t.startGesture(
+          const Offset(200, 130),
+          kind: PointerDeviceKind.stylus,
+        );
+        await g2.moveBy(const Offset(2, 0));
+        await g2.up();
+        await t.pump();
+        expect(await _saved(t, s, repo), isEmpty);
+      },
+    );
 
-    testWidgets('silgi aktifken kalem havada yarıçap dairesi çizilir; silgi değilse çizilmez', (t) async {
-      final (s, _) = await _host(t);
-      final tools = NoteToolSettings()..setEraser(true);
-      tools.setSize(30);
-      tools.apply(s);
-      final hover = await t.createGesture(kind: PointerDeviceKind.stylus);
-      await hover.addPointer(location: const Offset(200, 200));
-      await hover.moveTo(const Offset(220, 210));
-      await t.pump();
-      final cursor = find.byKey(const Key('ink-eraser-cursor'));
-      expect(t.renderObject(cursor), paints..circle(radius: 30.0));
-      await t.pump(const Duration(seconds: 1)); // olay kesilince söner
-      expect(t.renderObject(cursor), isNot(paints..circle()));
+    testWidgets(
+      'silgi aktifken kalem havada yarıçap dairesi çizilir; silgi değilse çizilmez',
+      (t) async {
+        final (s, _) = await _host(t);
+        final tools = NoteToolSettings()..setEraser(true);
+        tools.setSize(30);
+        tools.apply(s);
+        final hover = await t.createGesture(kind: PointerDeviceKind.stylus);
+        await hover.addPointer(location: const Offset(200, 200));
+        await hover.moveTo(const Offset(220, 210));
+        await t.pump();
+        final cursor = find.byKey(const Key('ink-eraser-cursor'));
+        expect(t.renderObject(cursor), paints..circle(radius: 30.0));
+        await t.pump(const Duration(seconds: 1)); // olay kesilince söner
+        expect(t.renderObject(cursor), isNot(paints..circle()));
 
-      tools.setEraser(false);
-      tools.apply(s);
-      await hover.moveTo(const Offset(230, 210));
-      await t.pump();
-      expect(t.renderObject(cursor), isNot(paints..circle()));
-      await hover.removePointer();
-    });
+        tools.setEraser(false);
+        tools.apply(s);
+        await hover.moveTo(const Offset(230, 210));
+        await t.pump();
+        expect(t.renderObject(cursor), isNot(paints..circle()));
+        await hover.removePointer();
+      },
+    );
   });
 
   group('NoteToolSettings boyutları', () {
@@ -361,20 +450,23 @@ void main() {
       expect(u.eraserRadius, 40);
     });
 
-    test('şekil aracı kalem seçince kapanır, silgi/kement ile birlikte olmaz', () {
-      final t = NoteToolSettings();
-      t.setShapeTool(ShapeTool.arrow);
-      expect(t.shapeTool, ShapeTool.arrow);
-      t.setShapeTool(ShapeTool.arrow);
-      expect(t.shapeTool, isNull); // aynı araca yeniden dokun: kapanır
-      t.setShapeTool(ShapeTool.circle);
-      t.setEraser(true);
-      expect(t.shapeTool, isNull);
-      t.setShapeTool(ShapeTool.circle);
-      expect(t.eraser, isFalse);
-      t.setKind(PenKind.pencil);
-      expect(t.shapeTool, isNull);
-    });
+    test(
+      'şekil aracı kalem seçince kapanır, silgi/kement ile birlikte olmaz',
+      () {
+        final t = NoteToolSettings();
+        t.setShapeTool(ShapeTool.arrow);
+        expect(t.shapeTool, ShapeTool.arrow);
+        t.setShapeTool(ShapeTool.arrow);
+        expect(t.shapeTool, isNull); // aynı araca yeniden dokun: kapanır
+        t.setShapeTool(ShapeTool.circle);
+        t.setEraser(true);
+        expect(t.shapeTool, isNull);
+        t.setShapeTool(ShapeTool.circle);
+        expect(t.eraser, isFalse);
+        t.setKind(PenKind.pencil);
+        expect(t.shapeTool, isNull);
+      },
+    );
   });
 }
 

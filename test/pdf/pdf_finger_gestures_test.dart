@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kocum/core/database/app_database.dart';
 import 'package:kocum/features/ink/data/ink_stroke_repository.dart';
+import 'package:kocum/features/ink/domain/ink_stroke_record.dart';
 import 'package:kocum/features/pdf/presentation/pdf_ink_input.dart';
 import 'package:kocum/features/pdf/presentation/pdf_ink_session.dart';
 import 'package:kocum/features/pdf/presentation/pdf_page_ink_layer.dart';
@@ -23,6 +24,9 @@ Future<(PdfInkSession, TransformationController)> _host(WidgetTester t) async {
   addTearDown(session.dispose);
   final tc = TransformationController();
   addTearDown(tc.dispose);
+  _repo = repo;
+  session.readViewMatrix = () => tc.value.clone();
+  session.writeViewMatrix = (m) => tc.value = (m as Matrix4).clone();
   await t.pumpWidget(MaterialApp(
     home: Scaffold(
       body: PdfInkInput(
@@ -50,6 +54,7 @@ Future<(PdfInkSession, TransformationController)> _host(WidgetTester t) async {
 }
 
 final _b = GestureBinding.instance;
+late InkStrokeRepository _repo;
 
 void _down(int id, Offset p, double r) =>
     _b.handlePointerEvent(PointerDownEvent(pointer: id, position: p, radiusMajor: r));
@@ -105,22 +110,143 @@ void main() {
     expect(tc.value, before);
   });
 
-  testWidgets('kalem havadayken parmak yutulur, hover bitince tekrar geçer', (t) async {
-    final (s, tc) = await _host(t);
-    final hover = await t.createGesture(kind: PointerDeviceKind.stylus);
-    await hover.addPointer(location: const Offset(100, 100));
-    await hover.moveTo(const Offset(110, 100));
-    expect(s.penNear, isTrue);
+  Future<TestGesture> _hoverAt(WidgetTester t, Offset p) async {
+    final h = await t.createGesture(kind: PointerDeviceKind.stylus);
+    await h.addPointer(location: p);
+    await h.moveTo(p + const Offset(5, 0));
     await t.pump();
+    return h;
+  }
+
+  testWidgets('kalem havada: görünüm kilitli değil, uzaktan tek parmak kaydırır', (t) async {
+    final (s, tc) = await _host(t);
+    final hover = await _hoverAt(t, const Offset(50, 50));
+    expect(s.penNear, isTrue);
+    expect(s.viewerLocked.value, isFalse);
     final before = tc.value.clone();
-    await _pan(t, 7, 100);
+    await _pan(t, 7, 100); // (300,400): kaleme ~900 px uzak
+    expect(tc.value, isNot(before));
+    await hover.removePointer();
+  });
+
+  testWidgets('kalem havada: iki parmak zum çalışır', (t) async {
+    final (_, tc) = await _host(t);
+    final hover = await _hoverAt(t, const Offset(50, 50));
+    await _pinch(t, 100);
+    expect(tc.value.getMaxScaleOnAxis(), greaterThan(1.05));
+    await hover.removePointer();
+  });
+
+  testWidgets('kalem havada: yakın temas (avuç) yutulur, hover bitince geçer', (t) async {
+    final (s, tc) = await _host(t);
+    final hover = await _hoverAt(t, const Offset(320, 420));
+    final before = tc.value.clone();
+    await _pan(t, 8, 100); // (300,400): kaleme ~30 px
     expect(tc.value, before);
-    // Kalem aniden ekran dışına çıktı: olay gelmez, zaman aşımı kilidi açar.
     await hover.removePointer();
     await t.pump(const Duration(milliseconds: 600));
     expect(s.penNear, isFalse);
-    expect(s.viewerLocked.value, isFalse);
-    await _pan(t, 8, 100);
+    await _pan(t, 9, 100);
     expect(tc.value, isNot(before));
+  });
+
+  testWidgets('kalem aşağıdayken tüm dokunmalar yutulur (uzak olsa da)', (t) async {
+    final (s, tc) = await _host(t);
+    final pen = await t.startGesture(const Offset(50, 50), kind: PointerDeviceKind.stylus);
+    expect(s.viewerLocked.value, isTrue);
+    final before = tc.value.clone();
+    await _pan(t, 10, 100);
+    expect(tc.value, before);
+    await pen.up();
+    await t.pumpAndSettle();
+  });
+
+  testWidgets('kalem kalktıktan 150 ms sonra parmak çalışır', (t) async {
+    final (s, tc) = await _host(t);
+    final pen = await t.startGesture(const Offset(300, 400), kind: PointerDeviceKind.stylus);
+    await pen.up();
+    await t.pump(const Duration(milliseconds: 150));
+    expect(s.penActive, isFalse);
+    final before = tc.value.clone();
+    await _pan(t, 11, 100);
+    expect(tc.value, isNot(before));
+  });
+
+  // --- geriye dönük avuç reddi ---
+  Future<void> _palmDown(WidgetTester t, int id, Offset p, {double r = 100}) async {
+    _down(id, p, r);
+    for (var i = 0; i < 6; i++) {
+      p += const Offset(0, -15);
+      _move(id, p, const Offset(0, -15), r);
+      await t.pump(const Duration(milliseconds: 16));
+    }
+  }
+
+  testWidgets('avuç önce: sayfa kayar, kalem hover olunca dönüşüm GERİ gelir, avuç sonra kaydıramaz', (t) async {
+    final (s, tc) = await _host(t);
+    final start = tc.value.clone();
+    await _palmDown(t, 21, const Offset(300, 400));
+    expect(tc.value, isNot(start)); // avuç sıradan parmak gibi sayfayı kaydırdı
+    final hover = await _hoverAt(t, const Offset(340, 380));
+    expect(tc.value, start); // anlık geri alındı
+    expect(s.palm.isPalm(21), isTrue);
+    expect(s.viewerLocked.value, isTrue);
+    await t.pump();
+    var p = const Offset(300, 310);
+    for (var i = 0; i < 6; i++) {
+      p += const Offset(0, -20);
+      _move(21, p, const Offset(0, -20), 100);
+      await t.pump(const Duration(milliseconds: 16));
+    }
+    expect(tc.value, start); // avuç artık kaydıramaz
+    _up(21, p);
+    await t.pump();
+    expect(s.viewerLocked.value, isFalse); // avuç kalkınca görünüm serbest
+    await hover.removePointer();
+    await t.pump(const Duration(milliseconds: 600));
+    await _pan(t, 22, 100);
+    expect(tc.value, isNot(start)); // sonraki parmak çalışır
+  });
+
+  testWidgets('avuç önce + kalem DOWN: dönüşüm geri, çizgi kaydedilir', (t) async {
+    final (s, tc) = await _host(t);
+    final start = tc.value.clone();
+    await _palmDown(t, 23, const Offset(300, 400));
+    expect(tc.value, isNot(start));
+    final pen = await t.startGesture(const Offset(340, 380), kind: PointerDeviceKind.stylus);
+    expect(tc.value, start);
+    for (var i = 0; i < 6; i++) {
+      await pen.moveBy(const Offset(10, 0));
+    }
+    await pen.up();
+    _up(23, const Offset(300, 310));
+    await t.pumpAndSettle();
+    late int n;
+    await t.runAsync(() async {
+      await s.flush();
+      n = (await _repo.forPage(PdfPageOwner('c' * 64, 0), attemptNo: 1, layer: 0)).length;
+    });
+    expect(n, 1);
+  });
+
+  testWidgets('üç temas aynı anda: kalemi beklemeden avuç, görünüm geri alınır', (t) async {
+    final (s, tc) = await _host(t);
+    final start = tc.value.clone();
+    _down(31, const Offset(200, 300), 100);
+    _down(32, const Offset(260, 300), 100);
+    for (var i = 1; i <= 5; i++) {
+      _move(31, Offset(200, 300 - i * 10.0), const Offset(0, -10), 100);
+      _move(32, Offset(260, 300 - i * 10.0), const Offset(0, -10), 100);
+      await t.pump(const Duration(milliseconds: 16));
+    }
+    _down(33, const Offset(320, 300), 100);
+    await t.pump();
+    expect(s.palm.isPalm(33), isTrue);
+    expect(tc.value, start);
+    _up(31, const Offset(200, 250));
+    _up(32, const Offset(260, 250));
+    _up(33, const Offset(320, 300));
+    await t.pump();
+    expect(s.viewerLocked.value, isFalse);
   });
 }

@@ -380,7 +380,7 @@ void main() {
     expect(cols, contains('question_id'));
     if (from >= 15) expect((await d.select(d.inkStrokes).getSingle()).questionId, isNull);
     expect(await d.customSelect("SELECT name FROM sqlite_master WHERE name = 'ix_ink_question'").get(), hasLength(1));
-    expect((await d.customSelect('PRAGMA user_version').getSingle()).read<int>('user_version'), 22);
+    expect((await d.customSelect('PRAGMA user_version').getSingle()).read<int>('user_version'), 23);
     expect(await d.customSelect("SELECT name FROM sqlite_master WHERE name = 'ix_defter_sayfa'").get(), hasLength(1));
     // Yeni defter çalışır ve deftere yazılır.
     final r2 = InkNotebookRepository(d);
@@ -397,7 +397,7 @@ void main() {
 
   test('sıfırdan kurulum: tablolar, indeksler, tetikleyiciler tamam', () async {
     final idx = await db.customSelect("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'ix_defter_%'").get();
-    expect(idx, hasLength(5));
+    expect(idx, hasLength(6)); // + ix_defter_klasor (v23)
     for (final t in ['ink_notebooks', 'ink_note_pages', 'ink_notebook_tags', 'ink_notebook_people', 'ink_page_tags', 'ink_page_people']) {
       expect(LedgerService(db).syncTables.any((x) => x.actualTableName == t), isTrue, reason: t);
     }

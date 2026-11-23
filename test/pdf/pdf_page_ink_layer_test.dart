@@ -190,27 +190,16 @@ void main() {
     },
   );
 
-  testWidgets('kalem havada sayfaya yaklaşınca önceki avuç da kilitlenir', (t) async {
-    final (s, _, sc) = await _host(t);
-    final palm = await t.startGesture(
-      const Offset(300, 450),
-      kind: PointerDeviceKind.touch,
-    );
-    await palm.moveBy(const Offset(0, -20));
-    await t.pump();
-    final before = sc.offset;
+  testWidgets('kalem havada sayfaya yaklaşınca görünüm kilitlenmez (avuç temas bazında yutulur)', (t) async {
+    final (s, _, _) = await _host(t);
     final hover = await t.createGesture(kind: PointerDeviceKind.stylus);
     await hover.addPointer(location: const Offset(100, 300));
     await hover.moveTo(const Offset(110, 300));
-    expect(s.viewerLocked.value, isTrue);
-    await t.pump(); // kilit bir sonraki karede görünüme ulaşır
-    await palm.moveBy(const Offset(0, -60));
-    await palm.up();
-    await t.pumpAndSettle();
-    expect(sc.offset, before);
-    await hover.removePointer();
-    await t.pump(const Duration(seconds: 1)); // havada tutma süresi dolar
+    expect(s.penNear, isTrue);
     expect(s.viewerLocked.value, isFalse);
+    await hover.removePointer();
+    await t.pump(const Duration(seconds: 1));
+    expect(s.penNear, isFalse);
   });
 
   testWidgets('büyük temas (avuç) baştan yutulur, görünümü kaydırmaz', (t) async {
@@ -347,4 +336,25 @@ void main() {
       expect(rows.single.points.first.y, closeTo(200, 0.1));
     },
   );
+
+  testWidgets('kalem iptali (avuç değince ACTION_CANCEL) çizgiyi BİTİRİR ve kaydeder; yeni DOWN yeni çizgi', (t) async {
+    final (s, repo, _) = await _host(t);
+    final g = await t.startGesture(const Offset(100, 300), kind: PointerDeviceKind.stylus);
+    for (var i = 0; i < 5; i++) {
+      await g.moveBy(const Offset(0, -20));
+    }
+    await g.cancel();
+    await t.pump();
+    // iptalden hemen sonra yeni çizgi
+    await _drag(t, const Offset(150, 300), PointerDeviceKind.stylus);
+    expect(await _saved(t, s, repo), hasLength(2));
+  });
+
+  testWidgets('tek noktalık kalem iptali çizgi bırakmaz; parmak iptali yarım çizgiyi atar', (t) async {
+    final (s, repo, _) = await _host(t);
+    final g = await t.startGesture(const Offset(100, 300), kind: PointerDeviceKind.stylus);
+    await g.cancel();
+    await t.pump();
+    expect(await _saved(t, s, repo), isEmpty);
+  });
 }

@@ -190,9 +190,15 @@ class InkBController extends ChangeNotifier implements InkSurface {
   }
 
   /// Çizgi iptal (ACTION_CANCEL): yarım çizgi atılır, deftere girmez.
-  void cancelStroke() {
+  /// [keep] (kalem iptali: avuç değince Android akışı keser): o ana kadarki
+  /// noktalar KAYDEDİLEREK çizgi biter; tek noktalık/çok kısa çizgi yine atılır.
+  void cancelStroke({bool keep = false}) {
     final id = _liveId;
     if (id == null || _disposed) return;
+    if (keep && _live.length >= 2) {
+      endStroke(_live.last);
+      return;
+    }
     _events.add(InkStrokeCancel(id));
     _resetLive();
     notifyListeners();

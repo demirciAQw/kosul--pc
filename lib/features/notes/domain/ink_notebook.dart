@@ -12,10 +12,14 @@ class InkNotebookRecord {
     required this.deleted,
     required this.createdAt,
     required this.updatedAt,
+    this.folderId,
   });
 
   final String id;
   final String title;
+
+  /// Defterin klasörü (v23); null = kökte.
+  final String? folderId;
   final int coverColor;
   final PageTemplate defaultTemplate;
   final int sortOrder;
@@ -41,10 +45,32 @@ class InkNotePageRecord {
     required this.deleted,
     required this.createdAt,
     required this.updatedAt,
+    this.title,
+    this.konuId,
+    this.parentPageId,
+    this.boardX,
+    this.boardY,
+    this.boardW,
+    this.boardH,
   });
 
   final String id;
   final String notebookId;
+
+  /// Sayfa başlığı (v23); null = başlıksız.
+  final String? title;
+
+  /// Bağlı MEB konusu (`curriculum_nodes.id`); null = bağsız.
+  final String? konuId;
+
+  /// Alt sayfaysa ebeveyn sayfa.
+  final String? parentPageId;
+
+  /// Pano konumu ve kart boyutu (null: yerleşmemiş / varsayılan boyut).
+  final double? boardX;
+  final double? boardY;
+  final double? boardW;
+  final double? boardH;
 
   /// Değişmeyen numara: `ink_strokes.notePage` bunu taşır.
   final int pageNo;
