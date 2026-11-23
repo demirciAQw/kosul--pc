@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../health/health_providers.dart';
 import '../../../app/palette.dart';
 import '../../../app/routes.dart';
 import '../../../app/widgets/tone_icon.dart';
@@ -85,6 +86,7 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen> {
         stems: ref.read(stemReportProvider),
         sessions: sessions,
         deadline: settings?.booksDeadline,
+        healthSection: await ref.read(healthReportSectionProvider.future),
       );
       final out = await _temp('Kocum_Claude_Paket$number${full ? '_tum' : ''}_${_stamp(now)}.md');
       await out.writeAsString(report.markdown, flush: true);

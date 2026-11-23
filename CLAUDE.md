@@ -16,7 +16,7 @@ telefon (konu düzeyi) hem tablet (soru düzeyi) için tarif edilmiştir.
   Domain saf Dart: test edilebilir, Flutter'a bağlı değil.
 - Ortak: `lib/core/` (database, media, export, text, notifications, di).
 - Önemli yerler:
-  - `core/database/` tablolar ve göçler (`schemaVersion` şu an 20)
+  - `core/database/` tablolar ve göçler (`schemaVersion` şu an 22)
   - `core/ledger/` değişiklik defteri: HLC, SQLite tetikleyicileri, uygulama/çakışma/geri alma
     (`LedgerService`). Her senkron tablosu tetikleyiciyle deftere yazılır; ayrıntı
     `docs/KABLOSUZ_AKTARIM.md`
@@ -25,6 +25,9 @@ telefon (konu düzeyi) hem tablet (soru düzeyi) için tarif edilmiştir.
     Domain: satır gruplama (`line_grouping.dart`), tanıyıcı arayüzü, sayfa metni, `strokeSignature`.
     Metin `ink_page_text` tablosunda TÜREV veridir (id = sayfa kimliği); çizgilere dokunulmaz.
     Drift akış tuzağı: önbellek anahtarı yalnız SQL metni; düz `SELECT 1` akışları çakışır
+  - `features/health/` sağlık verisi (şema 22; ayrıntı aşağıda "Sağlık verisi"): uyku/nabız/stres,
+    Health Connect (Kotlin kanalı) + Huawei ZIP içe aktarma + elle stres. HASSAS: deftere ve
+    kablosuz eşitlemeye girmez
   - `features/anlik/` anlık notlar, ortak etiketler, kişiler (`((etiket))`, `@kişi`)
   - `features/ledger/` Claude'un değişiklikleri, çakışmalar, silme önerileri ekranları
   - `lib/cli/` + `bin/kocum.dart`: Claude'un veriye eli (`docs/KOCUM_ARACI.md`)
@@ -134,6 +137,27 @@ flutter build linux --release      # build/linux/x64/release/bundle/kocum
 - Testler `test/sync_*_test.dart`: gerçek sunucu ve istemci 127.0.0.1'de;
   geri döngü yalnızca `allowLoopback: true` ile açılır.
 - Android'de INTERNET izni `tool/network_patch.dart` ile eklenir.
+
+### Sağlık verisi (v9.20, şema 22)
+
+- Tablolar `saglik_gunluk` (gün+kaynak tekil), `saglik_stres` (kaynak+zaman tekil),
+  `saglik_uyku_oturum` (kaynak+başlangıç tekil). Kümesi `core/database/health_tables.dart`
+  (`healthTables`): `ledgerExcludedTables` (defter/senkron/tetikleyici yok) ve masaüstü
+  `skippedTables` içinde (bilgisayara birleştirmede alınmaz). Yedek ZIP tüm veritabanı olduğundan
+  sağlık verisi YEDEĞE girer (Ayarlar kartı bunu yazar). "Sağlık verisini sil" üç tabloyu + çakışma
+  tercihlerini siler. Claude raporuna yalnız `saglik.rapora_dahil` (app_meta, varsayılan KAPALI) açıksa
+  `healthSection` girer.
+- Health Connect: `health` paketi KULLANILMADI (compileSdk 37 + AGP 9.1+ + FlutterFragmentActivity ister;
+  burada yalnız android-36). Bunun yerine `tool/health_patch.dart` (saf, idempotent, testli) Kotlin kanalı
+  `kocum/health` ekler (`androidx.health.connect:connect-client:1.1.0`, Apache-2.0; salt OKUMA izinleri,
+  `<queries>`, rationale + `activity-alias`; `FlutterPlugin+ActivityAware`, MainActivity'ye tek satır).
+  Dart tarafı soyut `HealthSource` (`HealthConnectSource`, `UnsupportedHealthSource` masaüstü,
+  `FakeHealthSource` test). Health Connect'te STRES veri türü YOK.
+- Huawei ZIP: şema BİLİNMİYOR. `domain/huawei_zip_parser.dart` önce yapı raporu (yalnız ad), sonra
+  tahmine dayalı ayrıştırma; sentetik testlerle denendi, gerçek dosyayla DENENMEDİ. ZIP okuma
+  `core/export/zip_reader.dart` (yeni paket yok); şifreli ZIP desteklenmez.
+- Elle uyku ile saat uyku çakışırsa kullanıcıya sorulur (`saglik.uyku_tercih.<gün>`); hiçbir kayıt
+  otomatik silinmez/üzerine yazılmaz.
 
 ## Kurallar
 

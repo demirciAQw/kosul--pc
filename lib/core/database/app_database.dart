@@ -45,6 +45,9 @@ part 'app_database.g.dart';
   InkPagePeople,
   PdfPageLayers,
   InkPageText,
+  SaglikGunluk,
+  SaglikStres,
+  SaglikUykuOturum,
 ])
 class AppDatabase extends _$AppDatabase {
   /// Testlerde: `AppDatabase(NativeDatabase.memory())`
@@ -69,8 +72,9 @@ class AppDatabase extends _$AppDatabase {
   /// v19: kalemli defter (ink_notebooks, ink_note_pages) ve etiket/kişi bağları.
   /// v20: PDF sayfa katmanları (pdf_page_layers): filigran temizleme/örtü, dosya değişmez.
   /// v21: el yazısı metni (ink_page_text): sayfa başına türev metin, çizgiler değişmez.
+  /// v22: sağlık verisi (saglik_gunluk, saglik_stres, saglik_uyku_oturum); defter dışı.
   @override
-  int get schemaVersion => 21;
+  int get schemaVersion => 22;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -87,6 +91,7 @@ class AppDatabase extends _$AppDatabase {
           await _createNotebookIndexes();
           await _createPdfLayerIndexes();
           await _createPageTextIndexes();
+          await _createHealthIndexes();
         },
         onUpgrade: (m, from, to) async {
           if (from < 2) {
@@ -211,6 +216,13 @@ class AppDatabase extends _$AppDatabase {
             await m.createTable(inkPageText);
             await _createPageTextIndexes();
           }
+          // v22: sağlık tabloları (14/20/21 → 22 hepsi buradan); eskilere dokunulmaz.
+          if (from < 22) {
+            await m.createTable(saglikGunluk);
+            await m.createTable(saglikStres);
+            await m.createTable(saglikUykuOturum);
+            await _createHealthIndexes();
+          }
           // Tablolar yeniden kurulmuş ya da sütun eklenmiş olabilir: tetikleyiciler baştan.
           await LedgerService(this).installTriggers(rebuild: true);
         },
@@ -238,6 +250,12 @@ class AppDatabase extends _$AppDatabase {
   Future<void> _createPdfLayerIndexes() async {
     await customStatement(
         'CREATE INDEX IF NOT EXISTS ix_pdf_layer_doc ON pdf_page_layers(pdf_document_id, page)');
+  }
+
+  Future<void> _createHealthIndexes() async {
+    await customStatement('CREATE INDEX IF NOT EXISTS ix_saglik_gunluk_gun ON saglik_gunluk(gun)');
+    await customStatement('CREATE INDEX IF NOT EXISTS ix_saglik_stres_zaman ON saglik_stres(zaman)');
+    await customStatement('CREATE INDEX IF NOT EXISTS ix_saglik_uyku_bitis ON saglik_uyku_oturum(bitis)');
   }
 
   Future<void> _createPageTextIndexes() async {

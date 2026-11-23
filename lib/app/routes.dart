@@ -13,6 +13,8 @@ abstract final class AppRoutes {
   static const conflicts = '/tools/cakismalar';
   static const inkLab = '/tools/kalem';
   static const pdfLibrary = '/pdf';
+  static const health = '/saglik';
+  static const huaweiImport = '/saglik/huawei';
   static const notebooks = '/defter';
   static String inkNotebook(String id) => '/defter/$id';
 

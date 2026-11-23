@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../health/health_providers.dart';
 import '../../../core/di/core_providers.dart';
 import '../../../core/export/zip_writer.dart';
 import '../../curriculum/curriculum_providers.dart';
@@ -55,6 +56,7 @@ class _AiReportSheetState extends ConsumerState<_AiReportSheet> {
         questionTexts: ocrQuestionTextsWithFigures(ref.read(ocrRecordsProvider).value ?? const {},
             tags: ref.read(autoTagsProvider)),
         stems: ref.read(stemReportProvider),
+        healthSection: ref.read(healthReportSectionProvider).value,
       );
 
   Future<void> _copy() async {
@@ -107,6 +109,7 @@ class _AiReportSheetState extends ConsumerState<_AiReportSheet> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    ref.watch(healthReportSectionProvider); // ayar açıksa özet hazır olsun
     final cards = ref.watch(allQuestionsProvider).value ?? const <QuestionCard>[];
     final subjects = {for (final c in cards) c.subject}.toList()..sort();
     final preview = _build();

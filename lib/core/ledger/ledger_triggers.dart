@@ -6,6 +6,8 @@
 /// uygulamanın her yeri ve dışarıdan yazan araçlar kendiliğinden kaydolur.
 library;
 
+import '../database/health_tables.dart';
+
 /// Deftere girmeyen tablolar: uygulama ayarları, defterin kendisi ve MEB konu
 /// ağacı (`curriculum_nodes`: her cihaz aynı varlıktan kendisi tohumlar; deftere
 /// girse her açılışta binlerce gereksiz satır ve sahte çakışma çıkardı).
@@ -16,6 +18,8 @@ const ledgerExcludedTables = {
   'cakismalar',
   'esitleme_durum',
   'curriculum_nodes',
+  // Sağlık verisi hassastır; deftere ve kablosuz eşitlemeye girmez.
+  ...healthTables,
 };
 
 const ledgerTriggerPrefix = 'trg_ledger_';

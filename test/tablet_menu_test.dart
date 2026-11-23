@@ -444,6 +444,8 @@ void main() {
       '/session/active': 'aktif oturum: tam ekran zorunlu akış',
       '/mock/karne':
           'extra ister; menüde "Karne içe aktar" dosya seçtirerek açar',
+      '/saglik': 'Ayarlar > Sağlık verisi kartından açılır (yalnız Android)',
+      '/saglik/huawei': 'Ayarlar > Sağlık verisi kartından açılır (yalnız Android)',
     };
 
     test(

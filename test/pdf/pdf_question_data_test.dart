@@ -351,7 +351,7 @@ void main() {
       addTearDown(d.close);
       final cols = {for (final c in await d.customSelect('PRAGMA table_info(question_cards)').get()) c.read<String>('name')};
       expect(cols, containsAll(['pdf_document_id', 'pdf_page', 'pdf_box_left', 'pdf_box_top', 'pdf_box_right', 'pdf_box_bottom']));
-      expect((await d.customSelect('PRAGMA user_version').getSingle()).read<int>('user_version'), 21);
+      expect((await d.customSelect('PRAGMA user_version').getSingle()).read<int>('user_version'), 22);
       final repo = DriftQuestionCardRepository(d);
       expect((await repo.findById('eski'))!.hasPdfAnchor, isFalse);
       // Yeni sütunlu satır yazılır ve tetikleyici onu kapsar.
@@ -392,7 +392,7 @@ void main() {
       await raw.close();
       raw = AppDatabase(NativeDatabase(file));
       addTearDown(raw.close);
-      expect((await raw.customSelect('PRAGMA user_version').getSingle()).read<int>('user_version'), 21);
+      expect((await raw.customSelect('PRAGMA user_version').getSingle()).read<int>('user_version'), 22);
     });
   });
 

@@ -38,6 +38,8 @@ import 'routes.dart';
 import 'tablet.dart';
 import '../features/notes/presentation/ink_notebook_screen.dart';
 import '../features/notes/presentation/notebooks_screen.dart';
+import '../features/health/presentation/health_screen.dart';
+import '../features/health/presentation/huawei_import_screen.dart';
 import '../features/tools/presentation/tools_screen.dart';
 import '../features/tools/presentation/practice_test_screen.dart';
 
@@ -232,6 +234,14 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.inkLab,
         builder: (context, state) => const InkLabPage(),
+      ),
+      GoRoute(
+        path: AppRoutes.health,
+        builder: (context, state) => const TabletFrame(selected: RailItem.ayarlar, child: HealthScreen()),
+      ),
+      GoRoute(
+        path: AppRoutes.huaweiImport,
+        builder: (context, state) => const TabletFrame(selected: RailItem.ayarlar, child: HuaweiImportScreen()),
       ),
       GoRoute(
         path: AppRoutes.pdfLibrary,

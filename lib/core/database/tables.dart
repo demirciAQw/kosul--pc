@@ -838,3 +838,83 @@ class InkPageText extends Table {
   @override
   Set<Column> get primaryKey => {id};
 }
+
+// ───────────────────────── Sağlık verisi (v22) ─────────────────────────
+// HASSAS: üç tablo da değişiklik defterine / kablosuz eşitlemeye / bilgisayara
+// birleştirmeye GİRMEZ (bkz. health_tables.dart). Yedek ZIP'e (veritabanı) girer.
+
+/// Gün başına özet. (gun, kaynak) tekildir.
+@DataClassName('SaglikGunlukRow')
+class SaglikGunluk extends Table {
+  TextColumn get id => text()();
+
+  /// Yerel gün, YYYY-MM-DD (uyku, uyanılan güne yazılır).
+  TextColumn get gun => text()();
+  IntColumn get uykuToplamDk => integer().nullable()();
+  IntColumn get uykuDerinDk => integer().nullable()();
+  IntColumn get uykuHafifDk => integer().nullable()();
+  IntColumn get uykuRemDk => integer().nullable()();
+  IntColumn get uykuUyanikDk => integer().nullable()();
+  IntColumn get uykuBaslangic => integer().nullable()();
+  IntColumn get uykuBitis => integer().nullable()();
+  IntColumn get dinlenmeNabzi => integer().nullable()();
+  RealColumn get ortalamaHrv => real().nullable()();
+  IntColumn get adim => integer().nullable()();
+
+  /// 0..100'e çevrilmiş stres ortalaması / en yükseği (null: veri yok).
+  RealColumn get stresOrtalama => real().nullable()();
+  RealColumn get stresMaks => real().nullable()();
+
+  /// 'health_connect' | 'huawei_zip' | 'manuel'
+  TextColumn get kaynak => text()();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  @override
+  List<Set<Column>> get uniqueKeys => [
+        {gun, kaynak},
+      ];
+}
+
+/// Tek tek stres ölçümü. (kaynak, zaman) tekildir.
+@DataClassName('SaglikStresRow')
+class SaglikStres extends Table {
+  TextColumn get id => text()();
+  IntColumn get zaman => integer()();
+  RealColumn get seviye => real()();
+
+  /// Ölçeğin en büyük değeri: elle 5 (1..5), Huawei 100 (0..100).
+  IntColumn get seviyeMaks => integer().withDefault(const Constant(100))();
+  TextColumn get kaynak => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  @override
+  List<Set<Column>> get uniqueKeys => [
+        {kaynak, zaman},
+      ];
+}
+
+/// Uyku oturumu ve aşamaları. (kaynak, baslangic) tekildir.
+@DataClassName('SaglikUykuOturumRow')
+class SaglikUykuOturum extends Table {
+  TextColumn get id => text()();
+  IntColumn get baslangic => integer()();
+  IntColumn get bitis => integer()();
+  TextColumn get kaynak => text()();
+
+  /// Aşama listesi (JSON): [{"s": başlangıç ms, "e": bitiş ms, "t": "deep|light|rem|awake|…"}]
+  TextColumn get asamaJson => text().withDefault(const Constant('[]'))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  @override
+  List<Set<Column>> get uniqueKeys => [
+        {kaynak, baslangic},
+      ];
+}

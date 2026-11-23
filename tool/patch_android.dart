@@ -7,6 +7,7 @@
 //  - flutter_local_notifications için core library desugaring
 //  - Sabit imza: android/key.properties varsa release APK onunla imzalanır
 //    (yoksa eskisi gibi hata ayıklama anahtarı kullanılır)
+//  - Sağlık verisi: Health Connect salt okuma kanalı (tool/health_patch.dart)
 //  - Eski eklentileri yeni Android SDK ile derleme
 //
 // v0.2: harici kırpıcı (uCrop / image_cropper) kaldırıldı; kırpma uygulama içinde.
@@ -16,6 +17,7 @@ import 'abi_patch.dart';
 import 'camera_patch.dart';
 import 'gece_patch.dart';
 import 'genai_patch.dart';
+import 'health_patch.dart';
 import 'ink_patch.dart';
 import 'network_patch.dart';
 import 'r8_patch.dart';
@@ -46,6 +48,7 @@ void main() {
   _copyLauncherIcons();
   _patchGenAi(kts, groovy);
   _patchInk(kts, groovy);
+  _patchHealth(kts, groovy, manifest);
   _patchR8(kts, groovy);
   _patchGece(kts, groovy);
   _patchAbi(kts, groovy);
@@ -103,6 +106,28 @@ void _patchGenAi(File kts, File groovy) {
     return;
   }
   activity.writeAsStringSync(genAiMainActivity(pkg));
+}
+
+/// Sağlık verisi (Health Connect, salt okuma): bağımlılık, izinler, Kotlin kanalı.
+/// _patchGenAi'den SONRA çalışmalı (MainActivity'yi o yeniden yazar).
+void _patchHealth(File kts, File groovy, File manifest) {
+  if (kts.existsSync()) {
+    kts.writeAsStringSync(patchHealthKts(kts.readAsStringSync()));
+  } else if (groovy.existsSync()) {
+    groovy.writeAsStringSync(patchHealthGroovy(groovy.readAsStringSync()));
+  }
+  manifest.writeAsStringSync(patchHealthManifest(manifest.readAsStringSync()));
+  final root = Directory('android/app/src/main/kotlin');
+  final activity = root.existsSync()
+      ? root.listSync(recursive: true).whereType<File>().where((f) => f.path.endsWith('MainActivity.kt')).firstOrNull
+      : null;
+  final pkg = activity == null ? null : packageOf(activity.readAsStringSync());
+  if (activity == null || pkg == null) {
+    stderr.writeln('Uyarı: MainActivity.kt bulunamadı; sağlık kanalı eklenmedi.');
+    return;
+  }
+  File('${activity.parent.path}/KocumHealth.kt').writeAsStringSync(healthKotlin(pkg));
+  activity.writeAsStringSync(patchHealthMainActivity(activity.readAsStringSync()));
 }
 
 /// Kalem yüzeyi (Jetpack Ink): bağımlılıklar, Kotlin dosyası, MainActivity kaydı.

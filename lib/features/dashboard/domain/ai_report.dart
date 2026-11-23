@@ -94,6 +94,10 @@ AiReport buildAiReport({
   Map<String, String> questionTexts = const {},
   /// Soru kökü analizi (olumsuz, öncüllü, "en …" kökler; tekrar eden kalıplar).
   StemReport? stems,
+
+  /// Hazır sağlık özeti (Markdown). Yalnız kullanıcı "Sağlık verisini Claude raporuna dahil et"
+  /// ayarını açtıysa verilir; null ise rapora hiçbir sağlık verisi girmez.
+  String? healthSection,
 }) {
   final o = options;
   final since = o.since ?? (o.days == null ? null : now.subtract(Duration(days: o.days!)));
@@ -417,6 +421,11 @@ AiReport buildAiReport({
     b
       ..writeln()
       ..writeln('_Bu kapsamda kayıtlı soru yok._');
+  }
+  if (healthSection != null && healthSection.trim().isNotEmpty) {
+    b
+      ..writeln()
+      ..write(healthSection);
   }
   return AiReport(markdown: b.toString(), photos: photos, questionCount: shown.length);
 }
