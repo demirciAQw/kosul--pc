@@ -12,6 +12,7 @@
 // v0.2: harici kırpıcı (uCrop / image_cropper) kaldırıldı; kırpma uygulama içinde.
 import 'dart:io';
 
+import 'abi_patch.dart';
 import 'camera_patch.dart';
 import 'gece_patch.dart';
 import 'genai_patch.dart';
@@ -47,6 +48,7 @@ void main() {
   _patchInk(kts, groovy);
   _patchR8(kts, groovy);
   _patchGece(kts, groovy);
+  _patchAbi(kts, groovy);
   stdout.writeln('Android ayarları tamam.');
 }
 
@@ -61,6 +63,15 @@ void _patchGece(File kts, File groovy) {
   } on GeceYamaHatasi catch (e) {
     stderr.writeln('Deneme sürümü yaması yapılamadı: $e');
     exit(1);
+  }
+}
+
+/// APK boyutu: yalnız arm64-v8a (tool/abi_patch.dart).
+void _patchAbi(File kts, File groovy) {
+  if (kts.existsSync()) {
+    kts.writeAsStringSync(patchAbiKts(kts.readAsStringSync()));
+  } else if (groovy.existsSync()) {
+    groovy.writeAsStringSync(patchAbiGroovy(groovy.readAsStringSync()));
   }
 }
 
