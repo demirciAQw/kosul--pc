@@ -15,6 +15,7 @@ const _tableTitles = <String, String>{
   'anlik_links': 'Not bağı',
   'ink_strokes': 'Çizgi',
   'pdf_documents': 'PDF belgesi',
+  'pdf_page_layers': 'PDF katmanı',
   'ink_notebooks': 'Defter',
   'ink_note_pages': 'Defter sayfası',
   'ink_notebook_tags': 'Defter etiketi',

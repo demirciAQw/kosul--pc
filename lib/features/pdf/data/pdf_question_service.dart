@@ -13,9 +13,12 @@ import '../../ocr/domain/question_text.dart';
 import '../../question_bank/domain/question_bank.dart';
 import '../../question_bank/domain/question_card.dart';
 import '../../question_bank/domain/srs.dart';
+import '../domain/layer_pixels.dart';
+import '../domain/page_layer.dart';
 import '../domain/pdf_document_record.dart';
 import '../domain/pdf_engine.dart';
 import '../domain/question_box.dart';
+import 'pdf_layers_repository.dart';
 import 'pdf_preview_encoder.dart';
 
 /// Bir soru kutusunun incelemesi: metin, kaynağı ve öneriler.
@@ -44,6 +47,7 @@ class PdfQuestionService {
     required this.lexicon,
     this.ocr,
     this.ocrRepository,
+    this.layers,
     this.ocrEngineVersion = 'kocum-okuyucu-2.2',
   });
 
@@ -61,6 +65,9 @@ class PdfQuestionService {
   /// Varsa metin okuma kaydı da yazılır: otomatik etiketler fotoğraf akışıyla aynı çalışır.
   final OcrRepository? ocrRepository;
   final String ocrEngineVersion;
+
+  /// Varsa kırpma, sayfanın görünür filigran/örtü katmanlarıyla yapılır (önizleme ve OCR).
+  final PdfLayersRepository? layers;
 
   static const previewWidth = 480;
   static const ocrWidth = 1400;
@@ -136,8 +143,9 @@ class PdfQuestionService {
     PdfEngineDocument doc,
     int page,
     PdfBox box,
-    int targetWidth,
-  ) async {
+    int targetWidth, {
+    String? documentId,
+  }) async {
     final size = await doc.pageSize(page);
     final plan = planBoxRender(size, box, targetWidth);
     final img = await doc.renderPage(
@@ -158,6 +166,24 @@ class PdfQuestionService {
         o += 4;
         i += 4;
       }
+    }
+    // Görünür katmanlar (filigran temizleme / örtü) kırpmaya da uygulanır.
+    final visible = (layers == null || documentId == null)
+        ? const <PdfPageLayer>[]
+        : visibleLayersFor(await layers!.forPage(documentId, page), page);
+    if (visible.isNotEmpty) {
+      final sx = img.width / size.width, sy = img.height / size.height;
+      final cleaned = await applyLayersInIsolate(
+        out,
+        plan.cropWidth,
+        plan.cropHeight,
+        sx,
+        sy,
+        visible,
+        originX: plan.cropX / sx,
+        originY: plan.cropY / sy,
+      );
+      return (rgba: cleaned, width: plan.cropWidth, height: plan.cropHeight);
     }
     return (rgba: out, width: plan.cropWidth, height: plan.cropHeight);
   }
@@ -185,7 +211,7 @@ class PdfQuestionService {
       final doc = await engine.openFile(pdfPath);
       final EncodedPreview preview;
       try {
-        final crop = await _crop(doc, page, box, previewWidth);
+        final crop = await _crop(doc, page, box, previewWidth, documentId: document.id);
         preview = await encodePreview(crop.rgba, crop.width, crop.height);
       } finally {
         await doc.close();

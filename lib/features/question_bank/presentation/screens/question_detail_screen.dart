@@ -4,17 +4,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../app/routes.dart';
-import '../../../../app/tablet.dart' show isTabletContext;
 import '../../../../core/text/turkish_text.dart';
 import '../../../../core/utils/formatters.dart';
 import '../../../curriculum/curriculum_providers.dart';
 import '../../../curriculum/domain/curriculum.dart';
-import '../../../pdf/domain/solve.dart';
-import '../../../pdf/pdf_providers.dart';
 import '../../../pdf/presentation/solve_time_section.dart';
 import '../../domain/question_card.dart';
 import '../../question_bank_providers.dart';
 import '../widgets/media_image.dart';
+import '../widgets/question_actions.dart';
 import '../../../../app/palette.dart';
 import '../../../settings/settings_providers.dart';
 import '../../../ocr/ocr_providers.dart';
@@ -54,8 +52,6 @@ class _QuestionDetailScreenState extends ConsumerState<QuestionDetailScreen> {
 
     Widget meta(String text) => Chip(label: Text(text), visualDensity: VisualDensity.compact);
 
-    final canSolve = solveSpaceOf(hasPdfAnchor: card.hasPdfAnchor, hasImage: card.questionImage != null) !=
-        SolveSpace.none;
     return Scaffold(
       appBar: AppBar(
         title: Text(card.status.label),
@@ -68,36 +64,8 @@ class _QuestionDetailScreenState extends ConsumerState<QuestionDetailScreen> {
               color: card.isStarred ? KocumColors.star : null,
             ),
           ),
-          if (card.hasPdfAnchor && (ref.watch(pdfAvailableProvider(card.pdfDocumentId!)).value ?? false))
-            IconButton(
-              key: const Key('detail-open-pdf'),
-              tooltip: 'PDF\'te göster',
-              onPressed: () {
-                final b = card.pdfBox!;
-                context.push(AppRoutes.pdfReaderAt(card.pdfDocumentId!, card.pdfPage!, b.left, b.top, b.right, b.bottom,
-                    questionId: card.id));
-              },
-              icon: const Icon(Icons.picture_as_pdf_outlined),
-            ),
-          // Çiz / Çöz: fotoğraflı ve PDF'li kartlarda. Telefonda da açılır; yalnız kalem çizer
-          // (parmak kaydırır/yakınlaştırır), kalemi olmayan telefonda yalnızca görüntü gezilir.
-          if (canSolve)
-            IconButton(
-              key: const Key('detail-solve'),
-              tooltip: 'Çiz / Çöz',
-              onPressed: () => context.push(AppRoutes.questionSolve(card.id)),
-              icon: const Icon(Icons.draw_outlined),
-            ),
-          IconButton(
-            tooltip: 'Düzenle',
-            onPressed: () => context.push(AppRoutes.editQuestion(card.id)),
-            icon: const Icon(Icons.edit_outlined),
-          ),
-          PopupMenuButton<String>(
-            onSelected: (_) => _confirmDelete(card),
-            itemBuilder: (context) => const [PopupMenuItem(value: 'delete', child: Text('Soruyu sil'))],
-          ),
         ],
+        bottom: QuestionActionBar(card: card, keyPrefix: 'detail', onAction: (a) => _onAction(card, a)),
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
@@ -118,19 +86,6 @@ class _QuestionDetailScreenState extends ConsumerState<QuestionDetailScreen> {
                 subtitle: const Text('Fotoğrafı yok. Eklemek için dokun.'),
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => context.push(AppRoutes.editQuestion(card.id)),
-              ),
-            ),
-          if (canSolve && isTabletContext(context))
-            Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: FilledButton.tonalIcon(
-                  key: const Key('detail-solve-big'),
-                  onPressed: () => context.push(AppRoutes.questionSolve(card.id)),
-                  icon: const Icon(Icons.draw_outlined),
-                  label: const Text('Çiz / Çöz'),
-                ),
               ),
             ),
           const SizedBox(height: 12),
@@ -205,22 +160,20 @@ class _QuestionDetailScreenState extends ConsumerState<QuestionDetailScreen> {
     );
   }
 
-  Future<void> _confirmDelete(QuestionCard card) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (dialog) => AlertDialog(
-        title: const Text('Soruyu sil?'),
-        content: const Text('Soru, çözümü ve fotoğrafları kalıcı olarak silinir.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialog, false), child: const Text('Vazgeç')),
-          FilledButton(onPressed: () => Navigator.pop(dialog, true), child: const Text('Sil')),
-        ],
-      ),
-    );
-    if (ok != true || !mounted) return;
+  Future<void> _onAction(QuestionCard card, QuestionAction action) async {
     final router = GoRouter.of(context);
-    await ref.read(deleteQuestionCardProvider).call(card.id);
-    if (router.canPop()) router.pop();
+    final deleted = await performQuestionAction(context, ref, card, action);
+    if (!mounted) return;
+    if (action == QuestionAction.select) {
+      final n = ref.read(questionSelectionProvider).length;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(
+          content: Text(n == 0 ? 'Seçim kalktı.' : '$n soru seçili. Defterde devam edebilirsin.'),
+          duration: const Duration(seconds: 2),
+        ));
+    }
+    if (deleted && router.canPop()) router.pop();
   }
 }
 

@@ -659,6 +659,37 @@ class PdfDocuments extends Table {
   List<String> get customConstraints => ['CHECK (id = sha256)'];
 }
 
+// ───────────── PDF sayfa katmanları (v20) ─────────────
+
+/// PDF görüntüleme katmanı: filigran temizleme ya da renkli örtü. PDF dosyası
+/// ASLA değişmez; katman yalnızca görüntülemede uygulanır ve kullanıcı verisi
+/// gibi senkron olur. `page`: 0'dan; -1 = belgenin TÜM sayfaları. Kutu (PDF
+/// sayfa birimi, sol-üst, y aşağı) null ise tüm sayfa. `kind`: watermark | cover.
+/// `params`: JSON (filigran: tone, strength, hueRange; örtü: color, opacity).
+/// `z`: küçük olan altta. Silme yumuşaktır (`deleted`). Belge için yabancı anahtar
+/// yok: PDF satırı başka cihazdan sonra gelebilir.
+@DataClassName('PdfPageLayerRow')
+class PdfPageLayers extends Table {
+  TextColumn get id => text()();
+  TextColumn get pdfDocumentId => text()();
+  IntColumn get page => integer()();
+  TextColumn get kind => text()();
+  RealColumn get boxLeft => real().nullable()();
+  RealColumn get boxTop => real().nullable()();
+  RealColumn get boxRight => real().nullable()();
+  RealColumn get boxBottom => real().nullable()();
+  TextColumn get params => text().withDefault(const Constant('{}'))();
+  IntColumn get z => integer().withDefault(const Constant(0))();
+  TextColumn get name => text().withDefault(const Constant(''))();
+  BoolColumn get visible => boolean().withDefault(const Constant(true))();
+  BoolColumn get deleted => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
 // ───────────── Kalemli defter (v19) ─────────────
 
 /// Kalemli defter (T6). Anlık notlardan (`anlik_notes`) ve ders notlarından

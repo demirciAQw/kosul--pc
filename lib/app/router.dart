@@ -4,7 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../features/anlik/presentation/anlik_screens.dart';
 import '../features/dashboard/presentation/dashboard_screen.dart';
 import '../features/ink/presentation/ink_lab_page.dart';
-import '../features/pdf/domain/pdf_engine.dart' show PdfBox;
+import '../features/pdf/domain/book_analysis.dart' show ReaderLink;
 import '../features/pdf/presentation/pdf_library_page.dart';
 import '../features/pdf/presentation/pdf_reader_page.dart';
 import '../features/pdf/presentation/pdf_solve_page.dart';
@@ -257,27 +257,15 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/pdf/:id',
         builder: (context, state) {
-          final page = int.tryParse(state.uri.queryParameters['page'] ?? '');
-          final parts = (state.uri.queryParameters['box'] ?? '')
-              .split(',')
-              .map(double.tryParse)
-              .toList();
-          final ok =
-              page != null &&
-              page >= 0 &&
-              parts.length == 4 &&
-              parts.every((v) => v != null && v.isFinite) &&
-              parts[2]! > parts[0]! &&
-              parts[3]! > parts[1]!;
+          final link = ReaderLink.parse(state.uri.queryParameters);
           return TabletFrame(
             selected: RailItem.kitaplik,
             child: PdfReaderPage(
               documentId: state.pathParameters['id']!,
-              initialPage: ok ? page : null,
-              highlight: ok
-                  ? PdfBox(parts[0]!, parts[1]!, parts[2]!, parts[3]!)
-                  : null,
-              questionId: ok ? state.uri.queryParameters['q'] : null,
+              initialPage: link.page,
+              analysis: link.analysis,
+              highlight: link.box,
+              questionId: link.questionId,
             ),
           );
         },

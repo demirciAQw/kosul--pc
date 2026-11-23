@@ -15,7 +15,15 @@ class LedgerSyncResult {
     this.photosSent = 0,
     this.photosReceived = 0,
     this.rounds = 0,
+    this.snapshotRows = 0,
+    this.snapshotPending = false,
   });
+
+  /// Tam durumdan eklenen (cihazda eksik olan) satır sayısı.
+  final int snapshotRows;
+
+  /// Tam durum henüz bitmedi (tur sınırı ya da kopma); bir sonraki eşitleme sürdürür.
+  final bool snapshotPending;
 
   final int sent;
   final int received;
@@ -30,6 +38,8 @@ class LedgerSyncResult {
         '$received alındı',
         if (photosSent > 0) '$photosSent fotoğraf gitti',
         if (photosReceived > 0) '$photosReceived fotoğraf geldi',
+        if (snapshotRows > 0) 'bilgisayardan $snapshotRows eski kayıt alındı',
+        if (snapshotPending) 'tam durum sürüyor (yeniden eşitle)',
         if (conflicts > 0) '$conflicts çakışma (Çakışmalar listesinde)',
         if (failed > 0) '$failed değişiklik uygulanamadı',
       ].join(', ');
@@ -69,6 +79,11 @@ class LedgerSync {
       await ledger.setIntState(LedgerService.keyRelayReset, 1);
     }
     final device = await ledger.deviceId();
+    // Tam durum (v9.15): yeni eşleşen cihaz bilgisayardaki tüm güncel satırları ister;
+    // bitene dek defter geçmişi yeniden oynatılmaz (sahte çakışma çıkmasın).
+    var snapshotWanted = await ledger.intState(LedgerService.keyNeedSnapshot) == 1;
+    var snapshotRows = 0;
+    var snapshotDoneNow = false;
     var result = const LedgerSyncResult();
     for (var round = 1; round <= maxRounds; round++) {
       final sentCursor = await ledger.intState(LedgerService.keySentSeq);
@@ -80,9 +95,18 @@ class LedgerSync {
       final photosSent = await _uploadPhotos(connection, out);
 
       onProgress?.call('Değişiklikler gönderiliyor ($round. tur)…');
+      final snapCursor = snapshotWanted ? (await ledger.textState(LedgerService.keySnapshotCursor) ?? '') : null;
+      if (snapCursor != null) onProgress?.call('Bilgisayardaki kayıtlar alınıyor…');
       final response = await client.exchangeLedger(
         connection,
-        LedgerRequest(schema: schemaVersion, device: device, received: receivedCursor, changes: out, lastSeq: lastOut),
+        LedgerRequest(
+          schema: schemaVersion,
+          device: device,
+          received: receivedCursor,
+          changes: out,
+          lastSeq: lastOut,
+          snapshotCursor: snapCursor,
+        ),
       );
 
       var photosReceived = 0;
@@ -99,6 +123,30 @@ class LedgerSync {
       // Uygulama bitti: imleçler ilerler.
       if (response.acked > sentCursor) await ledger.setIntState(LedgerService.keySentSeq, response.acked);
       if (response.lastSeq > receivedCursor) await ledger.setIntState(LedgerService.keyReceivedSeq, response.lastSeq);
+      if (snapCursor != null) {
+        // Bilgisayarın defter sırası ilk sayfada kaydedilir; tam durum bitince alınan-sıra oraya çekilir.
+        if (await ledger.intState(LedgerService.keySnapshotMarker) == 0 && response.snapshotMarker > 0) {
+          await ledger.setIntState(LedgerService.keySnapshotMarker, response.snapshotMarker);
+        }
+        snapshotRows += (await ledger.applySnapshot(response.snapshot)).applied;
+        final next = response.snapshotNext;
+        if (next == null) {
+          final marker = await ledger.intState(LedgerService.keySnapshotMarker);
+          // YALNIZ boş cihazda (alınan sıra 0) imleç işarete çekilir. Dolu cihazda imleç KORUNUR:
+          // tam durum var olan satıra dokunmaz, silineni bilmez; N+1..M arası güncelleme ve
+          // silmeler normal akışla gelir (yeniden oynatma "aynıysa atla" ile güvenlidir).
+          if (await ledger.intState(LedgerService.keyReceivedSeq) == 0 && marker > 0) {
+            await ledger.setIntState(LedgerService.keyReceivedSeq, marker);
+          }
+          await ledger.setIntState(LedgerService.keySnapshotMarker, 0);
+          await ledger.setTextState(LedgerService.keySnapshotCursor, '');
+          await ledger.setIntState(LedgerService.keyNeedSnapshot, 0);
+          snapshotWanted = false;
+          snapshotDoneNow = true;
+        } else {
+          await ledger.setTextState(LedgerService.keySnapshotCursor, next);
+        }
+      }
 
       result = LedgerSyncResult(
         sent: result.sent + out.length,
@@ -108,9 +156,13 @@ class LedgerSync {
         photosSent: result.photosSent + photosSent,
         photosReceived: result.photosReceived + photosReceived,
         rounds: round,
+        snapshotRows: snapshotRows,
+        snapshotPending: snapshotWanted,
       );
       final moreHere = out.length >= ledgerBatch;
-      if (!moreHere && !response.more) break;
+      // Tam durum az önce bitti: sıra işaretinden sonraki değişiklikler için bir tur daha.
+      if (!moreHere && !response.more && !snapshotWanted && !snapshotDoneNow) break;
+      snapshotDoneNow = false;
     }
     return result;
   }

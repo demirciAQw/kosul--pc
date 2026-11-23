@@ -151,13 +151,21 @@ void main() {
       expect(await desktopStore.phone(), isNull);
     });
 
-    test('en fazla bir telefon: ikinci telefon eşleşemez, kod ekranı da açılmaz', () async {
+    test('birden çok cihaz: ikinci cihaz eşleşir, birincisi kopmaz; yuvalar dolunca yenisi reddedilir', () async {
       await server.openPairing();
       await pair();
+      // Yeni cihaz için kod ekranı yine açılır; mevcut eşleşme kopmaz.
+      final code = (await server.openPairing()).code;
+      await pair(code: code, id: 'telefon0002bb');
+      expect((await desktopStore.devices()).map((d) => d.id), [phoneId, 'telefon0002bb']);
+      for (final id in ['telefon0003cc', 'telefon0004dd']) {
+        await pair(code: (await server.openPairing()).code, id: id);
+      }
+      expect((await desktopStore.devices()), hasLength(SyncLimits.maxDevices));
       await expectLater(server.openPairing(), throwsA(isA<SyncException>()));
       await expectLater(
-        client.pair(host: '127.0.0.1', port: server.port!, code: '123456', phoneId: 'telefon0002bb', phoneName: 'x', platform: 'android'),
-        throwsA(isA<SyncException>().having((e) => e.message, 'mesaj', contains('zaten bir telefonla'))),
+        client.pair(host: '127.0.0.1', port: server.port!, code: '123456', phoneId: 'telefon0005ee', phoneName: 'x', platform: 'android'),
+        throwsA(isA<SyncException>().having((e) => e.message, 'mesaj', contains('dolu'))),
       );
       expect((await desktopStore.phone())!.id, phoneId);
     });
@@ -321,7 +329,7 @@ void main() {
     });
 
     test('eşleşme bilgisayardan kaldırılınca telefon bağlanamaz', () async {
-      await server.forgetPhone();
+      await server.forgetDevice(phoneId);
       await expectLater(client.connect(computer, phoneId: phoneId), throwsA(isA<SyncException>()));
     });
   });

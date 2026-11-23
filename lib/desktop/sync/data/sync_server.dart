@@ -34,8 +34,16 @@ class SyncEvent {
 ///
 /// Neye dokunur: yalnızca fotoğraf klasörü (doğrulanmış yollar) ve kendi
 /// geçici klasörü; veriyi içe aktarma her zamanki birleştirmeden geçer.
-/// Telefona genel dosya okutmaz; listeleme isteği yoktur. Tek istisna: bilgisayarın
-/// kendi değişikliklerinde geçen fotoğrafların telefona verilmesi (`_photoGet`).
+/// Telefona genel dosya okutmaz; listeleme isteği yoktur. Üç dar istisna:
+/// bilgisayarın kendi değişikliklerinde geçen fotoğrafların verilmesi (`_photoGet`),
+/// imzalı "bu PDF özeti var mı?" sorusu (`_pdf`, gövdesiz PUT) ve bilgisayarın
+/// `pdf_documents` satırında geçen PDF'in verilmesi (`_pdfGet`, `pdf-al`).
+///
+/// Çok cihaz (v9.15): en çok [SyncLimits.maxDevices] telefon/tablet aynı anda
+/// eşleşik olur; her birinin ayrı kimliği, anahtarı, oturumu ve sıra sayacı vardır.
+/// Cihazlar eşzamanlı istek yapabilir; yalnızca veritabanına dokunan bölümler
+/// (defter alışverişi, yedek içe aktarma) sırayla çalışır, bekleyen istek hata
+/// almaz, sırasını bekler.
 class SyncServer {
   SyncServer({
     required this.store,
@@ -48,6 +56,7 @@ class SyncServer {
     Random? random,
     DateTime Function()? now,
     this.allowLoopback = false,
+    this.lockWait = const Duration(seconds: 20),
   })  : _random = random ?? Random.secure(),
         _now = now ?? DateTime.now {
     _pairing = PairingWindow(random: _random, now: _now);
@@ -73,6 +82,10 @@ class SyncServer {
   /// Yalnızca testler: aynı bilgisayardan (127.0.0.1) gelen isteği kabul et.
   final bool allowLoopback;
 
+  /// Veritabanı kilidini en çok bu kadar bekler; geçerse 409 "meşgul" (istemci zaman
+  /// aşımından kısa: kopmuş isteğin işi sonradan uygulanmaz).
+  final Duration lockWait;
+
   final Random _random;
   final DateTime Function() _now;
   late final PairingWindow _pairing;
@@ -83,10 +96,19 @@ class SyncServer {
   HttpServer? _http;
   RawDatagramSocket? _udp;
   DhKeyPair? _dh;
-  SyncSession? _session;
-  bool _importing = false;
-  int _expected = 0;
-  int _received = 0;
+
+  /// Açık oturumlar (oturum kimliği → oturum); her cihazın en çok bir oturumu.
+  final _sessions = <String, SyncSession>{};
+
+  /// Veritabanına yazan işler (defter, yedek) sırayla; cihazlar birbirini bekler.
+  final _dbLock = _Mutex();
+
+  /// Büyük yedek içe aktarılırken (kilit uzun sürer) defter istekleri bekletilmez: 409 "meşgul".
+  bool _backupRunning = false;
+
+  /// Yanıtı süren istekler (cihaz kaldırılınca iptal edilir).
+  final _open = <_Ctx>{};
+  final _photoProgress = <String, ({int expected, int received})>{};
   String _computerId = '';
   String _computerName = '';
   late Directory _incoming;
@@ -134,7 +156,7 @@ class SyncServer {
 
   Future<void> stop() async {
     closePairing();
-    _session = null;
+    _sessions.clear();
     _udp?.close();
     _udp = null;
     final http = _http;
@@ -147,11 +169,12 @@ class SyncServer {
     await _events.close();
   }
 
-  /// Kod ekranını açar. Eşleşmiş telefon varken açılmaz: en fazla bir telefon.
+  /// Kod ekranını açar. Mevcut cihazlar kopmaz; yalnızca yuvalar doluysa açılmaz.
   Future<PairingCode> openPairing() async {
     if (_http == null) throw const SyncException('Önce kablosuz almayı aç.');
-    if (await store.phone() != null) {
-      throw const SyncException('Bu bilgisayar zaten bir telefonla eşleşmiş. Yeni telefon için önce eşleşmeyi kaldır.');
+    if ((await store.devices()).length >= SyncLimits.maxDevices) {
+      throw const SyncException(
+          'Bu bilgisayar en çok ${SyncLimits.maxDevices} cihazla eşleşebilir. Yeni cihaz için önce birini kaldır.');
     }
     _dh = DhKeyPair.generate(_random);
     return _pairing.open();
@@ -162,9 +185,21 @@ class SyncServer {
     _dh = null;
   }
 
-  Future<void> forgetPhone() async {
-    _session = null;
-    await store.removePhone();
+  /// Yalnızca bu cihazın eşleşmesi ve oturumu kalkar; diğerleri etkilenmez.
+  Future<void> forgetDevice(String id) async {
+    _sessions.removeWhere((_, s) => s.phoneId == id);
+    for (final c in _open.where((c) => c.deviceId == id)) {
+      c.aborted = true;
+    }
+    await store.removeDevice(id);
+  }
+
+  Future<void> forgetAllDevices() async {
+    _sessions.clear();
+    for (final c in _open) {
+      c.aborted = true;
+    }
+    await store.removeAllDevices();
   }
 
   void _emit(SyncEventKind kind, String message) {
@@ -193,6 +228,18 @@ class SyncServer {
 
   Future<void> _handle(HttpRequest request) async {
     final ctx = _Ctx(request);
+    _open.add(ctx);
+    // Bağlantı kopunca (yanıt tamamlanmadan) iş kilitten çıkınca uygulanmaz (en iyi çaba).
+    unawaited(request.response.done.then<void>((_) => ctx.gone = true, onError: (Object _) => ctx.gone = true));
+    try {
+      await _handleInner(ctx);
+    } finally {
+      _open.remove(ctx);
+    }
+  }
+
+  Future<void> _handleInner(_Ctx ctx) async {
+    final request = ctx.request;
     final remote = request.connectionInfo?.remoteAddress;
     final address = remote?.address ?? '';
     try {
@@ -210,6 +257,10 @@ class SyncServer {
       }
       if (request.method == 'POST' && request.uri.path == SyncPaths.photoGet) {
         await _photoGet(ctx);
+        return;
+      }
+      if (request.method == 'POST' && request.uri.path == SyncPaths.pdfGet) {
+        await _pdfGet(ctx);
         return;
       }
       final handlers = <String, Future<Map<String, Object?>> Function()>{
@@ -241,16 +292,16 @@ class SyncServer {
   }
 
   Future<Map<String, Object?>> _hello() async {
-    final phone = await store.phone();
+    final full = (await store.devices()).length >= SyncLimits.maxDevices;
     final code = pairing;
     final dh = _dh;
-    final open = code != null && dh != null && phone == null;
+    final open = code != null && dh != null && !full;
     return SyncHello(
       id: _computerId,
       name: _computerName,
       platform: platform,
       pairingOpen: open,
-      paired: phone != null,
+      paired: full,
       challenge: _challenges.issue(),
       dhPublic: open ? dh.publicHex : null,
     ).toJson();
@@ -259,11 +310,12 @@ class SyncServer {
   Future<Map<String, Object?>> _pair(_Ctx ctx) async {
     final json = _decode(await _readBytes(ctx, SyncLimits.jsonBody));
     final req = _parse(() => PairRequest.fromJson(json));
-    if (await store.phone() != null) {
+    final existing = await store.devices();
+    if (existing.length >= SyncLimits.maxDevices && !existing.any((d) => d.id == req.phoneId)) {
       throw const _Reject(
         409,
-        'Bu bilgisayar zaten bir telefonla eşleşmiş. Yeni telefon için önce bilgisayarda '
-        'Ayarlar → Telefon eşleştirme → Eşleşmeyi kaldır.',
+        'Bu bilgisayar en çok ${SyncLimits.maxDevices} cihazla eşleşebilir. Yeni cihaz için önce bilgisayarda '
+        'Ayarlar → Cihaz eşleştirme → bir cihazı kaldır.',
         counts: false,
       );
     }
@@ -297,14 +349,16 @@ class SyncServer {
       }
       throw _Reject(403, 'Kod yanlış. Kalan hak: ${code.attemptsLeft}.');
     }
-    final phone = PairedPhone(
+    final phone = PairedDevice(
       id: req.phoneId,
       name: cleanDeviceName(req.name),
       platform: req.platform,
+      kind: req.kind,
       key: key,
       pairedAt: _now(),
     );
-    await store.savePhone(phone);
+    await store.saveDevice(phone);
+    _sessions.removeWhere((_, s) => s.phoneId == phone.id); // yeniden eşleşen cihazın eski oturumu geçersiz
     closePairing();
     _emit(SyncEventKind.paired, phone.name);
     return PairResponse(
@@ -318,17 +372,19 @@ class SyncServer {
   Future<Map<String, Object?>> _startSession(_Ctx ctx) async {
     final json = _decode(await _readBytes(ctx, SyncLimits.jsonBody));
     final req = _parse(() => SessionRequest.fromJson(json));
-    final phone = await store.phone();
-    if (phone == null || !safeEquals(req.phoneId, phone.id)) {
-      throw const _Reject(401, 'Bu telefon bu bilgisayarla eşleşmemiş. Telefonda eşleşmeyi kaldırıp yeniden eşleştir.');
+    final phone = await store.device(req.phoneId);
+    if (phone == null) {
+      throw const _Reject(401, 'Bu cihaz bu bilgisayarla eşleşmemiş. Cihazda eşleşmeyi kaldırıp yeniden eşleştir.');
     }
     if (!_challenges.consume(req.challenge)) throw const _Reject(401, 'İsteğin süresi geçti; yeniden dene.');
     if (!safeEquals(proofOf(phone.key, ProofLabels.phoneSession, [req.challenge, phone.id]), req.proof)) {
       _emit(SyncEventKind.rejected, 'Anahtarı tutmayan bir bağlanma denemesi reddedildi.');
       throw const _Reject(401, 'Anahtar tutmadı. Telefonda eşleşmeyi kaldırıp yeniden eşleştir.');
     }
-    final session = SyncSession(id: randomToken(_random), phoneId: phone.id, now: _now());
-    _session = session;
+    final now = _now();
+    _sessions.removeWhere((_, s) => s.phoneId == phone.id || s.isExpired(now)); // cihaz başına tek oturum
+    final session = SyncSession(id: randomToken(_random), phoneId: phone.id, now: now);
+    _sessions[session.id] = session;
     _emit(SyncEventKind.session, '${phone.name} bağlandı.');
     return SessionResponse(
       session: session.id,
@@ -337,7 +393,7 @@ class SyncServer {
   }
 
   Future<Map<String, Object?>> _photoList(_Ctx ctx) async {
-    final signed = await _claim(ctx.request);
+    final signed = await _claim(ctx);
     final bytes = await _readBytes(ctx, SyncLimits.jsonBody);
     _verify(ctx.request, signed, sha256Hex(bytes));
     final json = _decode(bytes);
@@ -348,14 +404,13 @@ class SyncServer {
       sizes[e.path] = await _localSize(e.path);
     }
     final result = selectMissingMedia(req.photos, sizes);
-    _expected = result.missing.length;
-    _received = 0;
+    _photoProgress[signed.phone.id] = (expected: result.missing.length, received: 0);
     _emit(SyncEventKind.photo, 'Telefonda ${req.photos.length} fotoğraf var; ${result.missing.length} tanesi gelecek.');
     return PhotoListResponse(missing: result.missing, rejected: result.rejected).toJson();
   }
 
   Future<Map<String, Object?>> _photo(_Ctx ctx) async {
-    final signed = await _claim(ctx.request);
+    final signed = await _claim(ctx);
     final path = ctx.request.headers.value(SyncHeaders.mediaPath) ?? '';
     if (!isTransferableMediaPath(path)) throw const _Reject(400, 'Fotoğraf yolu kurallara uymuyor; alınmadı.');
     final temp = File(p.join(_incoming.path, '${randomToken(_random)}.part'));
@@ -374,8 +429,10 @@ class SyncServer {
     } finally {
       if (await temp.exists()) await temp.delete();
     }
-    _received++;
-    _emit(SyncEventKind.photo, 'Fotoğraf alındı: $_received / $_expected');
+    final progress = _photoProgress[signed.phone.id] ?? (expected: 0, received: 0);
+    _photoProgress[signed.phone.id] = (expected: progress.expected, received: progress.received + 1);
+    _emit(SyncEventKind.photo,
+        '${signed.phone.name}: fotoğraf alındı: ${progress.received + 1} / ${progress.expected}');
     return {'tamam': true};
   }
 
@@ -395,7 +452,7 @@ class SyncServer {
     final root = pdfRoot;
     if (root == null) throw const _Reject(404, 'Bu bilgisayar PDF almıyor.', counts: false);
     final request = ctx.request;
-    final signed = await _claim(request);
+    final signed = await _claim(ctx);
     final name = request.headers.value(SyncHeaders.mediaPath) ?? '';
     final sha = shaOfPdfName(name);
     if (sha == null) throw const _Reject(400, 'PDF adı kurallara uymuyor; alınmadı.');
@@ -448,22 +505,18 @@ class SyncServer {
   Future<Map<String, Object?>> _ledger(_Ctx ctx) async {
     final exchange = ledger;
     if (exchange == null) throw const _Reject(404, 'Bu bilgisayar değişiklik alışverişini desteklemiyor.', counts: false);
-    final signed = await _claim(ctx.request);
+    final signed = await _claim(ctx);
     final bytes = await _readBytes(ctx, SyncLimits.jsonBody);
     _verify(ctx.request, signed, sha256Hex(bytes));
     ctx.signed = signed;
-    if (_importing) {
-      throw const _Reject(409, 'Bilgisayar şu an bir yedeği içe aktarıyor; biraz sonra tekrar dene.', counts: false);
-    }
     final req = _parse(() => LedgerRequest.fromJson(_decode(bytes)));
-    _importing = true;
-    try {
-      final response = await exchange.handle(req);
-      _emit(SyncEventKind.imported, 'Değişiklikler: ${response.summary}; ${response.changes.length} değişiklik telefona gidiyor.');
-      return response.toJson();
-    } finally {
-      _importing = false;
-    }
+    // Başka bir cihazın alışverişi ya da yedeği sürüyorsa sırayı bekler (hata almaz).
+    if (_backupRunning) throw const _Reject(409, 'Bilgisayar büyük bir veriyi içe aktarıyor (meşgul); biraz sonra tekrar dene.', counts: false);
+    final response = await _locked(ctx, signed, () => exchange.handle(req, peer: signed.phone.id));
+    unawaited(store.touchDevice(signed.phone.id, _now()));
+    _emit(SyncEventKind.imported,
+        '${signed.phone.name}: ${response.summary}; ${response.changes.length} değişiklik cihaza gidiyor.');
+    return response.toJson();
   }
 
   /// Bilgisayarın telefona vereceği fotoğraf: yalnızca bilgisayarın kendi
@@ -471,11 +524,11 @@ class SyncServer {
   Future<void> _photoGet(_Ctx ctx) async {
     final exchange = ledger;
     if (exchange == null) throw const _Reject(404, 'Bilinmeyen istek.');
-    final signed = await _claim(ctx.request);
+    final signed = await _claim(ctx);
     final bytes = await _readBytes(ctx, SyncLimits.jsonBody);
     _verify(ctx.request, signed, sha256Hex(bytes));
     final path = _parse(() => PhotoGetRequest.fromJson(_decode(bytes))).path;
-    if (!await exchange.maySend(path)) throw const _Reject(404, 'Bu fotoğraf verilemez.');
+    if (!await exchange.maySend(path, device: signed.phone.id)) throw const _Reject(404, 'Bu fotoğraf verilemez.');
     final file = _mediaFile(path);
     await _ensureInsideMedia(file);
     final stat = await file.stat();
@@ -502,46 +555,126 @@ class SyncServer {
     }
   }
 
-  Future<Map<String, Object?>> _backup(_Ctx ctx) async {
-    final signed = await _claim(ctx.request);
-    if (_importing) {
-      throw const _Reject(409, 'Bilgisayar şu an bir yedeği içe aktarıyor; biraz sonra tekrar gönder.', counts: false);
+  /// PDF'i cihaza verir (`pdf-al`, v9.15, isteğe bağlı: cihazda ayar varsayılan KAPALI).
+  ///
+  /// Üçüncü dar istisna. Genel dosya okuma değildir: imza şart; ad yalnızca
+  /// `^[0-9a-f]{64}\.pdf$`; özet bilgisayarın `pdf_documents` satırında geçmek
+  /// zorunda (yoksa 404, varlık bilgisi sızmaz); hedef `pdfs/` altında gerçek
+  /// dosya olmalı (symlink reddi); boyut en çok [SyncLimits.pdf]. Gövde
+  /// `baslangic` bayttan itibaren akıtılır (kopan indirme kaldığı yerden sürer).
+  /// Yanıt imzası "ad|başlangıç|toplam" üzerindedir (dosyayı iki kez okumayız);
+  /// asıl bütünlük kanıtı ADIN kendisidir: istemci baytların SHA-256'sını adla
+  /// karşılaştırır, tutmazsa atar.
+  Future<void> _pdfGet(_Ctx ctx) async {
+    final root = pdfRoot;
+    final exchange = ledger;
+    if (root == null || exchange == null) throw const _Reject(404, 'Bu bilgisayar PDF vermiyor.', counts: false);
+    final signed = await _claim(ctx);
+    final bytes = await _readBytes(ctx, SyncLimits.jsonBody);
+    _verify(ctx.request, signed, sha256Hex(bytes));
+    final req = _parse(() => PdfGetRequest.fromJson(_decode(bytes)));
+    final sha = shaOfPdfName(req.name);
+    if (sha == null) throw const _Reject(400, 'PDF adı kurallara uymuyor.');
+    if (!await exchange.hasPdfDocument(sha)) throw const _Reject(404, 'Bu PDF bilgisayarda yok.', counts: false);
+    final target = File(p.join(root.path, req.name));
+    if (!await root.exists()) throw const _Reject(404, 'Bu PDF bilgisayarda yok.', counts: false);
+    await _ensureInside(root, target, 'PDF klasörü uygulamanın alanı dışını gösteriyor; verilmedi.');
+    final stat = await FileStat.stat(target.path);
+    if (await FileSystemEntity.type(target.path, followLinks: false) != FileSystemEntityType.file) {
+      throw const _Reject(404, 'Bu PDF bilgisayarda yok.', counts: false);
     }
-    _importing = true;
-    final zip = File(p.join(_incoming.path, 'Kablosuz_${_stamp(_now())}.zip'));
+    if (stat.size > SyncLimits.pdf) throw _Reject(413, 'PDF çok büyük (en çok ${formatPdfSize(SyncLimits.pdf)}).', counts: false);
+    if (req.start < 0 || req.start > stat.size) throw const _Reject(400, 'Başlangıç konumu geçersiz.');
+    final signature = responseSignature(signed.phone.key,
+        session: signed.session.id,
+        sequence: signed.sequence,
+        bodyHash: sha256Hex(utf8.encode(pdfGetMeta(req.name, req.start, stat.size))));
+    final response = ctx.request.response
+      ..statusCode = 200
+      ..headers.contentType = ContentType.binary
+      ..headers.set(HttpHeaders.cacheControlHeader, 'no-store')
+      ..headers.set(SyncHeaders.responseSignature, signature)
+      ..contentLength = stat.size - req.start;
+    ctx.bodyTaken = true;
+    _emit(SyncEventKind.pdf, '${signed.phone.name}: PDF veriliyor (${formatPdfSize(stat.size)}).');
+    try {
+      await for (final chunk in target.openRead(req.start, stat.size)) {
+        if (ctx.aborted || ctx.gone) break;
+        response.add(chunk);
+        await response.flush();
+      }
+      // Cihaz kaldırıldıysa gövde eksik kalır: Content-Length tutmadığı için close() hata verir
+      // ve bağlantı yok edilir (istemci yarım gövdeyi zaten adın özetiyle reddeder).
+      await response.close();
+    } catch (_) {
+      // Cihaz bağlantıyı kapatmış olabilir (iptal); yeniden isterse kaldığı yerden sürer.
+    }
+  }
+
+  Future<Map<String, Object?>> _backup(_Ctx ctx) async {
+    final signed = await _claim(ctx);
+    // Dosya adı cihaza özgü: iki cihaz aynı anda yedek gönderse de çakışmaz.
+    final zip = File(p.join(_incoming.path, 'Kablosuz_${_stamp(_now())}_${randomToken(_random).substring(0, 8)}.zip'));
     try {
       final hash = await _readToFile(ctx, zip, SyncLimits.backup);
       _verify(ctx.request, signed, hash);
-      _emit(SyncEventKind.backupReceived, 'Telefondan veri geldi; içe aktarılıyor…');
-      final summary = await importBackup(zip);
+      _emit(SyncEventKind.backupReceived, '${signed.phone.name}: veri geldi; içe aktarılıyor…');
+      final summary = await _locked(ctx, signed, () async {
+        _backupRunning = true;
+        try {
+          return await importBackup(zip);
+        } finally {
+          _backupRunning = false;
+        }
+      });
       _emit(SyncEventKind.imported, summary);
       return BackupResponse(summary).toJson();
     } finally {
-      _importing = false;
       if (await zip.exists()) await zip.delete();
     }
   }
 
   // ───────────── Yardımcılar ─────────────
 
+  /// Veritabanı kilidine girer. Bekleme [lockWait] ile sınırlı (aşılırsa 409 meşgul).
+  /// Kilitten çıkınca bağlantı koptuysa, cihaz kaldırıldıysa ya da eşleşmesi gittiyse iş
+  /// UYGULANMAZ (yanıt kaybolacağı için istemci yeniden gönderirdi).
+  Future<T> _locked<T>(_Ctx ctx, _Signed signed, Future<T> Function() body) async {
+    try {
+      return await _dbLock.run(() async {
+        if (ctx.aborted || ctx.gone || await store.device(signed.phone.id) == null) {
+          throw ctx.gone && !ctx.aborted
+              ? const _Reject(499, 'İstemci bağlantısı koptu; iş uygulanmadı.', counts: false)
+              : const _Reject(401, 'Bu cihazın eşleşmesi kaldırılmış.', counts: false);
+        }
+        return body();
+      }, wait: lockWait);
+    } on TimeoutException {
+      throw const _Reject(409, 'Bilgisayar başka bir işle meşgul; biraz sonra tekrar dene.', counts: false);
+    }
+  }
+
   /// Oturum ve sıra numarası gövde okunmadan denetlenir ve sıra ayrılır.
-  Future<_Signed> _claim(HttpRequest request) async {
-    final session = _session;
+  Future<_Signed> _claim(_Ctx ctx) async {
+    final request = ctx.request;
     final id = request.headers.value(SyncHeaders.session);
     final sequence = int.tryParse(request.headers.value(SyncHeaders.sequence) ?? '');
     final now = _now();
-    if (session == null || id == null || sequence == null || !safeEquals(id, session.id) || session.isExpired(now)) {
+    final session = id == null ? null : _sessions[id];
+    if (session == null || sequence == null || session.isExpired(now)) {
+      if (session != null) _sessions.remove(session.id);
       throw const _Reject(401, 'Oturum geçersiz ya da süresi doldu; yeniden bağlan.');
     }
     if (!session.claim(sequence, now)) {
-      _session = null;
+      _sessions.remove(session.id);
       throw const _Reject(401, 'Sıra numarası tutmadı (aynı istek ikinci kez mi geldi?); oturum kapatıldı.');
     }
-    final phone = await store.phone();
-    if (phone == null || phone.id != session.phoneId) {
-      _session = null;
-      throw const _Reject(401, 'Bu telefonun eşleşmesi kaldırılmış.');
+    final phone = await store.device(session.phoneId);
+    if (phone == null) {
+      _sessions.remove(session.id);
+      throw const _Reject(401, 'Bu cihazın eşleşmesi kaldırılmış.');
     }
+    ctx.deviceId = phone.id;
     return _Signed(session, sequence, phone);
   }
 
@@ -556,7 +689,7 @@ class SyncServer {
       bodyHash: bodyHash,
     );
     if (!safeEquals(expected, request.headers.value(SyncHeaders.signature) ?? '')) {
-      if (identical(_session, signed.session)) _session = null;
+      _sessions.remove(signed.session.id);
       _emit(SyncEventKind.rejected, 'İmzası tutmayan bir istek reddedildi.');
       throw const _Reject(401, 'İmza tutmadı; oturum kapatıldı.');
     }
@@ -707,6 +840,15 @@ class _Ctx {
 
   /// Gövde okunmadan yanıtlandı: yanıttan sonra bağlantı kapatılır.
   bool closeAfter = false;
+
+  /// İmzalı istekte cihaz kimliği (cihaz kaldırılınca bu istek iptal edilir).
+  String? deviceId;
+
+  /// Cihaz kaldırıldı: akış kesilir, kilitte bekleyen iş uygulanmaz.
+  bool aborted = false;
+
+  /// İstemci bağlantısı koptu.
+  bool gone = false;
 }
 
 class _Signed {
@@ -714,7 +856,7 @@ class _Signed {
 
   final SyncSession session;
   final int sequence;
-  final PairedPhone phone;
+  final PairedDevice phone;
 }
 
 class _Reject implements Exception {
@@ -725,4 +867,28 @@ class _Reject implements Exception {
 
   /// Adresin hata sayacına yazılsın mı? ("Meşgul" gibi durumlar yazılmaz.)
   final bool counts;
+}
+
+/// Eşzamanlı çağıranları sıraya dizer: biri bitmeden öbürü başlamaz.
+class _Mutex {
+  Future<void> _tail = Future<void>.value();
+
+  /// [wait] verilirse sıra beklemesi bununla sınırlıdır (TimeoutException); beklemeyi
+  /// bırakan iş hiç başlamaz, zincir bozulmaz.
+  Future<T> run<T>(Future<T> Function() body, {Duration? wait}) async {
+    final prev = _tail;
+    final turn = Completer<void>();
+    _tail = turn.future;
+    try {
+      await (wait == null ? prev : prev.timeout(wait));
+    } on TimeoutException {
+      unawaited(prev.whenComplete(turn.complete));
+      rethrow;
+    }
+    try {
+      return await body();
+    } finally {
+      turn.complete();
+    }
+  }
 }

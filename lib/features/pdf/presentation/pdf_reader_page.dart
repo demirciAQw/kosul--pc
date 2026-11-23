@@ -13,6 +13,9 @@ import '../../notes/presentation/note_tool_settings.dart';
 import '../../question_bank/domain/question_card.dart';
 import '../domain/pdf_engine.dart' show PdfBox, PdfPageSize;
 import '../domain/question_box.dart';
+import '../domain/book_analysis.dart';
+import 'analysis_overlay.dart';
+import 'pdf_analysis_panel.dart';
 import 'pdf_box_overlay.dart';
 import 'pdf_question_panel.dart';
 import '../../../core/di/core_providers.dart';
@@ -20,6 +23,10 @@ import '../pdf_providers.dart';
 import 'pdf_ink_input.dart';
 import 'pdf_ink_session.dart';
 import 'pdf_page_ink_layer.dart';
+import '../data/layer_renderer.dart';
+import '../pdf_layers_providers.dart';
+import 'layer_overlay.dart';
+import 'pdf_layers_controller.dart';
 
 /// PDF okuyucu: dikey kaydırma, parmakla yakınlaştırma, küçük resim şeridi,
 /// sayfa göstergesi ve her sayfanın üstünde kalem katmanı.
@@ -30,8 +37,12 @@ class PdfReaderPage extends ConsumerWidget {
     this.initialPage,
     this.highlight,
     this.questionId,
+    this.analysis = false,
   });
   final String documentId;
+
+  /// Analiz modu açık başlar (`?analiz=1`); yalnız kitaba bağlı PDF'te anlamlı.
+  final bool analysis;
 
   /// Vurgulanan kutunun soru kartı: varsa "Çöz" düğmesi görünür.
   final String? questionId;
@@ -79,6 +90,7 @@ class PdfReaderPage extends ConsumerWidget {
           initialPage: page,
           highlight: page == null ? null : highlight,
           questionId: page == null ? null : questionId,
+          analysis: analysis,
         );
       },
     );
@@ -92,8 +104,10 @@ class PdfReaderView extends ConsumerStatefulWidget {
     this.initialPage,
     this.highlight,
     this.questionId,
+    this.analysis = false,
   });
   final PdfOpenInfo info;
+  final bool analysis;
   final String? questionId;
   final int? initialPage;
   final PdfBox? highlight;
@@ -105,6 +119,8 @@ class PdfReaderView extends ConsumerStatefulWidget {
 class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
   late final PdfInkSession _session;
   final _viewer = r.PdfViewerController();
+  late final PdfLayersHub _layersHub; // filigran/örtü katmanları (görüntüleme)
+  late final PdfLayersController _layers;
   final _page = ValueNotifier<int>(1);
   late final r.PdfDocumentRef _docRef;
   late final AppLifecycleListener _lifecycle;
@@ -117,6 +133,12 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
   /// Sayfa üstündeki kutular: bekleyen seçim (mavi) ve kart vurgusu (turuncu).
   final _marks = ValueNotifier<List<PdfBoxMark>>(const []);
   ({int page, PdfBox box})? _pending;
+
+  /// Analiz modu: kapalıyken işaretler çizilmez, veri okunmaz.
+  late bool _analysisOn;
+  bool _panelOpen = false;
+  AnalysisFilter _filter = AnalysisFilter.wrong;
+  final _analysisData = ValueNotifier<BookAnalysis?>(null);
 
   @override
   void initState() {
@@ -132,6 +154,24 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
     // Kalem boyutu ve yuva konumu defterle AYNI kalıcı ayardır.
     _prefs = NoteToolPrefsBinding(ref.read(noteToolPrefsStoreProvider), _tools);
     _session.onSelectBox = _onBox;
+    _layersHub = PdfLayersHub(
+      documentId: widget.info.record.id,
+      repository: ref.read(pdfLayersRepositoryProvider),
+      renderer: PdfLayerRenderer(
+        documentId: widget.info.record.id,
+        open: () => ref.read(pdfEngineProvider).openFile(widget.info.path!),
+      ),
+    )..start();
+    _layers = PdfLayersController(
+      hub: _layersHub,
+      session: _session,
+      contextOf: () => context,
+      currentPage: () => _page.value - 1,
+      zoom: _viewer,
+      zoomOf: () => _viewer.isReady ? _viewer.currentZoom : 1,
+    );
+    _analysisOn = widget.analysis && widget.info.record.bookId != null;
+    _panelOpen = _analysisOn;
     _page.value = (widget.initialPage ?? 0) + 1;
     final hl = widget.highlight, hp = widget.initialPage;
     if (hl != null && hp != null)
@@ -167,6 +207,9 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
     _errorSub?.cancel();
     _page.dispose();
     _marks.dispose();
+    _analysisData.dispose();
+    _layers.dispose();
+    unawaited(_layersHub.dispose());
     // Kuyruk bitmeden oturum kapanmasın: kayıtlar tamamlanınca kapat.
     unawaited(_session.flush().whenComplete(_session.dispose));
     super.dispose();
@@ -204,6 +247,7 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
     double ph,
   ) {
     if (!mounted) return;
+    if (_layers.consumeBox(page, x1, y1, x2, y2, pw, ph)) return; // filigran bölgesi seçiliyor
     final box = normalizeQuestionBox(x1, y1, x2, y2, PdfPageSize(pw, ph));
     if (box == null) {
       ScaffoldMessenger.of(context)
@@ -238,6 +282,7 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
   }
 
   List<Widget> _overlays(BuildContext context, Rect rect, r.PdfPage page) => [
+    _layers.overlay(page.pageNumber - 1, page.width, page.height),
     PdfPageBoxOverlay(
       key: ValueKey('box-${page.pageNumber}'),
       page: page.pageNumber - 1,
@@ -252,15 +297,116 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
       pageWidth: page.width,
       pageHeight: page.height,
     ),
+    AnalysisPageOverlay(
+      key: ValueKey('analysis-${page.pageNumber}'),
+      page: page.pageNumber - 1,
+      pageWidth: page.width,
+      pageHeight: page.height,
+      analysis: _analysisData,
+      onOpenPanel: () => setState(() => _panelOpen = true),
+    ),
   ];
+
+  void _goToPage(int pdfPage) => _viewer.goToPage(pageNumber: pdfPage + 1);
+
+  /// Sonraki/önceki yanlış sayfasına git (yoksa ileti).
+  void _stepMistake(BookAnalysis a, {required bool forward}) {
+    final cur = _page.value - 1;
+    final to = forward ? a.nextMistakePage(cur, _filter) : a.previousMistakePage(cur, _filter);
+    if (to == null) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(forward ? 'Sonrası yok.' : 'Öncesi yok.')));
+      return;
+    }
+    _goToPage(to);
+  }
+
+  /// Analiz katmanı: düğmeler ve panel. Mod kapalıyken hiçbir şey çizmez.
+  Widget _analysisLayer(BookAnalysis? a) {
+    if (!_analysisOn || a == null) return const SizedBox.shrink();
+    final badges = a.mistakeBadges;
+    return Stack(
+      children: [
+        Positioned(
+          top: 8,
+          left: 8,
+          child: Material(
+            key: const Key('analysis-bar'),
+            elevation: 3,
+            borderRadius: BorderRadius.circular(20),
+            color: Theme.of(context).colorScheme.surfaceContainerHigh,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  key: const Key('analysis-prev'),
+                  tooltip: 'Önceki yanlış',
+                  icon: const Icon(Icons.keyboard_arrow_up),
+                  onPressed: () => _stepMistake(a, forward: false),
+                ),
+                Text('${badges.values.fold<int>(0, (x, y) => x + y)} yanlış/boş'),
+                IconButton(
+                  key: const Key('analysis-next'),
+                  tooltip: 'Sonraki yanlış',
+                  icon: const Icon(Icons.keyboard_arrow_down),
+                  onPressed: () => _stepMistake(a, forward: true),
+                ),
+                IconButton(
+                  key: const Key('analysis-panel-toggle'),
+                  tooltip: 'Yanlışlarım',
+                  icon: Icon(_panelOpen ? Icons.list_alt : Icons.list_alt_outlined),
+                  onPressed: () => setState(() => _panelOpen = !_panelOpen),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (_panelOpen)
+          Positioned(
+            top: 0,
+            bottom: 0,
+            right: 0,
+            width: (MediaQuery.sizeOf(context).width * 0.8).clamp(0.0, 320.0),
+            child: PdfAnalysisPanel(
+              analysis: a,
+              filter: _filter,
+              onFilter: (f) => setState(() => _filter = f),
+              onGo: (i) => _goToPage(i.pdfPage!),
+              onClose: () => setState(() => _panelOpen = false),
+            ),
+          ),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final rec = widget.info.record;
+    // Veri yalnız mod açıkken okunur (kapalıyken kart akışı açılmaz).
+    final analysis = _analysisOn ? ref.watch(bookAnalysisProvider(rec.id)).value : null;
+    if (_analysisData.value != analysis) {
+      final a = analysis;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _analysisData.value = _analysisOn ? a : null;
+      });
+    }
     return Scaffold(
       appBar: AppBar(
         title: Text(rec.title, overflow: TextOverflow.ellipsis),
         actions: [
+          if (rec.bookId != null)
+            IconButton(
+              key: const Key('pdf-analysis-toggle'),
+              tooltip: 'Analiz modu',
+              icon: Icon(_analysisOn ? Icons.fact_check : Icons.fact_check_outlined),
+              onPressed: () => setState(() {
+                _analysisOn = !_analysisOn;
+                _panelOpen = _analysisOn;
+                if (!_analysisOn) _analysisData.value = null;
+              }),
+            ),
+          ..._layers.actions(),
           const FocusModeButton(),
           IconButton(
             key: const Key('pdf-thumbs-toggle'),
@@ -281,6 +427,7 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
                   _ThumbStrip(
                     docRef: _docRef,
                     current: _page,
+                    badges: analysis?.mistakeBadges ?? const {},
                     onTap: (n) => _viewer.goToPage(pageNumber: n),
                   ),
                 Expanded(
@@ -387,7 +534,8 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
                                             ),
                                           ),
                                           child: Text(
-                                            '$n / ${rec.pageCount}',
+                                            '$n / ${rec.pageCount}'
+                                            '${(analysis?.mistakeBadges[n - 1] ?? 0) > 0 ? ' · ${analysis!.mistakeBadges[n - 1]} yanlış' : ''}',
                                             style: const TextStyle(
                                               color: Colors.white,
                                             ),
@@ -402,6 +550,7 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
                           },
                         ),
                       ),
+                      _analysisLayer(analysis),
                       FloatingToolDock(
                         tools: _tools,
                         session: _session,
@@ -425,7 +574,11 @@ class _ThumbStrip extends StatelessWidget {
     required this.docRef,
     required this.current,
     required this.onTap,
+    this.badges = const {},
   });
+
+  /// PDF sayfası (0'dan) → yanlış sayısı (analiz modu rozeti).
+  final Map<int, int> badges;
   final r.PdfDocumentRef docRef;
   final ValueNotifier<int> current;
   final ValueChanged<int> onTap;
@@ -468,9 +621,29 @@ class _ThumbStrip extends StatelessWidget {
                           ),
                         ),
                       ),
-                      Text(
-                        '${i + 1}',
-                        style: Theme.of(context).textTheme.labelSmall,
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            '${i + 1}',
+                            style: Theme.of(context).textTheme.labelSmall,
+                          ),
+                          if ((badges[i] ?? 0) > 0) ...[
+                            const SizedBox(width: 4),
+                            Container(
+                              key: Key('analysis-badge-$i'),
+                              padding: const EdgeInsets.symmetric(horizontal: 5),
+                              decoration: BoxDecoration(
+                                color: analysisColor(QuestionStatus.wrong),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                '${badges[i]}',
+                                style: const TextStyle(color: Colors.white, fontSize: 10),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ],
                   ),

@@ -43,6 +43,7 @@ part 'app_database.g.dart';
   InkNotebookPeople,
   InkPageTags,
   InkPagePeople,
+  PdfPageLayers,
 ])
 class AppDatabase extends _$AppDatabase {
   /// Testlerde: `AppDatabase(NativeDatabase.memory())`
@@ -65,8 +66,9 @@ class AppDatabase extends _$AppDatabase {
   /// v17: soru kartında PDF koordinatı (pdf_document_id, pdf_page, pdf_box_*).
   /// v18: çizgi -> soru bağı (ink_strokes.question_id), çözüm katmanları.
   /// v19: kalemli defter (ink_notebooks, ink_note_pages) ve etiket/kişi bağları.
+  /// v20: PDF sayfa katmanları (pdf_page_layers): filigran temizleme/örtü, dosya değişmez.
   @override
-  int get schemaVersion => 19;
+  int get schemaVersion => 20;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -81,6 +83,7 @@ class AppDatabase extends _$AppDatabase {
           await _createLedgerTables(m);
           await _createInkIndexes();
           await _createNotebookIndexes();
+          await _createPdfLayerIndexes();
         },
         onUpgrade: (m, from, to) async {
           if (from < 2) {
@@ -195,6 +198,11 @@ class AppDatabase extends _$AppDatabase {
             await m.createTable(inkPagePeople);
             await _createNotebookIndexes();
           }
+          // v20: tablo yoksa kurulur (14/18/19 → 20 hepsi buradan).
+          if (from < 20) {
+            await m.createTable(pdfPageLayers);
+            await _createPdfLayerIndexes();
+          }
           // Tablolar yeniden kurulmuş ya da sütun eklenmiş olabilir: tetikleyiciler baştan.
           await LedgerService(this).installTriggers(rebuild: true);
         },
@@ -217,6 +225,11 @@ class AppDatabase extends _$AppDatabase {
     await customStatement('CREATE INDEX IF NOT EXISTS ix_ink_pdf ON ink_strokes(pdf_document_id, pdf_page)');
     await customStatement('CREATE INDEX IF NOT EXISTS ix_ink_note ON ink_strokes(note_id, note_page)');
     await customStatement('CREATE INDEX IF NOT EXISTS ix_ink_question ON ink_strokes(question_id, attempt_no)');
+  }
+
+  Future<void> _createPdfLayerIndexes() async {
+    await customStatement(
+        'CREATE INDEX IF NOT EXISTS ix_pdf_layer_doc ON pdf_page_layers(pdf_document_id, page)');
   }
 
   Future<void> _createNotebookIndexes() async {

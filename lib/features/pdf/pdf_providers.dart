@@ -11,14 +11,18 @@ import '../ink/data/ink_stroke_repository.dart';
 import '../ocr/auto_tag_providers.dart';
 import '../ocr/data/ocr_queue.dart' show OcrQueue;
 import '../ocr/ocr_providers.dart';
+import '../library/library_providers.dart';
+import '../question_bank/domain/question_card.dart';
 import '../question_bank/question_bank_providers.dart';
 import 'data/pdf_document_repository.dart';
 import 'data/pdf_import_service.dart';
 import 'data/pdf_question_service.dart';
 import 'data/pdfrx_engine.dart';
+import 'domain/book_analysis.dart';
 import 'domain/pdf_document_record.dart';
 import 'domain/pdf_engine.dart';
 import 'domain/solve.dart';
+import 'pdf_layers_providers.dart';
 
 final pdfEngineProvider = Provider<PdfEngine>((ref) => const PdfrxEngine());
 
@@ -86,6 +90,7 @@ final pdfQuestionServiceProvider = FutureProvider<PdfQuestionService>((ref) asyn
     ocr: isAndroid ? ref.watch(ocrEngineProvider) : null,
     ocrRepository: ref.watch(ocrRepositoryProvider),
     ocrEngineVersion: OcrQueue.engineVersion,
+    layers: ref.watch(pdfLayersRepositoryProvider),
   );
 });
 
@@ -97,4 +102,32 @@ final pdfAvailableProvider = FutureProvider.autoDispose.family<bool, String>((re
   if (record == null) return false;
   final svc = await ref.watch(pdfImportServiceProvider.future);
   return svc.fileOf(record).exists();
+});
+
+/// Kitaba bağlı (silinmemiş) ilk PDF; yoksa null. Kitap ekranları "PDF'te aç"ı buna bakıp gösterir.
+final pdfForBookProvider = Provider.family<PdfDocumentRecord?, String>((ref, bookId) {
+  final docs = ref.watch(pdfDocumentsProvider).value ?? const <PdfDocumentRecord>[];
+  return docs.where((d) => d.bookId == bookId && !d.deleted).firstOrNull;
+});
+
+/// Kitabın tüm soru kartları (doğru/yanlış/boş) — analiz modu için.
+final _bookCardsProvider = StreamProvider.autoDispose.family<List<QuestionCard>, String>(
+    (ref, bookId) => ref.watch(questionCardRepositoryProvider).watch(QuestionFilter(bookId: bookId)));
+
+/// Analiz modu verisi: PDF'in bağlı olduğu kitabın haritası + kartları.
+/// PDF kitaba bağlı değilse ya da kitap yoksa `AsyncData(null)`.
+final bookAnalysisProvider = Provider.autoDispose.family<AsyncValue<BookAnalysis?>, String>((ref, docId) {
+  final info = ref.watch(pdfOpenInfoProvider(docId));
+  final record = info.value?.record;
+  final bookId = record?.bookId;
+  if (record == null || bookId == null) {
+    return info.isLoading ? const AsyncLoading() : const AsyncData(null);
+  }
+  final books = ref.watch(libraryProvider);
+  final cards = ref.watch(_bookCardsProvider(bookId));
+  final book = ref.watch(bookByIdProvider(bookId));
+  if (book == null) return books.isLoading ? const AsyncLoading() : const AsyncData(null);
+  if (cards.hasError) return AsyncError(cards.error!, cards.stackTrace ?? StackTrace.empty);
+  if (!cards.hasValue) return const AsyncLoading();
+  return AsyncData(buildBookAnalysis(book: book, doc: record, cards: cards.requireValue));
 });

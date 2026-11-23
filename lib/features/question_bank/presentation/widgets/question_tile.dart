@@ -10,6 +10,7 @@ import '../../domain/question_card.dart';
 import '../../../pdf/pdf_providers.dart';
 import '../../question_bank_providers.dart';
 import 'media_image.dart';
+import 'question_actions.dart';
 import '../../../../app/palette.dart';
 
 Color statusColor(QuestionStatus status) => switch (status) {
@@ -19,7 +20,7 @@ Color statusColor(QuestionStatus status) => switch (status) {
     };
 
 /// Galeri hissi: soru fotoğrafı, sağ üstte yıldız (GK), altta neden + zorluk.
-class QuestionTile extends ConsumerWidget {
+class QuestionTile extends ConsumerStatefulWidget {
   const QuestionTile({super.key, required this.card, this.onOpen});
   final QuestionCard card;
 
@@ -27,7 +28,16 @@ class QuestionTile extends ConsumerWidget {
   final VoidCallback? onOpen;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<QuestionTile> createState() => _QuestionTileState();
+}
+
+class _QuestionTileState extends ConsumerState<QuestionTile> {
+  final _menuKey = GlobalKey<PopupMenuButtonState<QuestionAction>>();
+
+  @override
+  Widget build(BuildContext context) {
+    final card = widget.card;
+    final onOpen = widget.onOpen;
     final scheme = Theme.of(context).colorScheme;
     const onImage = TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600);
     final selection = ref.watch(questionSelectionProvider);
@@ -56,11 +66,14 @@ class QuestionTile extends ConsumerWidget {
         side: selected ? BorderSide(color: scheme.primary, width: 3) : BorderSide.none,
       ),
       child: InkWell(
-        // Seçim modundayken dokunmak seçer; değilken soruyu açar. Uzun bas: seçimi başlat.
+        // Seçim modundayken dokunmak seçer; değilken soruyu açar.
+        // Uzun bas: seçim modundaysa seçer, değilse eylem menüsünü açar.
         onTap: selecting
             ? () => ref.read(questionSelectionProvider.notifier).toggle(card.id)
             : (onOpen ?? () => context.push(AppRoutes.question(card.id))),
-        onLongPress: () => ref.read(questionSelectionProvider.notifier).toggle(card.id),
+        onLongPress: selecting
+            ? () => ref.read(questionSelectionProvider.notifier).toggle(card.id)
+            : () => _menuKey.currentState?.showButtonMenu(),
         child: Stack(
           fit: StackFit.expand,
           children: [
@@ -128,6 +141,24 @@ class QuestionTile extends ConsumerWidget {
                 ),
               ),
             ),
+            if (!selecting)
+              Positioned(
+                top: 40,
+                right: 4,
+                child: PopupMenuButton<QuestionAction>(
+                  key: _menuKey,
+                  tooltip: 'Soru işlemleri',
+                  padding: EdgeInsets.zero,
+                  style: IconButton.styleFrom(backgroundColor: Colors.black38, visualDensity: VisualDensity.compact),
+                  icon: const Icon(Icons.more_vert_rounded, color: Colors.white, size: 20),
+                  itemBuilder: (_) => questionMenuItems(questionActionEntries(
+                    card,
+                    pdfAvailable: card.hasPdfAnchor ? hasPdf : null,
+                    selected: selected,
+                  )),
+                  onSelected: (a) => performQuestionAction(context, ref, card, a),
+                ),
+              ),
             if (openPdf != null && !selecting)
               Positioned(
                 top: 4,

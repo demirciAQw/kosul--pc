@@ -128,6 +128,26 @@ class PhoneSyncStore {
     await _save();
   }
 
+  /// "PDF'leri bilgisayardan al" (v9.15): bilgisayarda olup bu cihazda olmayan PDF
+  /// dosyalarını eşitlemede indir. Varsayılan KAPALI (dosyalar büyük olabilir).
+  Future<bool> pullPdfs() async => (await _load())['pdfAl'] == true;
+
+  Future<void> setPullPdfs(bool value) async {
+    (await _load())['pdfAl'] = value;
+    await _save();
+  }
+
+  /// Bu cihazın bilgisayarda görünen adı; kullanıcı yazmadıysa null.
+  Future<String?> deviceName() async {
+    final v = (await _load())['cihazAdi'];
+    return v is String && v.trim().isNotEmpty ? v : null;
+  }
+
+  Future<void> setDeviceName(String name) async {
+    (await _load())['cihazAdi'] = cleanDeviceName(name);
+    await _save();
+  }
+
   Future<PairedComputer?> computer() async => PairedComputer.tryParse((await _load())['bilgisayar']);
 
   /// En fazla bir bilgisayar: başka bir bilgisayar varken yenisi kaydedilmez

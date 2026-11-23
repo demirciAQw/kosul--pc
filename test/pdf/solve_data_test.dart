@@ -123,7 +123,7 @@ void main() {
       addTearDown(d.close);
       final cols = {for (final c in await d.customSelect('PRAGMA table_info(ink_strokes)').get()) c.read<String>('name')};
       expect(cols, contains('question_id'));
-      expect((await d.customSelect('PRAGMA user_version').getSingle()).read<int>('user_version'), 19);
+      expect((await d.customSelect('PRAGMA user_version').getSingle()).read<int>('user_version'), 20);
       final idx = {
         for (final r in await d.customSelect("SELECT name FROM sqlite_master WHERE type = 'index'").get())
           r.read<String>('name'),
@@ -157,7 +157,7 @@ void main() {
       await d.close();
       d = AppDatabase(NativeDatabase(file));
       addTearDown(d.close);
-      expect((await d.customSelect('PRAGMA user_version').getSingle()).read<int>('user_version'), 19);
+      expect((await d.customSelect('PRAGMA user_version').getSingle()).read<int>('user_version'), 20);
     });
   });
 

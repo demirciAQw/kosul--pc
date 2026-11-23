@@ -5,6 +5,8 @@ import 'package:go_router/go_router.dart';
 import '../../../app/routes.dart';
 import '../../../core/utils/formatters.dart';
 import '../../curriculum/domain/curriculum.dart';
+import '../../pdf/domain/book_analysis.dart';
+import '../../pdf/pdf_providers.dart';
 import '../../question_bank/domain/question_card.dart';
 import '../../question_bank/presentation/question_prefill.dart';
 import '../../question_bank/presentation/widgets/question_tile.dart';
@@ -42,6 +44,9 @@ class TestDetailScreen extends ConsumerWidget {
     final highest = byNo.keys.fold<int>(0, (a, b) => a > b ? a : b);
     final total = node.questionCount ?? result?.total ?? highest;
     final path = pathTo(book, nodeId);
+    // Kitaba bağlı PDF varsa testin ilk sayfasına gidilebilir.
+    final pdfDoc = ref.watch(pdfForBookProvider(bookId));
+    final startPage = pdfDoc == null ? null : testStartPdfPage(book, pdfDoc, nodeId);
 
     return Scaffold(
       appBar: AppBar(title: Text(node.title, maxLines: 1, overflow: TextOverflow.ellipsis)),
@@ -119,6 +124,30 @@ class TestDetailScreen extends ConsumerWidget {
               ),
             ],
           ),
+          if (pdfDoc != null && startPage != null) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    key: const Key('test-open-pdf'),
+                    onPressed: () => context.push(pdfPageRoute(pdfDoc.id, page: startPage)),
+                    icon: const Icon(Icons.picture_as_pdf_outlined),
+                    label: const Text("PDF'te aç"),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    key: const Key('test-open-pdf-analysis'),
+                    onPressed: () => context.push(pdfPageRoute(pdfDoc.id, page: startPage, analysis: true)),
+                    icon: const Icon(Icons.fact_check_outlined),
+                    label: const Text('Analiz modunda aç'),
+                  ),
+                ),
+              ],
+            ),
+          ],
           if (total > 0) ...[
             const SizedBox(height: 20),
             Text('Optik', style: theme.textTheme.titleSmall),

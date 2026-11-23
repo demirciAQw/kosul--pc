@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/palette.dart';
+import '../../../app/tablet.dart' show isTabletContext;
 import '../../../app/widgets/tone_icon.dart';
 import '../../../core/utils/formatters.dart';
 import '../data/phone_sync_store.dart';
@@ -33,7 +34,7 @@ class SendToComputerScreen extends ConsumerWidget {
   }
 }
 
-const _footer = 'Yalnızca aynı ağdaki eşleşmiş tek bilgisayara gider; İnternet ya da bulut kullanılmaz. '
+const _footer = 'Yalnızca aynı ağdaki eşleşmiş bilgisayara gider; İnternet ya da bulut kullanılmaz. '
     'Anahtar ağdan hiç geçmez; fotoğraflar ve veriler şifrelenmeden gider, bu yüzden okul ya da kafe gibi '
     'ortak Wi-Fi\'da kullanma.';
 
@@ -86,14 +87,23 @@ class _PairViewState extends ConsumerState<_PairView> {
   }
 
   Future<void> _pairWith(String host, int port) async {
-    final code = await showDialog<String>(context: context, builder: (_) => const _CodeDialog());
-    if (code == null || !mounted) return;
+    final isTablet = isTabletContext(context);
+    final suggested = await ref.read(deviceNameProvider.future);
+    if (!mounted) return;
+    final entry = await showDialog<({String code, String name})>(
+      context: context,
+      builder: (_) => _CodeDialog(isTablet: isTablet, suggestedName: suggested),
+    );
+    if (entry == null || !mounted) return;
     setState(() {
       _pairing = true;
       _error = null;
     });
     try {
-      final computer = await ref.read(sendControllerProvider.notifier).pair(host: host, port: port, code: code);
+      final computer = await ref
+          .read(sendControllerProvider.notifier)
+          .pair(host: host, port: port, code: entry.code, isTablet: isTablet, deviceName: entry.name);
+      ref.invalidate(deviceNameProvider);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Eşleşti: ${computer.name}')));
     } on Object catch (e) {
@@ -118,13 +128,14 @@ class _PairViewState extends ConsumerState<_PairView> {
               children: [
                 Text('Bilgisayarla eşleş', style: theme.textTheme.titleMedium),
                 const SizedBox(height: 8),
-                const Text('1. Bilgisayarda Koçum → Ayarlar → Telefon eşleştirme\'yı aç.\n'
-                    '2. "Telefon eşleştir"e bas; ekranda 6 haneli kod çıkar.\n'
-                    '3. Burada bilgisayarı seç ve kodu yaz.'),
+                const Text('1. Bilgisayarda Koçum → Ayarlar → Cihaz eşleştirme\'yi aç.\n'
+                    '2. "Yeni cihaz ekle"ye bas; ekranda 6 haneli kod çıkar.\n'
+                    '3. Burada bilgisayarı seç, cihaza bir ad ver ve kodu yaz.'),
                 const SizedBox(height: 8),
                 Text(
-                  'Telefon yalnızca bir bilgisayarla, bilgisayar yalnızca bir telefonla eşleşir. '
-                  'Yalnızca Linux\'taki Koçum kabul edilir.',
+                  'Bu cihaz bir bilgisayarla eşleşir. Bilgisayara en çok 4 telefon/tablet aynı anda bağlanabilir; '
+                  'telefon ile tablet birbirine doğrudan bağlanmaz, bilgisayar aracı olur. '
+                  'Eşleşince bilgisayardaki bütün kayıtlar bu cihaza da gelir. Yalnızca Linux\'taki Koçum kabul edilir.',
                   style: theme.textTheme.bodySmall,
                 ),
               ],
@@ -199,7 +210,10 @@ class _AddressDialogState extends State<_AddressDialog> {
 }
 
 class _CodeDialog extends StatefulWidget {
-  const _CodeDialog();
+  const _CodeDialog({required this.isTablet, this.suggestedName});
+
+  final bool isTablet;
+  final String? suggestedName;
 
   @override
   State<_CodeDialog> createState() => _CodeDialogState();
@@ -207,29 +221,47 @@ class _CodeDialog extends StatefulWidget {
 
 class _CodeDialogState extends State<_CodeDialog> {
   final _text = TextEditingController();
+  late final _name = TextEditingController(text: widget.suggestedName ?? (widget.isTablet ? 'Tabletim' : 'Telefonum'));
 
   @override
   void dispose() {
     _text.dispose();
+    _name.dispose();
     super.dispose();
   }
+
+  void _submit() => Navigator.pop(context, (code: _text.text, name: _name.text.trim().isEmpty ? 'Adsız cihaz' : _name.text.trim()));
 
   @override
   Widget build(BuildContext context) => AlertDialog(
         title: const Text('Eşleştirme kodu'),
-        content: TextField(
-          controller: _text,
-          autofocus: true,
-          keyboardType: TextInputType.number,
-          maxLength: 6,
-          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-          style: const TextStyle(fontSize: 28, letterSpacing: 6),
-          decoration: const InputDecoration(hintText: '000000', helperText: 'Bilgisayar ekranındaki 6 haneli kod'),
-          onSubmitted: (v) => Navigator.pop(context, v),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _text,
+              autofocus: true,
+              keyboardType: TextInputType.number,
+              maxLength: 6,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              style: const TextStyle(fontSize: 28, letterSpacing: 6),
+              decoration: const InputDecoration(hintText: '000000', helperText: 'Bilgisayar ekranındaki 6 haneli kod'),
+              onSubmitted: (_) => _submit(),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _name,
+              maxLength: SyncLimits.nameLength,
+              decoration: InputDecoration(
+                labelText: widget.isTablet ? 'Bu tabletin adı' : 'Bu telefonun adı',
+                helperText: 'Bilgisayardaki listede böyle görünür',
+              ),
+            ),
+          ],
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Vazgeç')),
-          FilledButton(onPressed: () => Navigator.pop(context, _text.text), child: const Text('Eşleş')),
+          FilledButton(onPressed: _submit, child: const Text('Eşleş')),
         ],
       );
 }
@@ -277,6 +309,17 @@ class _SendView extends ConsumerWidget {
             'bilgisayarda varsa yeniden gönderilmez.',
           ),
         ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: ref.watch(pullPdfsProvider).value ?? false,
+          onChanged: send.busy ? null : (v) => unawaited(controller.setPullPdfs(v)),
+          title: const Text('PDF\'leri bilgisayardan al'),
+          subtitle: const Text(
+            'Açıkken bilgisayarda olup bu cihazda dosyası olmayan PDF\'ler eşitlemede iner '
+            '(örneğin tabletten yüklediğin kitap telefona). Kapalıyken yalnızca kayıtlar gelir. '
+            'Dosya büyük olabilir (en çok 300 MB); kopan indirme kaldığı yerden sürer.',
+          ),
+        ),
         const SizedBox(height: 12),
         if (send.busy) ...[
           LinearProgressIndicator(value: send.total > 0 ? send.done / send.total : null),
@@ -287,7 +330,7 @@ class _SendView extends ConsumerWidget {
               child: TextButton.icon(
                 onPressed: controller.cancelPdf,
                 icon: const Icon(Icons.close),
-                label: const Text('PDF gönderimini iptal et'),
+                label: const Text('PDF aktarımını iptal et'),
               ),
             ),
         ],
@@ -303,7 +346,8 @@ class _SendView extends ConsumerWidget {
           ),
         const SizedBox(height: 16),
         Text(
-          'İlk eşitlemede tam yedek bilgisayarla birleşir (telefondaki kayıtlar kazanır). Sonrasında yalnızca '
+          'İlk eşitlemede tam yedek bilgisayarla birleşir (bu cihazdaki kayıtlar kazanır), sonra bilgisayardaki '
+          'tüm kayıtlar (öbür cihazlarınki dahil) bu cihaza gelir. Sonrasında yalnızca '
           'değişiklikler iki yöne gider; fotoğraflar da. Aynı satır iki yerde değişirse yeni olan kazanır, '
           'kaybeden sürüm Çakışmalar\'da kalır. Hiçbir şey sessizce silinmez. Bağlantı koparsa yeniden eşitle.',
           style: theme.textTheme.bodySmall,
@@ -311,6 +355,14 @@ class _SendView extends ConsumerWidget {
         const SizedBox(height: 8),
         Text(_footer, style: theme.textTheme.bodySmall),
         const SizedBox(height: 16),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: send.busy ? null : () => unawaited(_confirmFullState(context, ref)),
+            icon: const Icon(Icons.download),
+            label: const Text('Bilgisayardaki her şeyi yeniden al'),
+          ),
+        ),
         Align(
           alignment: Alignment.centerLeft,
           child: TextButton.icon(
@@ -323,14 +375,37 @@ class _SendView extends ConsumerWidget {
     );
   }
 
+  Future<void> _confirmFullState(BuildContext context, WidgetRef ref) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Her şey yeniden alınsın mı?'),
+        content: const Text(
+          'Sonraki eşitlemede bilgisayardaki bütün kayıtlar gelir; yalnızca bu cihazda EKSİK olanlar eklenir. '
+          'Var olan kayıtlara dokunulmaz, bu cihazda sildiğin kayıtlar geri gelmez. Büyük veride biraz sürebilir.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Vazgeç')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Tamam')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await ref.read(sendControllerProvider.notifier).requestFullState();
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Sonraki eşitlemede alınacak. "Eşitle"ye bas.')));
+    }
+  }
+
   Future<void> _confirmUnpair(BuildContext context, WidgetRef ref) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Eşleşme kaldırılsın mı?'),
         content: Text(
-          'Telefon artık ${computer.name} adlı bilgisayara gönderemez. Telefondaki ve bilgisayardaki veriler '
-          'silinmez. Bilgisayarda da Ayarlar → Telefon eşleştirme → Eşleşmeyi kaldır yap.',
+          'Bu cihaz artık ${computer.name} adlı bilgisayarla eşitlenemez. Cihazdaki ve bilgisayardaki veriler '
+          'silinmez; bilgisayara bağlı öbür cihazlar etkilenmez. Bilgisayarda da Ayarlar → Cihaz eşleştirme → '
+          'bu cihazı kaldır.',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Vazgeç')),

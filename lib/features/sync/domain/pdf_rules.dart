@@ -54,3 +54,26 @@ String formatPdfSize(int bytes) {
   final mb = bytes / (1024 * 1024);
   return '${mb.toStringAsFixed(mb < 10 ? 1 : 0).replaceAll('.', ',')} MB';
 }
+
+/// Cihazın bilgisayardan istediği PDF (`pdf-al`): ad ve kaç bayttan başlanacağı
+/// (kopan indirme kaldığı yerden sürsün). Gövde imzalıdır.
+class PdfGetRequest {
+  const PdfGetRequest(this.name, {this.start = 0});
+
+  final String name;
+  final int start;
+
+  Map<String, Object?> toJson() => {'yol': name, 'baslangic': start};
+
+  factory PdfGetRequest.fromJson(Object? json) {
+    if (json is Map && json['yol'] is String && (json['baslangic'] == null || json['baslangic'] is int)) {
+      return PdfGetRequest(json['yol'] as String, start: (json['baslangic'] as int?) ?? 0);
+    }
+    throw const SyncException('Bozuk mesaj: PDF isteği.');
+  }
+}
+
+/// `pdf-al` yanıt imzasının bağlandığı üst bilgi (dosya iki kez okunmasın diye
+/// baytların kendisi değil ad, başlangıç ve toplam boyut imzalanır; baytların
+/// bütünlüğünü adın SHA-256'sı kanıtlar).
+String pdfGetMeta(String name, int start, int total) => '$name|$start|$total';

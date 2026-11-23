@@ -445,7 +445,7 @@ void main() {
       await settle(t, 300);
     }
 
-    testWidgets('ayrıntı: Çiz / Çöz düğmesi telefonda çubukta, tablette ayrıca büyük; resimsizde yok', (t) async {
+    testWidgets('ayrıntı: Çiz / Çöz düğmesi üstteki yazılı çubukta (telefon ve tablet); resimsizde yok', (t) async {
       await setup(t);
       await insert(t, _card('q1', image: 'foto.png'));
       await insert(t, _card('q2'));
@@ -460,7 +460,7 @@ void main() {
 
       await pumpDetail(t, _card('q1', image: 'foto.png'), const Size(1280, 800));
       expect(find.byKey(const Key('detail-solve')), findsOneWidget);
-      expect(find.byKey(const Key('detail-solve-big')), findsOneWidget);
+      expect(find.byKey(const Key('detail-solve-big')), findsNothing);
       await t.pumpWidget(const SizedBox());
       await t.pump(const Duration(seconds: 1));
 

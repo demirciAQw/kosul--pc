@@ -294,6 +294,11 @@ class LedgerService {
     return r.isNotEmpty;
   }
 
+  /// Bu özet bir `pdf_documents` satırında geçiyor mu? (`pdf-al` yalnızca
+  /// bilgisayarın kendi belge kayıtlarında geçen PDF'i verir.)
+  Future<bool> hasPdfDocument(String sha256) async =>
+      (await (_db.select(_db.pdfDocuments)..where((d) => d.sha256.equals(sha256) & d.deleted.equals(false))).get()).isNotEmpty;
+
   /// Gönderilmeyecek olanlar dahil defterin en büyük yerel sırası.
   Future<int> maxSeq() async {
     final r = await _db.customSelect('SELECT COALESCE(MAX(yerel_sira), 0) AS n FROM degisiklikler').getSingle();
@@ -308,6 +313,156 @@ class LedgerService {
   Future<void> setIntState(String key, int value) => _db.customStatement(
       'INSERT INTO esitleme_durum (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
       [key, '$value']);
+
+  Future<String?> textState(String key) async {
+    final r = await _db.customSelect('SELECT value FROM esitleme_durum WHERE key = ?', variables: [Variable<String>(key)]).get();
+    return r.isEmpty ? null : r.first.read<String>('value');
+  }
+
+  Future<void> setTextState(String key, String value) => _db.customStatement(
+      'INSERT INTO esitleme_durum (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+      [key, value]);
+
+  // ───────────── Tam durum (v9.15) ─────────────
+
+  /// Yeni eşleşen cihaz bilgisayardaki TÜM güncel satırları ister mi? (1 = evet.)
+  /// Bilgisayara ilk tam yedekle gelen eski veri deftere girmediği için `pendingFor`
+  /// onu hiç taşımaz; bu yol onu "anlık görüntü" kayıtlarıyla tamamlar.
+  static const keyNeedSnapshot = 'tam_durum_gerek';
+
+  /// Tam durum indirmesinin imleci (`snapshotPage` biçimi) ve başladığındaki
+  /// bilgisayar defteri sırası (bittiğinde `alinan_sira` bu değere çekilir).
+  static const keySnapshotCursor = 'tam_durum_imlec';
+  static const keySnapshotMarker = 'tam_durum_sira';
+
+  /// Bilgisayar tarafı: senkron tablolarının güncel satırlarını sayfa sayfa verir
+  /// (yeni genel okuma ucu YOK: aynı imzalı `degisiklikler` alışverişinde, yalnızca
+  /// cihaz isterse). [cursor] boş = baştan. Satırlar `ekle` kaydı gibi görünür,
+  /// `yeni` = satırın tam JSON'u (tetikleyiciyle aynı biçim). [maxBytes] aşılınca
+  /// sayfa kapanır (en az bir satır gider). `next` null ise bitti.
+  Future<({List<LedgerChange> rows, String? next})> snapshotPage(
+    String cursor, {
+    int maxRows = 400,
+    int maxBytes = 1500 * 1024,
+  }) async {
+    final tables = [for (final t in syncTables) if (t.$primaryKey.length == 1) t]
+      ..sort((a, b) => a.actualTableName.compareTo(b.actualTableName));
+    var ti = 0;
+    String? after;
+    if (cursor.isNotEmpty) {
+      try {
+        final c = jsonDecode(cursor);
+        if (c is! List || c.length != 2 || c[0] is! String || c[1] is! String) throw const FormatException();
+        ti = tables.indexWhere((t) => t.actualTableName == c[0]);
+        if (ti < 0) throw const FormatException();
+        after = c[1] as String;
+      } on FormatException {
+        throw ArgumentError('Bozuk tam durum imleci.');
+      }
+    }
+    final device = await deviceId();
+    final clock = await _clockNow();
+    final rows = <LedgerChange>[];
+    var bytes = 0;
+    String? lastTable, lastKey;
+    var full = false;
+    for (; ti < tables.length && !full; ti++, after = null) {
+      final t = tables[ti];
+      final name = t.actualTableName;
+      final cols = [for (final c in t.$columns) c.$name];
+      final pkCol = t.$primaryKey.single;
+      final pk = pkCol.$name;
+      final isText = pkCol.type == DriftSqlType.string;
+      final Variable<Object>? param = after == null
+          ? null
+          : isText
+              ? Variable<String>(after)
+              : (int.tryParse(after) == null ? null : Variable<int>(int.parse(after)));
+      final result = await _db
+          .customSelect(
+            'SELECT ${rowJson('"$name"', cols, blobs: _blobColumns(t))} AS j, CAST("$pk" AS TEXT) AS k FROM "$name" '
+            '${param == null ? '' : 'WHERE "$pk" > ? '}ORDER BY "$pk" LIMIT ?',
+            variables: [
+              if (param != null) param,
+              Variable<int>(maxRows - rows.length),
+            ],
+          )
+          .get();
+      for (final r in result) {
+        final json = r.read<String>('j');
+        if (rows.isNotEmpty && bytes + json.length > maxBytes) {
+          full = true;
+          break;
+        }
+        bytes += json.length + 200;
+        final key = r.read<String>('k');
+        rows.add(LedgerChange(
+            id: 'anlik-$name-$key', device: device, source: 'pc', table: name, rowId: key, op: 'ekle', clock: clock, neu: json));
+        lastTable = name;
+        lastKey = key;
+        if (rows.length >= maxRows) {
+          full = true;
+          break;
+        }
+      }
+      if (full) break;
+    }
+    if (!full) return (rows: rows, next: null);
+    return (rows: rows, next: jsonEncode([lastTable, lastKey]));
+  }
+
+  /// Cihaz tarafı: bilgisayarın tam durum satırlarını yazar. YALNIZCA eksik
+  /// satır eklenir; var olan satıra dokunulmaz (çakışma çıkmaz), cihazda silinmiş
+  /// (`sil` kaydı olan) satır geri gelmez. Satırlar deftere işlenmez (yedekle gelmiş
+  /// veri gibi): cihaz sonradan değiştirirse `eski` değer bilgisayardakiyle tutar.
+  /// Yabancı anahtar denetimi sayfa boyunca kapalıdır (sayfa sırası tablo adına göredir,
+  /// ana kayıt sonraki sayfada gelebilir); bütün sayfalar gelince tutarlıdır.
+  Future<ApplyResult> applySnapshot(List<LedgerChange> changes) async {
+    var result = const ApplyResult();
+    if (changes.isEmpty) return result;
+    // DİKKAT: `PRAGMA foreign_keys` bağlantı geneldir (işlem içinde değiştirilemez); bu kısa
+    // pencerede aynı bağlantıdan gelen arayüz yazımları da FK denetimsiz çalışır. Pencere
+    // yalnızca bir sayfalık (en çok birkaç yüz satır) tam durum işlemi kadardır.
+    await _db.customStatement('PRAGMA foreign_keys = OFF');
+    try {
+      await _db.transaction(() async {
+        await _db.customStatement('UPDATE _baglam SET bastir = 1 WHERE id = 1');
+        try {
+          for (final c in changes) {
+            if (c.op != 'ekle' || c.neu == null || _table(c.table) == null) {
+              result += const ApplyResult(failed: 1);
+              continue;
+            }
+            try {
+              final cur = await currentRowJson(c.table, c.rowId);
+              if (cur != null) {
+                result += cur == c.neu ? const ApplyResult(alreadySame: 1) : const ApplyResult(duplicates: 1);
+                continue;
+              }
+              final deleted = await _db.customSelect(
+                "SELECT 1 FROM degisiklikler WHERE tablo = ? AND satir_id = ? AND islem = 'sil' LIMIT 1",
+                variables: [Variable<String>(c.table), Variable<String>(c.rowId)],
+              ).get();
+              if (deleted.isNotEmpty) {
+                result += const ApplyResult(duplicates: 1);
+                continue;
+              }
+              await _writeRow(c.table, c.rowId, c.neu);
+              result += const ApplyResult(applied: 1);
+            } catch (_) {
+              result += const ApplyResult(failed: 1);
+            }
+          }
+        } finally {
+          await _db.customStatement('UPDATE _baglam SET bastir = 0 WHERE id = 1');
+        }
+      });
+    } finally {
+      await _db.customStatement('PRAGMA foreign_keys = ON');
+    }
+    _flushTouched();
+    return result;
+  }
 
   Future<List<LedgerChange>> history({String? session, String? source, int limit = 500}) async => [
         for (final r in await _db.customSelect(

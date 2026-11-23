@@ -18,3 +18,9 @@ final pairedComputerProvider =
 
 /// "PDF dosyalarını da gönder" ayarı (varsayılan kapalı).
 final sendPdfsProvider = FutureProvider<bool>((ref) => ref.watch(phoneSyncStoreProvider).sendPdfs());
+
+/// "PDF'leri bilgisayardan al" ayarı (varsayılan kapalı).
+final pullPdfsProvider = FutureProvider<bool>((ref) => ref.watch(phoneSyncStoreProvider).pullPdfs());
+
+/// Bu cihazın bilgisayarda görünen adı (yoksa null).
+final deviceNameProvider = FutureProvider<String?>((ref) => ref.watch(phoneSyncStoreProvider).deviceName());

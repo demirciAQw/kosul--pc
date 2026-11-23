@@ -37,6 +37,10 @@ abstract final class SyncPaths {
   /// PDF dosyası (T7): yalnızca telefon/tablet → bilgisayar, `PUT`, isteğe bağlı.
   /// Ad `x-kocum-yol` başlığında `<sha256>.pdf`; imzaya girer.
   static const pdf = '$prefix/pdf';
+
+  /// PDF dosyasını bilgisayardan alma (v9.15, isteğe bağlı, ayar varsayılan KAPALI):
+  /// yalnızca bilgisayarın `pdf_documents` satırında geçen özet. Bkz. `SyncServer._pdfGet`.
+  static const pdfGet = '$prefix/pdf-al';
 }
 
 /// İmzalı isteklerin başlıkları (küçük harf; HTTP başlıkları harf duyarsız).
@@ -76,7 +80,17 @@ abstract final class SyncLimits {
   static const banDuration = Duration(minutes: 10);
 
   static const nameLength = 40;
+
+  /// Bir bilgisayara aynı anda eşleşebilecek telefon/tablet sayısı (v9.15).
+  /// Telefon ↔ tablet doğrudan eşleşmez; bilgisayar merkezdir.
+  static const maxDevices = 4;
 }
+
+/// Eşleşen cihazın türü (ekranda simge ve ad için; güvenlikte rolü yok).
+const deviceKindPhone = 'telefon';
+const deviceKindTablet = 'tablet';
+
+String cleanDeviceKind(Object? kind) => kind == deviceKindTablet ? deviceKindTablet : deviceKindPhone;
 
 /// Eşleşebilen telefon/tablet platformları. Windows ve diğerleri reddedilir.
 /// Not: platform karşı tarafın kendi beyanıdır; asıl kilit ekrandaki kod ve
@@ -225,7 +239,8 @@ class SyncHello {
   /// Bilgisayarda kod ekranı açık mı?
   final bool pairingOpen;
 
-  /// Bilgisayar zaten bir telefonla eşleşmiş mi?
+  /// Bilgisayarın cihaz yuvaları dolu mu? (v9.15: en çok [SyncLimits.maxDevices] cihaz;
+  /// anahtar adı eski sürümlerle uyum için `eslesmis` kaldı.) Doluysa yeni eşleşme olmaz.
   final bool paired;
 
   /// Bir sonraki istekte kullanılacak tek seferlik değer.
@@ -274,6 +289,7 @@ class PairRequest {
     required this.platform,
     required this.dhPublic,
     required this.proof,
+    this.kind = deviceKindPhone,
   });
 
   final String challenge;
@@ -281,6 +297,9 @@ class PairRequest {
   final String name;
   final String platform;
   final String dhPublic;
+
+  /// `telefon` ya da `tablet` (yalnızca gösterim; imzaya girmez).
+  final String kind;
 
   /// Telefonun, ekrandaki kodla türettiği anahtarı bildiğinin kanıtı.
   final String proof;
@@ -292,6 +311,7 @@ class PairRequest {
         'platform': platform,
         'dh': dhPublic,
         'kanit': proof,
+        'tur': kind,
       };
 
   factory PairRequest.fromJson(Object? json) {
@@ -303,6 +323,7 @@ class PairRequest {
       platform: _str(m, 'platform'),
       dhPublic: _str(m, 'dh'),
       proof: _str(m, 'kanit'),
+      kind: cleanDeviceKind(m['tur']),
     );
   }
 }

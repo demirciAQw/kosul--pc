@@ -11,6 +11,7 @@ import '../../tools/data/full_export.dart';
 import '../../tools/full_backup.dart';
 import '../../../core/ledger/ledger_service.dart';
 import '../data/ledger_sync.dart';
+import '../data/pdf_pull.dart';
 import '../data/pdf_sync.dart';
 import '../data/phone_sync_store.dart';
 import '../data/sync_client.dart';
@@ -54,6 +55,20 @@ class SendController extends Notifier<SendState> {
     ref.invalidate(sendPdfsProvider);
   }
 
+  Future<void> setPullPdfs(bool value) async {
+    await _store.setPullPdfs(value);
+    ref.invalidate(pullPdfsProvider);
+  }
+
+  /// "Bilgisayardaki her şeyi yeniden al": bir sonraki eşitleme tam durumu ister
+  /// (yalnızca eksik satırlar eklenir; var olana ve sildiklerine dokunulmaz).
+  Future<void> requestFullState() async {
+    final ledger = ref.read(ledgerServiceProvider);
+    await ledger.setIntState(LedgerService.keyNeedSnapshot, 1);
+    await ledger.setTextState(LedgerService.keySnapshotCursor, '');
+    await ledger.setIntState(LedgerService.keySnapshotMarker, 0);
+  }
+
   // ───────────── Eşleştirme ─────────────
 
   Future<List<DiscoveredComputer>> discover() async {
@@ -66,7 +81,13 @@ class SendController extends Notifier<SendState> {
   }
 
   /// Hata olursa [SyncException] (ya da ağ hatası) fırlatır; ekran gösterir.
-  Future<PairedComputer> pair({required String host, required int port, required String code}) async {
+  Future<PairedComputer> pair({
+    required String host,
+    required int port,
+    required String code,
+    bool isTablet = false,
+    String? deviceName,
+  }) async {
     if (await _store.computer() != null) {
       throw const SyncException('Telefon zaten bir bilgisayarla eşleşmiş. Önce o eşleşmeyi kaldır.');
     }
@@ -78,10 +99,16 @@ class SendController extends Notifier<SendState> {
         port: port,
         code: code,
         phoneId: phoneId,
-        phoneName: deviceLabel(platformName == 'android' ? 'Android' : platformName, phoneId),
+        phoneName: cleanDeviceName(
+          deviceName ?? deviceLabel(isTablet ? 'Tablet' : 'Telefon', phoneId),
+        ),
         platform: platformName,
+        kind: isTablet ? deviceKindTablet : deviceKindPhone,
       );
+      if (deviceName != null) await _store.setDeviceName(deviceName);
       await _store.saveComputer(computer);
+      // Yeni eşleşen cihaz bilgisayardaki tüm güncel kayıtları alır (eski yedekle gelenler dahil).
+      await requestFullState();
       ref.invalidate(pairedComputerProvider);
       return computer;
     } finally {
@@ -205,6 +232,12 @@ class SendController extends Notifier<SendState> {
       } on Object catch (e) {
         pdfSummary = 'PDF dosyaları gönderilemedi: ${describeSyncError(e)} Satırlar eşitlendi; PDF için yeniden eşitle.';
       }
+      var pullSummary = '';
+      try {
+        pullSummary = await _pullPdfs(client, computer);
+      } on Object catch (e) {
+        pullSummary = 'PDF dosyaları alınamadı: ${describeSyncError(e)} Satırlar eşitlendi; PDF için yeniden eşitle.';
+      }
       await _store.saveComputer(computer.copyWith(lastSentAt: DateTime.now()));
       ref.invalidate(pairedComputerProvider);
       _set(SendStage.done, [
@@ -214,6 +247,7 @@ class SendController extends Notifier<SendState> {
         ],
         'Eşitleme: ${synced.summary}.',
         if (pdfSummary.isNotEmpty) pdfSummary.endsWith('.') ? pdfSummary : '$pdfSummary.',
+        if (pullSummary.isNotEmpty) pullSummary.endsWith('.') ? pullSummary : '$pullSummary.',
         if (notOnPhone > 0) '$notOnPhone fotoğraf telefonda bulunamadı.',
         if (skipped > 0) '$skipped fotoğrafın adı kurallara uymadığı için gönderilmedi.',
       ].join(' '));
@@ -246,6 +280,37 @@ class SendController extends Notifier<SendState> {
           SendStage.pdfs,
           'PDF $i / $n: ${formatPdfSize(sent)} / ${formatPdfSize(total)}',
           done: sent,
+          total: total,
+        ),
+      ).run(connection, shas);
+      return result.summary;
+    } finally {
+      _pdfCancel = null;
+    }
+  }
+
+  /// "PDF'leri bilgisayardan al" açıksa, bu cihazda dosyası olmayan belgelerin PDF'ini indirir.
+  Future<String> _pullPdfs(SyncClient client, PairedComputer computer) async {
+    if (!await _store.pullPdfs()) return '';
+    final phoneId = await _store.phoneId();
+    final (_, connection) = await _connect(client, computer, phoneId);
+    final db = ref.read(appDatabaseProvider);
+    final shas = [
+      for (final d in await (db.select(db.pdfDocuments)..where((t) => t.deleted.equals(false))).get()) d.sha256,
+    ];
+    if (shas.isEmpty) return '';
+    final cancel = _pdfCancel = SyncCancelToken();
+    final dir = Directory(p.join((await getApplicationSupportDirectory()).path, 'pdfs'));
+    try {
+      final result = await PdfPull(
+        client: client,
+        pdfDir: dir,
+        enabled: _store.pullPdfs,
+        cancel: cancel,
+        onProgress: (i, n, name, got, total) => _set(
+          SendStage.pdfs,
+          'PDF $i / $n indiriliyor: ${formatPdfSize(got)} / ${formatPdfSize(total)}',
+          done: got,
           total: total,
         ),
       ).run(connection, shas);

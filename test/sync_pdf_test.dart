@@ -406,7 +406,7 @@ void main() {
     });
 
     test('eşleşme kaldırılınca PDF gönderilemez', () async {
-      await server.forgetPhone();
+      await server.forgetDevice(phoneId);
       final offer = await phonePdf(bytesOf(100));
       await expectLater(client.sendPdf(conn, offer, File('${phonePdfs.path}/${offer.name}')), throwsA(isA<SyncException>()));
     });

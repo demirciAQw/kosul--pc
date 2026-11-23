@@ -380,7 +380,7 @@ void main() {
     expect(cols, contains('question_id'));
     if (from >= 15) expect((await d.select(d.inkStrokes).getSingle()).questionId, isNull);
     expect(await d.customSelect("SELECT name FROM sqlite_master WHERE name = 'ix_ink_question'").get(), hasLength(1));
-    expect((await d.customSelect('PRAGMA user_version').getSingle()).read<int>('user_version'), 19);
+    expect((await d.customSelect('PRAGMA user_version').getSingle()).read<int>('user_version'), 20);
     expect(await d.customSelect("SELECT name FROM sqlite_master WHERE name = 'ix_defter_sayfa'").get(), hasLength(1));
     // Yeni defter çalışır ve deftere yazılır.
     final r2 = InkNotebookRepository(d);

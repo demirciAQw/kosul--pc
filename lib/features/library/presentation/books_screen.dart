@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../app/routes.dart';
+import '../../pdf/domain/pdf_document_record.dart';
+import '../../pdf/pdf_providers.dart';
 import '../domain/library.dart';
 import '../domain/progress.dart';
 import '../library_providers.dart';
@@ -37,6 +39,11 @@ class BooksScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final progress = ref.watch(bookProgressProvider);
     final all = progress.value ?? const <BookProgress>[];
+    // Kitaba bağlı PDF'ler (kapakta rozet, uzun basınca "PDF'te aç").
+    final pdfs = <String, PdfDocumentRecord>{
+      for (final d in ref.watch(pdfDocumentsProvider).value ?? const <PdfDocumentRecord>[])
+        if (d.bookId != null) d.bookId!: d,
+    };
     int count(BookShelf s) => all.where((p) => BookShelf.of(p.book) == s).length;
 
     return DefaultTabController(
@@ -65,7 +72,11 @@ class BooksScreen extends ConsumerWidget {
           data: (list) => TabBarView(
             children: [
               for (final shelf in BookShelf.values)
-                _ShelfView(shelf: shelf, items: [for (final p in list) if (BookShelf.of(p.book) == shelf) p]),
+                _ShelfView(
+                  shelf: shelf,
+                  pdfs: pdfs,
+                  items: [for (final p in list) if (BookShelf.of(p.book) == shelf) p],
+                ),
             ],
           ),
         ),
@@ -75,9 +86,12 @@ class BooksScreen extends ConsumerWidget {
 }
 
 class _ShelfView extends StatelessWidget {
-  const _ShelfView({required this.shelf, required this.items});
+  const _ShelfView({required this.shelf, required this.items, required this.pdfs});
   final BookShelf shelf;
   final List<BookProgress> items;
+
+  /// Kitap kimliği → bağlı PDF.
+  final Map<String, PdfDocumentRecord> pdfs;
 
   @override
   Widget build(BuildContext context) {
@@ -87,9 +101,47 @@ class _ShelfView extends StatelessWidget {
     return BookShelfView(
       items: items,
       onOpen: (book) => context.push(AppRoutes.book(book.id)),
+      pdfBookIds: pdfs.keys.toSet(),
+      onLongPress: (book) {
+        final pdf = pdfs[book.id];
+        if (pdf != null) _showBookSheet(context, book, pdf);
+      },
       header: _Overview(done: done, total: total, books: items.length),
     );
   }
+}
+
+/// Kapağa uzun basınca: kitabı ya da bağlı PDF'i aç.
+Future<void> _showBookSheet(BuildContext context, Book book, PdfDocumentRecord pdf) {
+  return showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    builder: (sheet) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(title: Text(book.title, maxLines: 2, overflow: TextOverflow.ellipsis)),
+          ListTile(
+            key: const Key('book-open-pdf'),
+            leading: const Icon(Icons.picture_as_pdf_outlined),
+            title: const Text("PDF'te aç"),
+            onTap: () {
+              Navigator.pop(sheet);
+              context.push(AppRoutes.pdfReader(pdf.id));
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.menu_book_outlined),
+            title: const Text('Kitabı aç'),
+            onTap: () {
+              Navigator.pop(sheet);
+              context.push(AppRoutes.book(book.id));
+            },
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 class _Overview extends StatelessWidget {

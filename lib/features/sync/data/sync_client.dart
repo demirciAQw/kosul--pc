@@ -37,6 +37,11 @@ class SyncCancelledException extends SyncException {
   const SyncCancelledException() : super('PDF gönderimi iptal edildi.');
 }
 
+/// Bilgisayar bu PDF'i vermiyor (satırı ya da dosyası yok).
+class PdfNotOnComputer extends SyncException {
+  const PdfNotOnComputer(super.message) : super(status: 404);
+}
+
 /// [SyncClient.sendPdf] sonucu: bilgisayarda zaten varsa gövde gitmemiştir.
 class PdfSendResult {
   const PdfSendResult({required this.alreadyThere});
@@ -158,13 +163,14 @@ class SyncClient {
     required String phoneId,
     required String phoneName,
     required String platform,
+    String kind = deviceKindPhone,
   }) async {
     final clean = code.replaceAll(RegExp(r'\s'), '');
     if (!RegExp(r'^\d{6}$').hasMatch(clean)) throw const SyncException('Kod 6 haneli olmalı.');
     final hello = await this.hello(host, port);
     if (hello.paired) {
-      throw const SyncException('Bu bilgisayar zaten bir telefonla eşleşmiş. Bilgisayarda Ayarlar → Telefon eşleştirme → '
-          'Eşleşmeyi kaldır, sonra tekrar dene.');
+      throw const SyncException('Bu bilgisayarın cihaz yuvaları dolu (en çok ${SyncLimits.maxDevices} cihaz). '
+          'Bilgisayarda Ayarlar → Cihaz eşleştirme\'den bir cihazı kaldır, sonra tekrar dene.');
     }
     final computerPublic = hello.dhPublic;
     if (!hello.pairingOpen || computerPublic == null) {
@@ -189,6 +195,7 @@ class SyncClient {
       platform: platform,
       dhPublic: dh.publicHex,
       proof: proofOf(key, ProofLabels.phonePair, [hello.challenge, phoneId]),
+      kind: cleanDeviceKind(kind),
     );
     final response = PairResponse.fromJson(await _postJson(host, port, SyncPaths.pair, request.toJson()));
     if (response.id != hello.id ||
@@ -346,6 +353,121 @@ class SyncClient {
     if (!safeEquals(expected, response.headers.value(SyncHeaders.responseSignature) ?? '')) {
       await temp.delete();
       throw const SyncException('Fotoğrafın imzası tutmadı; alınmadı.');
+    }
+    await temp.rename(target.path);
+  }
+
+  /// Bilgisayardaki PDF'i [target] yoluna indirir (`pdf-al`, v9.15; ayar açıksa
+  /// çağrılır). Yalnızca `<sha256>.pdf` adı gider; baytların SHA-256'sı ADLA
+  /// tutmazsa dosya atılır (bilgisayar ya da ağ bozmuş olsa da yanlış dosya yazılmaz).
+  /// Kopan indirme `.part` dosyasından sürer (kısmi dosya yeniden özetlenir).
+  /// Hedef (ya da klasör) symlink ise yazılmaz. İptalde ve özet tutmazsa `.part` silinir.
+  /// Bilgisayarda yoksa (404) [PdfNotOnComputer] fırlatır.
+  Future<void> fetchPdf(
+    SyncConnection connection,
+    String sha256,
+    File target, {
+    void Function(int received, int total)? onProgress,
+    SyncCancelToken? cancel,
+  }) async {
+    final name = pdfNameOfSha(sha256);
+    if (name == null) throw SyncException('PDF adı kurallara uymuyor: $sha256');
+    final computer = connection.computer;
+    _checkHost(computer.host);
+    final dir = target.parent;
+    await dir.create(recursive: true);
+    if (await FileSystemEntity.isLink(target.path) || await FileSystemEntity.isLink(dir.path)) {
+      throw const SyncException('PDF klasörü ya da dosyası bağlantı (symlink); indirilmedi.');
+    }
+    final temp = File('${target.path}.part');
+    if (await FileSystemEntity.isLink(temp.path)) await temp.delete();
+    final hash = StreamingSha256();
+    var have = 0;
+    if (await temp.exists()) {
+      // Yarım kalmış indirme: baytlar yeniden özetlenir, kaldığı yerden sürer.
+      await for (final chunk in temp.openRead()) {
+        hash.add(chunk);
+        have += chunk.length;
+      }
+      if (have > SyncLimits.pdf) {
+        await temp.delete();
+        throw const SyncException('Yarım PDF beklenenden büyük; silindi, yeniden dene.');
+      }
+    }
+    final body = utf8.encode(jsonEncode(PdfGetRequest(name, start: have).toJson()));
+    final sequence = connection._next();
+    final request = await _http.openUrl('POST', _uri(computer.host, computer.port, SyncPaths.pdfGet)).timeout(_requestTimeout);
+    request.headers
+      ..set(SyncHeaders.session, connection.session)
+      ..set(SyncHeaders.sequence, '$sequence')
+      ..set(
+        SyncHeaders.signature,
+        requestSignature(computer.key,
+            method: 'POST',
+            path: SyncPaths.pdfGet,
+            session: connection.session,
+            sequence: sequence,
+            mediaPath: '',
+            bodyHash: sha256Hex(body)),
+      );
+    request.contentLength = body.length;
+    request.add(body);
+    final response = await request.close().timeout(_requestTimeout);
+    if (response.statusCode != HttpStatus.ok) {
+      try {
+        await _readJson(response);
+      } on SyncException catch (e) {
+        if (response.statusCode == HttpStatus.notFound) throw PdfNotOnComputer(e.message);
+        if (response.statusCode == HttpStatus.badRequest && have > 0) await temp.delete(); // başlangıç tutmadı: baştan
+        rethrow;
+      }
+      throw SyncException('Bilgisayar PDF\'i vermedi (${response.statusCode}).');
+    }
+    final remaining = response.contentLength;
+    if (remaining < 0 || have + remaining > SyncLimits.pdf) {
+      throw SyncException('PDF boyutu sınırı aşıyor (en çok ${formatPdfSize(SyncLimits.pdf)}).');
+    }
+    final total = have + remaining;
+    final sink = temp.openWrite(mode: FileMode.append);
+    var got = have;
+    try {
+      await for (final chunk in response.timeout(const Duration(minutes: 2))) {
+        if (cancel?.cancelled == true) throw const SyncCancelledException();
+        got += chunk.length;
+        if (got > total) throw const SyncException('PDF beklenenden büyük geldi.');
+        hash.add(chunk);
+        sink.add(chunk);
+        onProgress?.call(got, total);
+      }
+      await sink.flush();
+    } on SyncCancelledException {
+      await sink.close();
+      if (await temp.exists()) await temp.delete();
+      rethrow;
+    } finally {
+      try {
+        await sink.close();
+      } on Object {
+        // zaten kapandı
+      }
+    }
+    final expected = responseSignature(computer.key,
+        session: connection.session, sequence: sequence, bodyHash: sha256Hex(utf8.encode(pdfGetMeta(name, have, total))));
+    if (!safeEquals(expected, response.headers.value(SyncHeaders.responseSignature) ?? '')) {
+      await temp.delete();
+      throw const SyncException('PDF yanıtının imzası tutmadı; alınmadı.');
+    }
+    if (got != total) {
+      // Eksik geldi (kopma): .part kalır, yeniden denenince sürer.
+      throw const HttpException('PDF yarıda kesildi.');
+    }
+    if (hash.close() != sha256) {
+      await temp.delete();
+      throw const SyncException('PDF içeriği adındaki özetle uyuşmuyor; alınmadı.');
+    }
+    if (await FileSystemEntity.isLink(target.path)) {
+      await temp.delete();
+      throw const SyncException('PDF hedefi bağlantı (symlink); alınmadı.');
     }
     await temp.rename(target.path);
   }

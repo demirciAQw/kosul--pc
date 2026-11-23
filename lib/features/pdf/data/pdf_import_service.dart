@@ -21,6 +21,16 @@ class PdfImportResult {
   final List<BookSuggestion> suggestions;
 }
 
+/// Seçilen dosyanın içe aktarma öncesi özeti (pencere için).
+class PdfFileInfo {
+  const PdfFileInfo({required this.sha256, required this.pageCount, this.existing});
+  final String sha256;
+  final int pageCount;
+
+  /// Aynı PDF zaten kitaplıkta (silinmemiş ve dosyası bu cihazda var).
+  final PdfDocumentRecord? existing;
+}
+
 /// PDF'i uygulama veri klasörüne `pdfs/<sha256>.pdf` olarak alır.
 /// IO ince katmandır; kurallar `pdf_import_rules.dart`'ta.
 class PdfImportService {
@@ -39,6 +49,47 @@ class PdfImportService {
   bool hasFile(PdfDocumentRecord d) => fileOf(d).existsSync();
 
   static Future<String> sha256OfFile(File f) async => (await crypto.sha256.bind(f.openRead()).first).toString();
+
+  /// Kopyalamadan: özet, sayfa sayısı ve zaten var mı. Bozuksa [PdfOpenException].
+  Future<PdfFileInfo> inspect(File source) async {
+    final sha = await sha256OfFile(source);
+    final doc = await engine.openFile(source.path);
+    final int pages;
+    try {
+      pages = doc.pageCount;
+    } finally {
+      await doc.close();
+    }
+    if (pages <= 0) throw const PdfOpenException('Sayfa yok');
+    final existing = await repository.findBySha(sha);
+    return PdfFileInfo(
+      sha256: sha,
+      pageCount: pages,
+      existing: existing != null && File(p.join(pdfDir.path, storedFileName(sha))).existsSync() ? existing : null,
+    );
+  }
+
+  /// Kitap formunu doldurmak için ilk [pages] sayfanın metin katmanı (taranmış
+  /// PDF'te boş). Hata olursa boş döner: tahmin yalnızca bir ipucudur.
+  Future<String> sampleText(PdfDocumentRecord d, {int pages = 3}) async {
+    try {
+      final f = fileOf(d);
+      if (!f.existsSync()) return '';
+      final doc = await engine.openFile(f.path);
+      try {
+        final out = StringBuffer();
+        for (var i = 0; i < doc.pageCount && i < pages; i++) {
+          final size = await doc.pageSize(i);
+          out.writeln(await doc.textInBox(i, PdfBox(0, 0, size.width, size.height)));
+        }
+        return out.toString();
+      } finally {
+        await doc.close();
+      }
+    } catch (_) {
+      return '';
+    }
+  }
 
   /// Aynı hizmetteki içe aktarmalar sırayla çalışır (çift içe aktarma yarışı yok).
   Future<void> _tail = Future.value();

@@ -32,7 +32,13 @@ class LedgerRequest {
     required this.received,
     required this.changes,
     required this.lastSeq,
+    this.snapshotCursor,
   });
+
+  /// Tam durum isteği (v9.15): null = istenmiyor; boş metin = baştan; dolu = kaldığı yer.
+  /// İstenirse bilgisayar defter değişikliği DÖNMEZ; yalnızca anlık görüntü satırları
+  /// ve bu anki defter sırası gelir (tam durum, geçmişi yeniden oynatmadan başlar).
+  final String? snapshotCursor;
 
   /// Veritabanı şema sürümü: iki taraf aynı olmalı.
   final int schema;
@@ -52,6 +58,7 @@ class LedgerRequest {
         'alinan': received,
         'satirlar': [for (final c in changes) c.toJson()],
         'son': lastSeq,
+        if (snapshotCursor != null) 'anlik': snapshotCursor,
       };
 
   factory LedgerRequest.fromJson(Object? json) {
@@ -69,7 +76,15 @@ class LedgerRequest {
       if (c == null) throw const SyncException('Bozuk mesaj: değişiklik.');
       changes.add(c);
     }
-    return LedgerRequest(schema: schema, device: device, received: received, changes: changes, lastSeq: last);
+    final snapshot = json['anlik'];
+    if (snapshot != null && (snapshot is! String || snapshot.length > 512)) throw const SyncException('Bozuk mesaj: tam durum imleci.');
+    return LedgerRequest(
+        schema: schema,
+        device: device,
+        received: received,
+        changes: changes,
+        lastSeq: last,
+        snapshotCursor: snapshot as String?);
   }
 }
 
@@ -83,7 +98,20 @@ class LedgerResponse {
     required this.more,
     required this.photos,
     required this.summary,
+    this.snapshot = const [],
+    this.snapshotNext,
+    this.snapshotMarker = 0,
   });
+
+  /// Tam durum sayfası (yalnızca istenirse): güncel satırlar `ekle` biçiminde.
+  final List<LedgerChange> snapshot;
+
+  /// Sonraki istekte gönderilecek imleç; null = tam durum bitti (ya da istenmedi).
+  final String? snapshotNext;
+
+  /// Tam durum yanıtında bilgisayar defterinin o anki en büyük sırası: bittiğinde
+  /// cihazın `alinan_sira` imleci buraya çekilir (geçmiş yeniden oynatılmaz).
+  final int snapshotMarker;
 
   /// Bilgisayarın uyguladığı en büyük telefon sırası.
   final int acked;
@@ -110,6 +138,11 @@ class LedgerResponse {
           for (final p in photos) {'yol': p.path, 'boyut': p.size},
         ],
         'ozet': summary,
+        if (snapshot.isNotEmpty || snapshotNext != null || snapshotMarker > 0) ...{
+          'anlik': [for (final c in snapshot) c.toJson()],
+          'anlikSonra': snapshotNext,
+          'anlikSira': snapshotMarker,
+        },
       };
 
   factory LedgerResponse.fromJson(Object? json) {
@@ -131,7 +164,19 @@ class LedgerResponse {
         }
       }
     }
+    final snap = <LedgerChange>[];
+    final rawSnap = json['anlik'];
+    if (rawSnap is List) {
+      for (final r in rawSnap) {
+        final c = LedgerChange.tryParse(r);
+        if (c == null) throw const SyncException('Bilgisayardan bozuk tam durum satırı geldi.');
+        snap.add(c);
+      }
+    }
     return LedgerResponse(
+      snapshot: snap,
+      snapshotNext: json['anlikSonra'] is String ? json['anlikSonra'] as String : null,
+      snapshotMarker: json['anlikSira'] is int ? json['anlikSira'] as int : 0,
       acked: acked,
       changes: changes,
       lastSeq: last,

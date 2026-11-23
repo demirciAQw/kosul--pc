@@ -28,10 +28,11 @@ int _stableHash(String s) {
 
 /// Kitabın kapak rengi: dersinden kararlı; aynı ders hep aynı renk.
 /// Ders yoksa kitap adından.
-Color bookCoverColor(Book book) {
-  final key = book.subject.trim().isNotEmpty ? book.subject : book.title;
-  return bookCoverPalette[_stableHash(key) % bookCoverPalette.length];
-}
+Color bookCoverColor(Book book) =>
+    bookCoverColorFor(book.subject.trim().isNotEmpty ? book.subject : book.title);
+
+/// Verilen anahtardan kararlı kapak rengi (kitabı olmayan PDF'ler başlığından).
+Color bookCoverColorFor(String key) => bookCoverPalette[_stableHash(key) % bookCoverPalette.length];
 
 /// Genişliğe göre raf sütun sayısı: telefonda 2-3, tablette 4-6.
 int shelfColumnsFor(double width) {
@@ -45,21 +46,80 @@ int shelfColumnsFor(double width) {
 /// Gerçek kitap gibi dikey (2:3) kapak: renkli zemin, ders etiketi, büyük ad,
 /// yayınevi, sağda sırt gölgesi ve altta ilerleme şeridi.
 class BookCover extends StatelessWidget {
-  const BookCover({super.key, required this.progress, required this.onTap});
+  const BookCover({
+    super.key,
+    required this.progress,
+    required this.onTap,
+    this.hasPdf = false,
+    this.onLongPress,
+  });
 
   final BookProgress progress;
   final VoidCallback onTap;
 
+  /// Kitaba bağlı PDF var: kapakta küçük "PDF" rozeti.
+  final bool hasPdf;
+  final VoidCallback? onLongPress;
+
   @override
   Widget build(BuildContext context) {
     final b = progress.book;
-    final color = bookCoverColor(b);
     final pct = (progress.ratio * 100).round();
+    return BookCoverFace(
+      title: b.title,
+      kicker: [b.examType, b.subject].where((e) => e.trim().isNotEmpty).join(' · '),
+      color: bookCoverColor(b),
+      publisher: (b.publisher ?? '').trim(),
+      ratio: progress.ratio,
+      footer: '%$pct · ${progress.doneLeaves}/${progress.totalLeaves}',
+      semanticsLabel: '${b.title}, ${b.subject}, ilerleme %$pct${hasPdf ? ', PDF var' : ''}',
+      onTap: onTap,
+      onLongPress: onLongPress,
+      badge: hasPdf ? 'PDF' : null,
+    );
+  }
+}
+
+/// Kapağın çizimi (kitap ve PDF rafları ortak kullanır). [ratio] null ise
+/// ilerleme şeridi çizilmez; [footer] altta tek satır yazıdır.
+class BookCoverFace extends StatelessWidget {
+  const BookCoverFace({
+    super.key,
+    required this.title,
+    required this.color,
+    required this.onTap,
+    required this.semanticsLabel,
+    this.kicker = '',
+    this.publisher = '',
+    this.ratio,
+    this.footer,
+    this.onLongPress,
+    this.badge,
+    this.bottomRight,
+  });
+
+  final String title;
+  final String kicker;
+  final Color color;
+  final String publisher;
+  final double? ratio;
+  final String? footer;
+  final String semanticsLabel;
+  final VoidCallback onTap;
+  final VoidCallback? onLongPress;
+
+  /// Sağ üstte küçük rozet ("PDF").
+  final String? badge;
+
+  /// Sağ altta ek bileşen (ör. ⋮ menüsü).
+  final Widget? bottomRight;
+
+  @override
+  Widget build(BuildContext context) {
     const white = Colors.white;
-    final publisher = (b.publisher ?? '').trim();
     return Semantics(
       button: true,
-      label: '${b.title}, ${b.subject}, ilerleme %$pct',
+      label: semanticsLabel,
       child: AspectRatio(
         aspectRatio: 2 / 3,
         child: LayoutBuilder(
@@ -91,6 +151,7 @@ class BookCover extends StatelessWidget {
                   type: MaterialType.transparency,
                   child: InkWell(
                     onTap: onTap,
+                    onLongPress: onLongPress,
                     child: Stack(
                       children: [
                         // Sağda ince sırt gölgesi.
@@ -121,7 +182,7 @@ class BookCover extends StatelessWidget {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                [b.examType, b.subject].where((e) => e.trim().isNotEmpty).join(' · '),
+                                kicker,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
@@ -136,7 +197,7 @@ class BookCover extends StatelessWidget {
                               const SizedBox(height: 8),
                               Expanded(
                                 child: Text(
-                                  b.title,
+                                  title,
                                   maxLines: 5,
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
@@ -154,26 +215,54 @@ class BookCover extends StatelessWidget {
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(color: white.withValues(alpha: 0.85), fontSize: small),
                                 ),
-                              const SizedBox(height: 6),
-                              ClipRRect(
-                                borderRadius: BorderRadius.circular(3),
-                                child: LinearProgressIndicator(
-                                  value: progress.ratio.clamp(0.0, 1.0),
-                                  minHeight: 5,
-                                  backgroundColor: const Color(0x55000000),
-                                  valueColor: const AlwaysStoppedAnimation(Color(0xFFFFFFFF)),
+                              if (ratio != null) ...[
+                                const SizedBox(height: 6),
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(3),
+                                  child: LinearProgressIndicator(
+                                    value: ratio!.clamp(0.0, 1.0),
+                                    minHeight: 5,
+                                    backgroundColor: const Color(0x55000000),
+                                    valueColor: const AlwaysStoppedAnimation(Color(0xFFFFFFFF)),
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(height: 3),
-                              Text(
-                                '%$pct · ${progress.doneLeaves}/${progress.totalLeaves}',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(color: white, fontSize: small, fontWeight: FontWeight.w600),
-                              ),
+                              ],
+                              if (footer != null) ...[
+                                const SizedBox(height: 3),
+                                Text(
+                                  footer!,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(color: white, fontSize: small, fontWeight: FontWeight.w600),
+                                ),
+                              ],
                             ],
                           ),
                         ),
+                        if (badge != null)
+                          Positioned(
+                            top: 6,
+                            right: c.maxWidth * 0.1,
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: white,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                child: Text(
+                                  badge!,
+                                  style: TextStyle(
+                                    color: color,
+                                    fontSize: small,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: 0.4,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        if (bottomRight != null) Positioned(bottom: 0, right: c.maxWidth * 0.04, child: bottomRight!),
                       ],
                     ),
                   ),
@@ -195,10 +284,49 @@ class BookShelfView extends StatelessWidget {
     required this.onOpen,
     this.header,
     this.padding = const EdgeInsets.fromLTRB(16, 12, 16, 96),
+    this.pdfBookIds = const {},
+    this.onLongPress,
   });
 
   final List<BookProgress> items;
   final void Function(Book book) onOpen;
+  final Widget? header;
+  final EdgeInsets padding;
+
+  /// PDF'i olan kitapların kimlikleri (kapakta "PDF" rozeti).
+  final Set<String> pdfBookIds;
+
+  /// Kapağa uzun basma (ör. "PDF'te aç").
+  final void Function(Book book)? onLongPress;
+
+  @override
+  Widget build(BuildContext context) {
+    return ShelfLayout<BookProgress>(
+      items: items,
+      header: header,
+      padding: padding,
+      itemBuilder: (context, p) => BookCover(
+        progress: p,
+        onTap: () => onOpen(p.book),
+        hasPdf: pdfBookIds.contains(p.book.id),
+        onLongPress: onLongPress == null ? null : () => onLongPress!(p.book),
+      ),
+    );
+  }
+}
+
+/// Genel raf: her satırda [shelfColumnsFor] kapak, altında ahşap raf.
+class ShelfLayout<T> extends StatelessWidget {
+  const ShelfLayout({
+    super.key,
+    required this.items,
+    required this.itemBuilder,
+    this.header,
+    this.padding = const EdgeInsets.fromLTRB(16, 12, 16, 96),
+  });
+
+  final List<T> items;
+  final Widget Function(BuildContext context, T item) itemBuilder;
   final Widget? header;
   final EdgeInsets padding;
 
@@ -207,7 +335,7 @@ class BookShelfView extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, c) {
         final cols = shelfColumnsFor(c.maxWidth);
-        final rows = <List<BookProgress>>[
+        final rows = <List<T>>[
           for (var i = 0; i < items.length; i += cols)
             items.sublist(i, i + cols > items.length ? items.length : i + cols),
         ];
@@ -215,7 +343,7 @@ class BookShelfView extends StatelessWidget {
           padding: padding,
           children: [
             if (header != null) ...[header!, const SizedBox(height: 16)],
-            for (final row in rows) _ShelfRow(cols: cols, books: row, onOpen: onOpen),
+            for (final row in rows) _ShelfRow<T>(cols: cols, items: row, itemBuilder: itemBuilder),
           ],
         );
       },
@@ -223,11 +351,11 @@ class BookShelfView extends StatelessWidget {
   }
 }
 
-class _ShelfRow extends StatelessWidget {
-  const _ShelfRow({required this.cols, required this.books, required this.onOpen});
+class _ShelfRow<T> extends StatelessWidget {
+  const _ShelfRow({required this.cols, required this.items, required this.itemBuilder});
   final int cols;
-  final List<BookProgress> books;
-  final void Function(Book book) onOpen;
+  final List<T> items;
+  final Widget Function(BuildContext context, T item) itemBuilder;
 
   @override
   Widget build(BuildContext context) {
@@ -246,9 +374,7 @@ class _ShelfRow extends StatelessWidget {
                 for (var i = 0; i < cols; i++) ...[
                   if (i > 0) const SizedBox(width: 12),
                   Expanded(
-                    child: i < books.length
-                        ? BookCover(progress: books[i], onTap: () => onOpen(books[i].book))
-                        : const SizedBox.shrink(),
+                    child: i < items.length ? itemBuilder(context, items[i]) : const SizedBox.shrink(),
                   ),
                 ],
               ],

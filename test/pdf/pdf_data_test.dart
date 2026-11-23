@@ -307,7 +307,7 @@ void main() {
     final names = {for (final r in await d.customSelect("SELECT name FROM sqlite_master WHERE type = 'table'").get()) r.read<String>('name')};
     expect(names, containsAll(['pdf_documents', 'ink_strokes']));
     expect((await d.select(d.anlikNotes).getSingle()).body, 'eski not');
-    expect((await d.customSelect('PRAGMA user_version').getSingle()).read<int>('user_version'), 19);
+    expect((await d.customSelect('PRAGMA user_version').getSingle()).read<int>('user_version'), 20);
     // Tetikleyici kurulu: yeni belge deftere yazılır.
     await PdfDocumentRepository(d).add(sha256: _h('b'), title: 'T', pageCount: 1, fileName: 'f');
     expect((await LedgerService(d).history()).any((c) => c.table == 'pdf_documents'), isTrue);

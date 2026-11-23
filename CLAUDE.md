@@ -16,7 +16,7 @@ telefon (konu düzeyi) hem tablet (soru düzeyi) için tarif edilmiştir.
   Domain saf Dart: test edilebilir, Flutter'a bağlı değil.
 - Ortak: `lib/core/` (database, media, export, text, notifications, di).
 - Önemli yerler:
-  - `core/database/` tablolar ve göçler (`schemaVersion` şu an 19)
+  - `core/database/` tablolar ve göçler (`schemaVersion` şu an 20)
   - `core/ledger/` değişiklik defteri: HLC, SQLite tetikleyicileri, uygulama/çakışma/geri alma
     (`LedgerService`). Her senkron tablosu tetikleyiciyle deftere yazılır; ayrıntı
     `docs/KABLOSUZ_AKTARIM.md`
@@ -91,21 +91,38 @@ flutter build linux --release      # build/linux/x64/release/bundle/kocum
 - Eşleştirme: bilgisayar ekranında 6 haneli tek seferlik kod (5 dk, 5 hak).
   Anahtar Diffie-Hellman (RFC 7919 ffdhe2048) + kodla iki tarafta ayrı
   hesaplanır, ağdan geçmez. Her istek HMAC imzalı ve sıra numaralı.
-- Kısıtlar: en fazla bir telefon (ya da tablet) ve bir bilgisayar; yalnızca Android telefon/tablet
+- Kısıtlar: bir bilgisayara en çok 4 telefon/tablet (`SyncLimits.maxDevices`); yalnızca Android telefon/tablet
   eşleşir, yalnızca Linux bilgisayar alır; yalnızca yerel ağ adresleri
   (100.64/10 ve 127.0.0.1 hayır); tarayıcı başlıkları ve alan adıyla Host
   reddedilir; yalnızca `questions|solutions|notes/yyyy/mm/ad.uzantı`
-  fotoğrafları yazılır. Genel okuma/listeleme isteği yoktur; yalnızca iki dar istisna
-  var: `fotograf-al` (bilgisayarın defterinde geçen, kurala uyan tek fotoğraf) ve
-  imzalı, gövdesiz "bu PDF özeti var mı?" sorusu (tek özet, imza şart).
+  fotoğrafları yazılır. Genel okuma/listeleme isteği yoktur; yalnızca üç dar istisna
+  var: `fotograf-al` (bilgisayarın defterinde ya da tam durum sayfalarında geçen, kurala
+  uyan tek fotoğraf), imzalı gövdesiz "bu PDF özeti var mı?" sorusu (tek özet, imza şart)
+  ve `pdf-al` (imzalı; ad `^[0-9a-f]{64}\.pdf$`; yalnızca bilgisayarın `pdf_documents`
+  satırında geçen özet; 300 MB; symlink reddi). Gerekçe: üçü de istemcinin ZATEN bildiği
+  tek bir kimliği ister (yol/özet), liste vermez, kimlik bilgisayarın kendi kaydında
+  geçmiyorsa 404 (varlık sızmaz); `pdf-al` ayrıca adın SHA-256'sı ile istemcide doğrulanır.
 - Merkez: bilgisayar telefon ve tablet arasında aracıdır (doğrudan telefon↔tablet
-  eşleşme YOK). Tek eşleşme yuvası: cihazlar sırayla gezer; bilgisayar aldığı
-  satırları özgün kimlikle öbürüne de verir (`pendingFor(relayExcept:)`).
-  Testi `test/sync_hub_test.dart`. Sınır: ilk tam yedekle gelen eski veri deftere
-  girmediği için sonradan eşleşen öbür cihaza gitmez.
-- PDF dosyası (isteğe bağlı, ayar varsayılan KAPALI, yalnızca telefon/tablet → bilgisayar):
-  `PUT /kocum/v1/pdf`, ad `^[0-9a-f]{64}\.pdf$`, `pdfs/<sha256>.pdf`, sha256 iki uçta,
-  300 MB sınırı, `.part`+atomik ad, gövdesiz PUT = "bu özet var mı". Test `test/sync_pdf_test.dart`.
+  eşleşme YOK). Çok cihaz (v9.15): en çok 4 cihaz AYNI ANDA eşleşik; her birinin kendi
+  anahtarı, kimliği, oturumu (cihaz başına tek) ve sıra sayacı var (`SyncServer._sessions`,
+  `DesktopSyncStore.devices()`); cihaz kaldırmak öbürlerini etkilemez, yeni cihaz eklemek
+  kopartmaz. Eşzamanlı istekler sunucuda yalnızca veritabanı bölümünde sıraya girer
+  (`_dbLock`). Eski tek cihaz `esitleme.json` (`telefon:`) okunurken `cihazlar:` listesine
+  taşınır. Bilgisayar aldığı satırları özgün kimlikle öbürüne de verir
+  (`pendingFor(relayExcept:)`). Testler `test/sync_hub_test.dart`, `test/sync_multi_device_test.dart`.
+- Tam durum (v9.15): yeni eşleşen cihaz `LedgerRequest.snapshotCursor` ile bilgisayarın
+  senkron tablolarındaki TÜM güncel satırları sayfa sayfa alır (`LedgerService.snapshotPage`,
+  aynı imzalı `degisiklikler` alışverişi; yeni uç yok). Bu sırada defter geçmişi yeniden
+  oynatılmaz; bitince `alinan_sira` bilgisayarın başlangıçtaki sırasına çekilir. Cihaz yalnızca
+  EKSİK satırı ekler (`applySnapshot`: var olana dokunmaz, `sil` kaydı olan geri gelmez,
+  deftere işlenmez). Bayrak: `keyNeedSnapshot`; yeni eşleşmede ve "Bilgisayardaki her şeyi
+  yeniden al" düğmesinde kurulur. Eski (v9.14) eşleşmeler kendiliğinden almaz.
+- PDF dosyası (isteğe bağlı, iki ayar da varsayılan KAPALI): cihaz → bilgisayar
+  `PUT /kocum/v1/pdf` (ad `^[0-9a-f]{64}\.pdf$`, `pdfs/<sha256>.pdf`, sha256 iki uçta, 300 MB,
+  `.part`+atomik ad, gövdesiz PUT = "bu özet var mı"; "PDF dosyalarını da gönder");
+  bilgisayar → cihaz `POST /kocum/v1/pdf-al` ("PDF'leri bilgisayardan al"; `PdfPull`,
+  kaldığı yerden devam, sha256 doğrulaması istemcide). Testler `test/sync_pdf_test.dart`,
+  `test/sync_multi_device_test.dart` (`pdf-al` güvenlik testleri).
 - Anahtarlar veritabanında değil ayrı dosyada (`esitleme.json`): telefonun
   veritabanı kopyası bilgisayara ve yedeklere gider, anahtar gitmemeli.
 - Veri içeriği şifrelenmez (yalnızca imzalı); ortak Wi-Fi için uyarı var.

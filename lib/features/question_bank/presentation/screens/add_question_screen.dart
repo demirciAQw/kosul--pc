@@ -23,6 +23,7 @@ import '../../domain/question_card.dart';
 import '../../question_bank_providers.dart';
 import '../question_prefill.dart';
 import '../widgets/photo_slot.dart';
+import '../widgets/question_actions.dart';
 import '../../../../app/palette.dart';
 import '../../../study_session/study_session_providers.dart';
 import '../../../study_session/presentation/session_quick_mark.dart';
@@ -310,6 +311,7 @@ class _AddQuestionScreenState extends ConsumerState<AddQuestionScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
         children: [
+          if (_editing && _original != null && _original!.hasPdfAnchor) _pdfAnchorCard(theme),
           if (contextLine.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(bottom: 12),
@@ -1041,6 +1043,47 @@ class _AddQuestionScreenState extends ConsumerState<AddQuestionScreen> {
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  /// PDF'li kartta düzenleme: PDF alanları (belge, sayfa, kutu) korunur; kutu
+  /// değişecekse PDF'te açılıp soru yeniden seçilir.
+  Widget _pdfAnchorCard(ThemeData theme) {
+    final card = _original!;
+    final available = questionPdfAvailable(ref, card) ?? false;
+    return Card(
+      key: const Key('edit-pdf-card'),
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Bu soru bir PDF\'ten geldi (sayfa ${card.pdfPage! + 1}). Düzenleme PDF bağını ve kutuyu korur.',
+                style: theme.textTheme.bodyMedium),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                OutlinedButton.icon(
+                  key: const Key('edit-open-pdf'),
+                  onPressed: available ? () => performQuestionAction(context, ref, card, QuestionAction.openPdf) : null,
+                  icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
+                  label: const Text('PDF\'te aç'),
+                ),
+                Text(
+                  available
+                      ? 'Kutuyu değiştirmek için PDF\'te soruyu yeniden seç.'
+                      : kPdfMissingHint,
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _snack(String message) =>

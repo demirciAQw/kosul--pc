@@ -3,10 +3,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../app/routes.dart';
+import '../../library/domain/library.dart';
+import '../../library/library_providers.dart';
+import '../../library/presentation/widgets/book_shelf_view.dart';
 import '../data/pdf_import_service.dart';
 import '../domain/pdf_document_record.dart';
 import '../domain/pdf_engine.dart';
 import '../pdf_providers.dart';
+import 'pdf_book_flow.dart';
+import 'pdf_import_dialog.dart';
 
 /// PDF kitaplığı: içe aktar, listele, aç. Kitap bağı yalnızca kullanıcı
 /// onaylarsa kurulur; silme yumuşaktır ve onay ister.
@@ -36,7 +41,12 @@ class _PdfLibraryPageState extends ConsumerState<PdfLibraryPage> {
     setState(() => _busy = true);
     try {
       final svc = await ref.read(pdfImportServiceProvider.future);
-      final res = await svc.importFile(file);
+      // Kopyalamadan önce: sayfa sayısı ve "zaten var mı" (bozuksa burada hata verir).
+      final info = await svc.inspect(file);
+      if (!mounted) return;
+      final choice = await showPdfImportDialog(context, fileName: file.path.split(RegExp(r'[\\/]')).last, info: info);
+      if (choice == null || !mounted) return;
+      final res = await svc.importFile(file, title: choice.title);
       if (!mounted) return;
       messenger.showSnackBar(
         SnackBar(
@@ -47,7 +57,11 @@ class _PdfLibraryPageState extends ConsumerState<PdfLibraryPage> {
           ),
         ),
       );
-      await _offerBook(res);
+      if (choice.addAsBook && res.document.bookId == null) {
+        await addPdfAsBook(context, ref, res.document);
+      } else {
+        await _offerBook(res);
+      }
     } on PdfOpenException catch (e) {
       messenger.showSnackBar(
         SnackBar(content: Text('PDF açılamadı: ${e.message}')),
@@ -128,9 +142,54 @@ class _PdfLibraryPageState extends ConsumerState<PdfLibraryPage> {
     }
   }
 
+  Future<void> _menu(String action, PdfDocumentRecord d) async {
+    switch (action) {
+      case 'kitap':
+        await addPdfAsBook(context, ref, d);
+      case 'esle':
+        await linkPdfToBook(context, ref, d);
+      case 'ofset':
+        await editPdfOffset(context, ref, d);
+      case 'kaldir':
+        await _remove(d);
+    }
+  }
+
+  Widget _cover(PdfDocumentRecord d, Book? book) {
+    return BookCoverFace(
+      key: Key('pdf-item-${d.id}'),
+      title: d.title,
+      kicker: book == null ? 'PDF' : [book.examType, book.subject].where((e) => e.trim().isNotEmpty).join(' · '),
+      color: book != null ? bookCoverColor(book) : bookCoverColorFor(d.title),
+      publisher: book == null ? '' : book.title,
+      footer: '${d.pageCount} sayfa',
+      semanticsLabel: '${d.title}, ${d.pageCount} sayfa${book != null ? ', kitap: ${book.title}' : ''}',
+      badge: 'PDF',
+      onTap: () => _open(d),
+      bottomRight: PopupMenuButton<String>(
+        key: Key('pdf-menu-${d.id}'),
+        iconColor: Colors.white,
+        iconSize: 20,
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+        tooltip: 'Daha fazla',
+        onSelected: (a) => _menu(a, d),
+        itemBuilder: (_) => [
+          if (d.bookId == null) const PopupMenuItem(value: 'kitap', child: Text('Kitap olarak ekle')),
+          const PopupMenuItem(value: 'esle', child: Text('Kitapla eşle')),
+          const PopupMenuItem(value: 'ofset', child: Text('Sayfa ofsetini ayarla')),
+          const PopupMenuItem(value: 'kaldir', child: Text('Listeden kaldır')),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final docs = ref.watch(pdfDocumentsProvider);
+    final books = {
+      for (final b in ref.watch(libraryProvider).value ?? const <Book>[]) b.id: b,
+    };
     return Scaffold(
       appBar: widget.embedded ? null : AppBar(title: const Text('PDF\'ler')),
       floatingActionButton: FloatingActionButton.extended(
@@ -162,30 +221,9 @@ class _PdfLibraryPageState extends ConsumerState<PdfLibraryPage> {
                     child: Text('Henüz PDF yok. "PDF ekle" ile bir PDF seç.'),
                   ),
                 )
-              : ListView.builder(
-                  padding: const EdgeInsets.only(bottom: 88),
-                  itemCount: list.length,
-                  itemBuilder: (_, i) {
-                    final d = list[i];
-                    return ListTile(
-                      key: Key('pdf-item-${d.id}'),
-                      leading: const Icon(Icons.picture_as_pdf_outlined),
-                      title: Text(d.title),
-                      subtitle: Text(
-                        '${d.pageCount} sayfa${d.bookId != null ? ' · kitaba bağlı' : ''}',
-                      ),
-                      onTap: () => _open(d),
-                      trailing: PopupMenuButton<String>(
-                        onSelected: (_) => _remove(d),
-                        itemBuilder: (_) => const [
-                          PopupMenuItem(
-                            value: 'kaldir',
-                            child: Text('Listeden kaldır'),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
+              : ShelfLayout<PdfDocumentRecord>(
+                  items: list,
+                  itemBuilder: (_, d) => _cover(d, books[d.bookId]),
                 );
         },
       ),

@@ -41,8 +41,9 @@ void main() {
     expect(out, isNot(contains('applicationId = "com.kocum.kocum.gece"')));
     expect(out, contains('manifestPlaceholders["appLabel"] = "Koçum"'));
     expect(out, contains('getByName("debug")'));
-    expect('applicationIdSuffix'.allMatches(out).length, 1);
-    expect('manifestPlaceholders["appLabel"]'.allMatches(out).length, 2);
+    expect('applicationIdSuffix'.allMatches(out).length, 1); // profile buildType'a SON EK YAZILMAZ (kütüphaneler bozulur)
+    expect(out, contains('selector().withBuildType("profile")'));
+    expect(out, contains('variant.applicationId.get() + ".gece"'));
     final dbg = out.substring(out.indexOf('getByName("debug")'));
     expect(dbg, contains('applicationIdSuffix = ".gece"'));
     expect(dbg, contains('manifestPlaceholders["appLabel"] = "Koçum (deneme)"'));
@@ -56,11 +57,24 @@ void main() {
     expect(out, contains('applicationId "com.kocum.kocum"'));
     expect(out, contains("manifestPlaceholders += [appLabel: 'Koçum']"));
     expect('applicationIdSuffix'.allMatches(out).length, 1);
-    expect('manifestPlaceholders'.allMatches(out).length, 2);
+    expect(out, contains("selector().withBuildType('profile')"));
     final dbg = out.substring(out.indexOf('debug {'));
     expect(dbg, contains("applicationIdSuffix '.gece'"));
     expect(dbg, contains("manifestPlaceholders += [appLabel: 'Koçum (deneme)']"));
     expect(patchGeceGroovy(out), out);
+  });
+
+  test('eski (profile öncesi) yamalı dosyaya profile bloğu bir kez eklenir', () {
+    final eski = patchGeceKts(_kts).split('// kocum-gece-profile').first;
+    expect(eski, isNot(contains('"profile"')));
+    final yeni = patchGeceKts(eski);
+    expect(yeni, contains('kocum-gece-profile'));
+    expect('kocum-gece-profile'.allMatches(yeni).length, 1);
+    expect(patchGeceKts(yeni), yeni);
+    final g = patchGeceGroovy(_groovy).split('// kocum-gece-profile').first;
+    final gy = patchGeceGroovy(g);
+    expect(gy, contains("withBuildType('profile')"));
+    expect(patchGeceGroovy(gy), gy);
   });
 
   test('defaultConfig yoksa istisna atılır', () {

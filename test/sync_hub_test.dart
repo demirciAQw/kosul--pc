@@ -100,7 +100,7 @@ void main() {
       ).run(connection);
     } finally {
       client.close();
-      await server.forgetPhone();
+      await server.forgetDevice(d.id);
     }
   }
 
