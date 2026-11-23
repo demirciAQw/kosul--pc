@@ -30,6 +30,16 @@ enum BookShelf {
   }
 }
 
+/// Kitaba bağlı PDF'ler. İki PDF aynı kitaba bağlıysa liste sırasındaki İLK
+/// (başlığa göre; kitap ayrıntısı ve raf aynı kuralı kullanır).
+Map<String, PdfDocumentRecord> pdfsByBook(Iterable<PdfDocumentRecord> docs) {
+  final out = <String, PdfDocumentRecord>{};
+  for (final d in docs) {
+    if (d.bookId != null) out.putIfAbsent(d.bookId!, () => d);
+  }
+  return out;
+}
+
 /// Kitaplar sekmesi: TYT, AYT ve MEB kitapları ayrı sekmelerde; her kitabın ne
 /// kadarı bitti, ne kadarı duruyor.
 class BooksScreen extends ConsumerWidget {
@@ -40,10 +50,7 @@ class BooksScreen extends ConsumerWidget {
     final progress = ref.watch(bookProgressProvider);
     final all = progress.value ?? const <BookProgress>[];
     // Kitaba bağlı PDF'ler (kapakta rozet, uzun basınca "PDF'te aç").
-    final pdfs = <String, PdfDocumentRecord>{
-      for (final d in ref.watch(pdfDocumentsProvider).value ?? const <PdfDocumentRecord>[])
-        if (d.bookId != null) d.bookId!: d,
-    };
+    final pdfs = pdfsByBook(ref.watch(pdfDocumentsProvider).value ?? const <PdfDocumentRecord>[]);
     int count(BookShelf s) => all.where((p) => BookShelf.of(p.book) == s).length;
 
     return DefaultTabController(

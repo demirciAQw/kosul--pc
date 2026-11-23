@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -12,7 +13,8 @@ import 'package:kocum/features/ocr/auto_tag_providers.dart';
 import 'package:kocum/features/ocr/domain/auto_tags.dart';
 import 'package:kocum/features/library/presentation/widgets/book_shelf_view.dart' show BookCoverFace;
 import 'package:kocum/features/pdf/data/pdf_import_service.dart';
-import 'package:kocum/features/pdf/presentation/pdf_book_flow.dart' show templateAssetLoaderProvider;
+import 'package:kocum/features/pdf/data/pdf_document_repository.dart';
+import 'package:kocum/features/pdf/presentation/pdf_book_flow.dart' show addPdfAsBook, commitPdfBook, templateAssetLoaderProvider;
 import 'package:kocum/features/pdf/domain/pdf_document_record.dart';
 import 'package:kocum/features/pdf/pdf_providers.dart';
 import 'package:kocum/features/pdf/presentation/pdf_library_page.dart';
@@ -462,5 +464,175 @@ void main() {
     expect(find.byKey(Key('pdf-item-${d.id}')), findsOneWidget);
     expect(find.text('PDF'), findsNWidgets(2)); // etiket + rozet
     expect(find.byType(ListTile), findsNothing);
+  });
+
+  Future<void> flush(WidgetTester t) async {
+    await wait(t);
+    await wait(t);
+  }
+
+  testWidgets('form: Kaydet çift dokunuşta yalnız bir kez kapanır (kitaplık açık kalır)', (t) async {
+    tall(t);
+    await pump(t);
+    await importVia(t, asBook: true);
+    await t.tap(find.byKey(const Key('book-save')));
+    await t.tap(find.byKey(const Key('book-save')), warnIfMissed: false);
+    await flush(t);
+    expect(find.byType(PdfLibraryPage), findsOneWidget);
+    expect(t.takeException(), isNull);
+    expect((await bookRows(t)), hasLength(1));
+    expect((await docs(t)).single.bookId, isNotNull);
+  });
+
+  testWidgets('form: kayıt sırasında sayfa kapanırsa kitap, bağ ve ofset yine de tutarlı yazılır', (t) async {
+    tall(t);
+    await pump(t);
+    await importVia(t, asBook: true);
+    await t.tap(find.byKey(const Key('book-save')));
+    await t.pumpWidget(const SizedBox()); // sayfa hemen sökülür
+    await t.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 300)));
+    expect(t.takeException(), isNull);
+    final book = (await bookRows(t)).single;
+    final d = (await docs(t)).single;
+    expect(d.bookId, book.id);
+  });
+
+  testWidgets('kitap olarak ekle: hazırlıkta yükleniyor göstergesi; ikinci çağrı ikinci form açmaz', (t) async {
+    tall(t);
+    await pump(t);
+    await importVia(t);
+    final el = t.element(find.byType(PdfLibraryPage));
+    final doc = (await docs(t)).single;
+    final rec = (await t.runAsync(() => ProviderScope.containerOf(el).read(pdfDocumentRepositoryProvider).findBySha(doc.id)))!;
+    final first = addPdfAsBook(el, el as WidgetRef, rec);
+    final second = await addPdfAsBook(el, el as WidgetRef, rec);
+    expect(second, isFalse);
+    await t.pump();
+    expect(find.byKey(const Key('pdf-book-loading')), findsOneWidget);
+    await until(t, find.byKey(const Key('book-save')));
+    await t.pump(const Duration(seconds: 1));
+    expect(find.byKey(const Key('pdf-book-loading')), findsNothing);
+    expect(find.byKey(const Key('book-save')), findsOneWidget);
+    await t.pageBack();
+    await t.pumpAndSettle();
+    expect(await first, isFalse);
+  });
+
+  testWidgets('silinmiş PDF yeniden eklenirken pencere bilgi verir, başlık değişmez, eski başlık korunur', (t) async {
+    tall(t);
+    await pump(t);
+    await importVia(t);
+    await t.tap(find.byType(PopupMenuButton<String>));
+    await t.pumpAndSettle();
+    await t.tap(find.text('Listeden kaldır'));
+    await t.pumpAndSettle();
+    await t.tap(find.text('Kaldır'));
+    await flush(t);
+    expect(find.text('Tyt Matematik Soru Bankasi'), findsNothing);
+    picks = [pick];
+    await t.tap(find.byKey(const Key('pdf-import')));
+    await flush(t);
+    expect(find.byKey(const Key('pdf-import-exists')), findsOneWidget);
+    expect(find.textContaining('kaldırılmıştı'), findsOneWidget);
+    expect(t.widget<TextField>(find.byKey(const Key('pdf-import-title'))).enabled, isFalse);
+    await t.tap(find.byKey(const Key('pdf-import-as-book')));
+    await t.pump();
+    await t.tap(find.byKey(const Key('pdf-import-confirm')));
+    await flush(t);
+    expect(find.text('Tyt Matematik Soru Bankasi'), findsOneWidget);
+    final d = (await docs(t)).single;
+    expect(d.deleted, isFalse);
+  });
+
+  testWidgets('kitaba bağlı PDF yeniden eklenirken "kitap olarak ekle" kutusu yok, nedeni yazılı', (t) async {
+    tall(t);
+    await pump(t);
+    await importVia(t);
+    final d = (await docs(t)).single;
+    final repo = ProviderScope.containerOf(t.element(find.byType(PdfLibraryPage))).read(pdfDocumentRepositoryProvider);
+    await t.runAsync(() async {
+      await db.into(db.books).insert(BooksCompanion.insert(
+            id: 'kb',
+            title: 'Bağlı Kitap',
+            examType: 'TYT',
+            subject: 'Matematik',
+            pageCount: 10,
+            avgQuestionsPerPage: 1,
+            createdAt: DateTime(2026),
+          ));
+    });
+    unawaited(repo.linkBook(d.id, 'kb'));
+    await wait(t);
+    await wait(t);
+    picks = [pick];
+    await t.tap(find.byKey(const Key('pdf-import')));
+    await flush(t);
+    expect(find.byKey(const Key('pdf-import-as-book')), findsNothing);
+    expect(find.textContaining('kitap bağı korunur'), findsOneWidget);
+    await t.tap(find.byKey(const Key('pdf-import-confirm')));
+    await flush(t);
+    expect((await docs(t)).single.bookId, 'kb');
+  });
+
+  testWidgets('başka cihazdan gelen satır (dosya yok): pencere bunu söyler, dosya kopyalanır, başlık korunur', (t) async {
+    tall(t);
+    await pump(t);
+    final sha = await t.runAsync(() => PdfImportService.sha256OfFile(pick));
+    final repo = ProviderScope.containerOf(t.element(find.byType(PdfLibraryPage))).read(pdfDocumentRepositoryProvider);
+    unawaited(repo.add(sha256: sha!, title: 'Eşitlenen Başlık', pageCount: 7, fileName: 'x.pdf'));
+    await wait(t);
+    picks = [pick];
+    await t.tap(find.byKey(const Key('pdf-import')));
+    await flush(t);
+    expect(find.textContaining('başka cihazdan'), findsOneWidget);
+    expect(t.widget<TextField>(find.byKey(const Key('pdf-import-title'))).controller!.text, 'Eşitlenen Başlık');
+    await t.tap(find.byKey(const Key('pdf-import-as-book')));
+    await t.pump();
+    await t.tap(find.byKey(const Key('pdf-import-confirm')));
+    await flush(t);
+    expect(File('${tmp.path}/pdfs/$sha.pdf').existsSync(), isTrue);
+    expect((await docs(t)).single.title, 'Eşitlenen Başlık');
+  });
+
+  testWidgets('⋮ düğmesi en az 48x48 dp dokunma alanı', (t) async {
+    tall(t);
+    await pump(t);
+    await importVia(t);
+    final size = t.getSize(find.byType(PopupMenuButton<String>));
+    expect(size.width, greaterThanOrEqualTo(48));
+    expect(size.height, greaterThanOrEqualTo(48));
+  });
+
+  test('commitPdfBook: ortada hata olursa yetim kitap kalmaz (geri alınır); başarıda üçü birlikte', () async {
+    final mem = AppDatabase(NativeDatabase.memory());
+    addTearDown(mem.close);
+    final repo = PdfDocumentRepository(mem);
+    final sha = 'a' * 64;
+    await repo.add(sha256: sha, title: 'T', pageCount: 5, fileName: 'a.pdf');
+    Future<String> create() async {
+      await mem.into(mem.books).insert(BooksCompanion.insert(
+            id: 'yeni',
+            title: 'Yeni',
+            examType: 'TYT',
+            subject: 'Matematik',
+            pageCount: 5,
+            avgQuestionsPerPage: 1,
+            createdAt: DateTime(2026),
+          ));
+      return 'yeni';
+    }
+
+    // Belge yok: bağ yazılamaz -> kitap da geri alınır.
+    await expectLater(
+      commitPdfBook(db: mem, pdfs: repo, docId: 'b' * 64, pageOffset: 2, createBook: create),
+      throwsStateError,
+    );
+    expect(await mem.select(mem.books).get(), isEmpty);
+    // Başarı: kitap + bağ + ofset.
+    final id = await commitPdfBook(db: mem, pdfs: repo, docId: sha, pageOffset: 2, createBook: create);
+    expect(id, 'yeni');
+    final d = (await repo.findBySha(sha))!;
+    expect([d.bookId, d.pageOffset], ['yeni', 2]);
+    expect(await mem.select(mem.books).get(), hasLength(1));
   });
 }

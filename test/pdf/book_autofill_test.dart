@@ -47,6 +47,24 @@ void main() {
       expect(findPublisher(''), isNull);
     });
 
+    test('sıradan sözcük olan yayınevi adları yalnız "yayın..." ile eşleşir (yanlış pozitif yok)', () {
+      for (final t in [
+        'Orijinal soru çözümü',
+        'Nitelik kazandırma',
+        'Antrenman programı',
+        'Zafer Bayramı',
+        'Aydın ilinde',
+        'Zafer',
+      ]) {
+        expect(findPublisher(t), isNull, reason: t);
+      }
+      expect(findPublisher('Aydın Yayınları TYT'), 'Aydın');
+      expect(findPublisher('Nitelik Yayınları'), 'Nitelik');
+      expect(findPublisher('antrenman yayincilik'), 'Antrenman');
+      expect(findPublisher('Zafer Yayınevi'), 'Zafer');
+      expect(buildBookAutofill(fileName: 'Orijinal_TYT_Matematik.pdf', pageCount: 10).publisher, isNull);
+    });
+
     test('sınav türü: başlıktan, yoksa metinde baskın olandan', () {
       expect(guessExamType('TYT Matematik', ''), 'TYT');
       expect(guessExamType('AYT Fizik', 'tyt'), 'AYT');

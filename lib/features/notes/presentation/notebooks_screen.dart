@@ -5,7 +5,10 @@ import 'package:go_router/go_router.dart';
 import '../../../app/routes.dart';
 import '../../anlik/anlik_providers.dart';
 import '../../anlik/domain/anlik.dart';
+import '../../../core/text/turkish_text.dart';
 import '../../anlik/domain/tag_tree.dart';
+import '../../handwriting/data/page_text_repository.dart' show PageTextHit;
+import '../../handwriting/handwriting_providers.dart';
 import '../domain/ink_notebook.dart';
 import '../domain/notebook_filter.dart';
 import '../domain/page_size.dart';
@@ -42,6 +45,26 @@ class NotebooksScreen extends ConsumerStatefulWidget {
 class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
   bool _showDeleted = false;
   String? _tagFilter;
+
+  /// Arama: defter adı ve kayıtlı el yazısı metni ([normalizeTr]).
+  String _query = '';
+  final _searchCtl = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchCtl.dispose();
+    super.dispose();
+  }
+
+  /// Arama sonucu: defteri eşleşen sayfada aç (masaüstünde `onOpen` ile defter açılır).
+  void _openHit(InkNotebookRecord n, PageTextHit h) {
+    final f = widget.onOpen;
+    if (f != null) {
+      f(context, n);
+    } else {
+      context.push(AppRoutes.inkNotebookAt(n.id, h.pageId));
+    }
+  }
 
   /// İyimser silme: silinen defter, akış güncellenmeden önce de listeden kalkar
   /// (akış "silindi" deyince ya da geri alınınca/hata olunca düşer).
@@ -244,12 +267,22 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
         };
         final filtering =
             _tagFilter != null && allTags.any((t) => t.id == _tagFilter);
-        final alive = filterNotebooksByTag(
+        final byTag = filterNotebooksByTag(
           aliveAll,
           tagsOf,
           allTags,
           filtering ? _tagFilter : null,
         );
+        final q = normalizeTr(_query);
+        final hits = q.isEmpty
+            ? const <PageTextHit>[]
+            : [
+                for (final h in ref.watch(pageTextSearchProvider(_query)).value ?? const <PageTextHit>[])
+                  if (byTag.any((n) => n.id == h.notebookId)) h,
+              ];
+        final alive = q.isEmpty
+            ? byTag
+            : [for (final n in byTag) if (normalizeTr(_name(n)).contains(q)) n];
         final deleted = [
           for (final n in list)
             if (n.deleted || _hidden.contains(n.id)) n,
@@ -267,6 +300,28 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
                   label: const Text('Yeni defter'),
                 ),
               ),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: TextField(
+                key: const Key('notebook-search'),
+                decoration: InputDecoration(
+                  isDense: true,
+                  prefixIcon: const Icon(Icons.search),
+                  hintText: 'Defter adı ya da el yazısı metninde ara',
+                  border: const OutlineInputBorder(),
+                  suffixIcon: _query.isEmpty
+                      ? null
+                      : IconButton(
+                          key: const Key('notebook-search-clear'),
+                          tooltip: 'Aramayı temizle',
+                          icon: const Icon(Icons.close),
+                          onPressed: () => setState(() => _query = ''),
+                        ),
+                ),
+                controller: _searchCtl,
+                onChanged: (v) => setState(() => _query = v),
+              ),
+            ),
             if (usedTagIds.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4),
@@ -289,12 +344,14 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
                   ],
                 ),
               ),
-            if (alive.isEmpty)
+            if (alive.isEmpty && hits.isEmpty)
               Padding(
                 padding: const EdgeInsets.all(32),
                 child: Center(
                   child: Text(
-                    filtering
+                    q.isNotEmpty
+                        ? 'Aramayla eşleşen defter ya da metin yok.'
+                        : filtering
                         ? 'Bu etikette defter yok.'
                         : 'Henüz defter yok. "Yeni defter" ile başla.',
                   ),
@@ -345,6 +402,25 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
                 );
               },
             ),
+            if (hits.isNotEmpty) ...[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(4, 16, 4, 4),
+                child: Text(
+                  'El yazısı metninde',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+              ),
+              for (final h in hits)
+                Card(
+                  key: Key('notebook-hit-${h.pageId}'),
+                  child: ListTile(
+                    leading: const Icon(Icons.text_fields_rounded),
+                    title: Text(_name(byTag.firstWhere((n) => n.id == h.notebookId))),
+                    subtitle: Text('Sayfa ${h.pageNumber} · ${h.snippet}', maxLines: 2, overflow: TextOverflow.ellipsis),
+                    onTap: () => _openHit(byTag.firstWhere((n) => n.id == h.notebookId), h),
+                  ),
+                ),
+            ],
             if (_showDeleted) ...[
               Padding(
                 padding: const EdgeInsets.fromLTRB(4, 16, 4, 4),

@@ -67,13 +67,11 @@ class _QuestionTileState extends ConsumerState<QuestionTile> {
       ),
       child: InkWell(
         // Seçim modundayken dokunmak seçer; değilken soruyu açar.
-        // Uzun bas: seçim modundaysa seçer, değilse eylem menüsünü açar.
+        // Uzun bas: seçim başlatır (seçim modundaysa değiştirir). Eylem menüsü ⋮ düğmesinde.
         onTap: selecting
             ? () => ref.read(questionSelectionProvider.notifier).toggle(card.id)
             : (onOpen ?? () => context.push(AppRoutes.question(card.id))),
-        onLongPress: selecting
-            ? () => ref.read(questionSelectionProvider.notifier).toggle(card.id)
-            : () => _menuKey.currentState?.showButtonMenu(),
+        onLongPress: () => ref.read(questionSelectionProvider.notifier).toggle(card.id),
         child: Stack(
           fit: StackFit.expand,
           children: [

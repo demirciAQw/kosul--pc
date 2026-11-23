@@ -290,12 +290,23 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
       pageHeight: page.height,
       marks: _marks,
     ),
-    PdfPageInkLayer(
-      key: ValueKey('ink-${page.pageNumber}'),
-      session: _session,
-      page: page.pageNumber - 1,
-      pageWidth: page.width,
-      pageHeight: page.height,
+    // Çizgiler katmanların (filigran/örtü) ÜSTÜNDE; "Çizimler" anahtarı yalnız gizler.
+    ValueListenableBuilder<bool>(
+      valueListenable: _layersHub.inkVisible,
+      builder: (_, v, child) => Visibility(
+        visible: v,
+        maintainState: true,
+        maintainAnimation: true,
+        maintainSize: true,
+        child: child!,
+      ),
+      child: PdfPageInkLayer(
+        key: ValueKey('ink-${page.pageNumber}'),
+        session: _session,
+        page: page.pageNumber - 1,
+        pageWidth: page.width,
+        pageHeight: page.height,
+      ),
     ),
     AnalysisPageOverlay(
       key: ValueKey('analysis-${page.pageNumber}'),
@@ -323,9 +334,8 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
   }
 
   /// Analiz katmanı: düğmeler ve panel. Mod kapalıyken hiçbir şey çizmez.
-  Widget _analysisLayer(BookAnalysis? a) {
+  Widget _analysisLayer(BookAnalysis? a, Map<int, int> badges) {
     if (!_analysisOn || a == null) return const SizedBox.shrink();
-    final badges = a.mistakeBadges;
     return Stack(
       children: [
         Positioned(
@@ -367,7 +377,7 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
             top: 0,
             bottom: 0,
             right: 0,
-            width: (MediaQuery.sizeOf(context).width * 0.8).clamp(0.0, 320.0),
+            width: analysisPanelWidth(MediaQuery.sizeOf(context).width),
             child: PdfAnalysisPanel(
               analysis: a,
               filter: _filter,
@@ -385,6 +395,8 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
     final rec = widget.info.record;
     // Veri yalnız mod açıkken okunur (kapalıyken kart akışı açılmaz).
     final analysis = _analysisOn ? ref.watch(bookAnalysisProvider(rec.id)).value : null;
+    // Rozetler bir kez hesaplanır (kaynak listeyi her çağrıda tarar).
+    final badges = analysis?.mistakeBadges ?? const <int, int>{};
     if (_analysisData.value != analysis) {
       final a = analysis;
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -427,7 +439,7 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
                   _ThumbStrip(
                     docRef: _docRef,
                     current: _page,
-                    badges: analysis?.mistakeBadges ?? const {},
+                    badges: badges,
                     onTap: (n) => _viewer.goToPage(pageNumber: n),
                   ),
                 Expanded(
@@ -453,7 +465,11 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
                                   .surfaceContainerHighest,
                               pageOverlaysBuilder: _overlays,
                               onPageChanged: (n) {
-                                if (n != null) _page.value = n;
+                                if (n != null) {
+                                  _page.value = n;
+                                  // eşitlemeyle gelen katman değişimleri sayfa çevirince görünür
+                                  _layers.hub.refreshIfStale();
+                                }
                               },
                             ),
                           ),
@@ -535,7 +551,7 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
                                           ),
                                           child: Text(
                                             '$n / ${rec.pageCount}'
-                                            '${(analysis?.mistakeBadges[n - 1] ?? 0) > 0 ? ' · ${analysis!.mistakeBadges[n - 1]} yanlış' : ''}',
+                                            '${(badges[n - 1] ?? 0) > 0 ? ' · ${badges[n - 1]} yanlış' : ''}',
                                             style: const TextStyle(
                                               color: Colors.white,
                                             ),
@@ -550,12 +566,31 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
                           },
                         ),
                       ),
-                      _analysisLayer(analysis),
-                      FloatingToolDock(
-                        tools: _tools,
-                        session: _session,
-                        selecting: _selecting,
-                        onSelect: () => _setSelecting(!_selecting),
+                      _analysisLayer(analysis, badges),
+                      // Analiz paneli açıkken yuva panelin altında kalmasın: yuvanın
+                      // alanı panelin soluna daralır (yuva her zaman panelden sonra çizilir).
+                      ListenableBuilder(
+                        listenable: _tools,
+                        builder: (context, _) => Positioned(
+                          left: 0,
+                          top: 0,
+                          bottom: 0,
+                          right: toolDockRightInset(
+                            panelOpen: _analysisOn && _panelOpen && analysis != null,
+                            screenWidth: MediaQuery.sizeOf(context).width,
+                            position: _tools.dockPosition,
+                          ),
+                          child: Stack(
+                            children: [
+                              FloatingToolDock(
+                                tools: _tools,
+                                session: _session,
+                                selecting: _selecting,
+                                onSelect: () => _setSelecting(!_selecting),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -671,3 +706,18 @@ SnackBar savedQuestionSnackBar(
     onPressed: () => router?.push(AppRoutes.pdfSolve(documentId, cardId)),
   ),
 );
+
+/// Analiz panelinin genişliği (ekranın %80'i, en çok 320).
+@visibleForTesting
+double analysisPanelWidth(double screenWidth) => (screenWidth * 0.8).clamp(0.0, 320.0);
+
+/// Analiz paneli açıkken araç yuvasının sağdan bırakacağı boşluk (panel genişliği).
+/// Sağ yuva her zaman panelin soluna alınır; üst/alt yuvada, panelden kalan genişlik
+/// yuva için yeterliyse (>= 520) alan daraltılır, değilse (telefon) yuva olduğu gibi kalır.
+@visibleForTesting
+double toolDockRightInset({required bool panelOpen, required double screenWidth, required DockPosition position}) {
+  if (!panelOpen) return 0;
+  final w = analysisPanelWidth(screenWidth);
+  if (position == DockPosition.right) return w;
+  return screenWidth - w >= 520 ? w : 0;
+}

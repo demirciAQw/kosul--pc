@@ -12,6 +12,7 @@ import '../../pdf/pdf_providers.dart';
 import '../domain/library.dart';
 import '../domain/progress.dart';
 import '../library_providers.dart';
+import 'books_screen.dart' show pdfsByBook;
 import 'library_sheet.dart';
 import 'widgets/progress_widgets.dart';
 
@@ -52,9 +53,7 @@ class BookDetailScreen extends ConsumerWidget {
     final results = ref.watch(testResultsProvider).value ?? const <String, TestResult>{};
     final mistakes = ref.watch(_mistakesByNodeProvider(bookId)).value ?? const <String, int>{};
     final p = bookProgress(book, results);
-    final pdf = (ref.watch(pdfDocumentsProvider).value ?? const <PdfDocumentRecord>[])
-        .where((d) => d.bookId == bookId)
-        .firstOrNull;
+    final pdf = pdfsByBook(ref.watch(pdfDocumentsProvider).value ?? const <PdfDocumentRecord>[])[bookId];
 
     return Scaffold(
       appBar: AppBar(

@@ -12,9 +12,12 @@ Color analysisColor(QuestionStatus s) => switch (s) {
   QuestionStatus.correct => const Color(0xFF2E7D32),
 };
 
+/// Başlık şeridi yüksekliği (sayfa içeriğini örtmesin diye ince).
+const double _bannerHeight = 20;
+
 /// Analiz modunda bir sayfanın üstü: kutusu olan sorulara renkli çerçeve ve
 /// numara etiketi; testin ilk sayfasında (kutusuz yanlışlar için) şerit.
-/// Çerçeveler dokunuş almaz; yalnız şeridin [Aç] düğmesi alır.
+/// Çerçeveler ve şerit dokunuş/kalem almaz; yalnız şeridin [Aç] düğmesi alır.
 /// [analysis] null ise (mod kapalı) hiçbir şey çizilmez.
 class AnalysisPageOverlay extends StatelessWidget {
   const AnalysisPageOverlay({
@@ -65,37 +68,55 @@ class AnalysisPageOverlay extends StatelessWidget {
                       ),
                     ),
                 if (banners.isNotEmpty)
+                  // İnce sabit bant (sayfa üst kenarı): dokunuşu ve kalemi YUTMAZ;
+                  // yalnız küçük "Aç" düğmesi dokunuş alır.
                   Positioned(
                     left: 0,
                     right: 0,
                     top: 0,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                    child: Stack(
                       children: [
-                        for (final t in banners)
-                          Material(
-                            key: Key('analysis-banner-${t.nodeId}'),
-                            color: analysisColor(QuestionStatus.wrong).withValues(alpha: 0.92),
-                            child: InkWell(
-                              onTap: onOpenPanel,
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                child: Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        t.bannerText(),
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-                                      ),
-                                    ),
-                                    const Text('Aç', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
-                                  ],
+                        IgnorePointer(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              for (final t in banners)
+                                Container(
+                                  key: Key('analysis-banner-${t.nodeId}'),
+                                  height: _bannerHeight,
+                                  alignment: Alignment.centerLeft,
+                                  padding: const EdgeInsets.only(left: 8, right: 44),
+                                  color: analysisColor(QuestionStatus.wrong).withValues(alpha: 0.82),
+                                  child: Text(
+                                    t.bannerText(),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 11),
+                                  ),
                                 ),
-                              ),
-                            ),
+                            ],
                           ),
+                        ),
+                        Positioned(
+                          right: 0,
+                          top: 0,
+                          child: Column(
+                            children: [
+                              for (final t in banners)
+                                InkWell(
+                                  key: Key('analysis-banner-open-${t.nodeId}'),
+                                  onTap: onOpenPanel,
+                                  child: Container(
+                                    height: _bannerHeight,
+                                    width: 40,
+                                    alignment: Alignment.center,
+                                    color: Colors.black26,
+                                    child: const Text('Aç', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 11)),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
                       ],
                     ),
                   ),

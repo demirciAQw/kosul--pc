@@ -46,6 +46,8 @@ class _PdfQuestionPanelState extends ConsumerState<PdfQuestionPanel> {
   String? _error;
   BoxAnalysis? _analysis;
   Book? _book;
+  bool _hasLayers = false;
+  bool _applyLayers = false; // varsayılan KAPALI: önizleme özgün sayfadan
 
   @override
   void initState() {
@@ -55,6 +57,17 @@ class _PdfQuestionPanelState extends ConsumerState<PdfQuestionPanel> {
     final b = _book;
     if (b != null) _subject = subjectKey(b.examType, b.subject);
     _analyze();
+    _checkLayers();
+  }
+
+  Future<void> _checkLayers() async {
+    try {
+      final svc = await ref.read(pdfQuestionServiceProvider.future);
+      final has = await svc.hasVisibleLayers(widget.info.record.id, widget.page);
+      if (mounted && has) setState(() => _hasLayers = true);
+    } catch (_) {
+      // anahtar gösterilmez
+    }
   }
 
   @override
@@ -113,6 +126,7 @@ class _PdfQuestionPanelState extends ConsumerState<PdfQuestionPanel> {
         book: _book,
         topicText: topic,
         mebNodeId: keepMeb ? suggested.mebNodeId : null,
+        applyLayersToPreview: _hasLayers && _applyLayers,
       );
       if (mounted) widget.onSaved(card);
     } catch (e) {
@@ -198,6 +212,16 @@ class _PdfQuestionPanelState extends ConsumerState<PdfQuestionPanel> {
                 for (final t in types) Chip(label: Text(t), visualDensity: VisualDensity.compact),
               ],
             ),
+            if (_hasLayers)
+              SwitchListTile(
+                key: const Key('pdf-q-apply-layers'),
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Katmanları önizlemeye uygula'),
+                subtitle: const Text('Kapalıyken karta özgün sayfa kaydedilir.'),
+                value: _applyLayers,
+                onChanged: _saving ? null : (v) => setState(() => _applyLayers = v),
+              ),
             if (_analysis != null && _analysis!.text.isEmpty && !_analyzing)
               Padding(
                 padding: const EdgeInsets.only(top: 6),

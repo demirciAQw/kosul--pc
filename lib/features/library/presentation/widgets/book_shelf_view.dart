@@ -339,12 +339,17 @@ class ShelfLayout<T> extends StatelessWidget {
           for (var i = 0; i < items.length; i += cols)
             items.sublist(i, i + cols > items.length ? items.length : i + cols),
         ];
-        return ListView(
+        // Başlık (varsa) + satırlar tembel kurulur: uzun listede yalnızca görünenler.
+        final offset = header != null ? 1 : 0;
+        return ListView.builder(
           padding: padding,
-          children: [
-            if (header != null) ...[header!, const SizedBox(height: 16)],
-            for (final row in rows) _ShelfRow<T>(cols: cols, items: row, itemBuilder: itemBuilder),
-          ],
+          itemCount: rows.length + offset,
+          itemBuilder: (context, i) {
+            if (header != null && i == 0) {
+              return Padding(padding: const EdgeInsets.only(bottom: 16), child: header!);
+            }
+            return _ShelfRow<T>(cols: cols, items: rows[i - offset], itemBuilder: itemBuilder);
+          },
         );
       },
     );

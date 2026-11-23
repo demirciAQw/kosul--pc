@@ -6,6 +6,7 @@ import '../../../app/palette.dart';
 import '../../../app/platform.dart';
 import '../../../app/routes.dart';
 import '../../../app/widgets/tone_icon.dart';
+import '../../handwriting/presentation/handwriting_settings_card.dart';
 import '../../ocr/data/genai_describer.dart';
 import '../../ocr/ocr_providers.dart';
 import '../domain/settings.dart';
@@ -87,6 +88,8 @@ class _SettingsBody extends ConsumerWidget {
               onTap: () => context.push(AppRoutes.inkLab),
             ),
           ),
+        // El yazısı tanıma (ML Kit modeli indirme/silme) yalnızca Android'de.
+        if (isAndroid) const HandwritingSettingsCard(),
         // PDF kitaplığı ve okuyucu yalnızca Android'de (tablet için).
         if (isAndroid)
           Card(

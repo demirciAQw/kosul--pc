@@ -44,6 +44,7 @@ part 'app_database.g.dart';
   InkPageTags,
   InkPagePeople,
   PdfPageLayers,
+  InkPageText,
 ])
 class AppDatabase extends _$AppDatabase {
   /// Testlerde: `AppDatabase(NativeDatabase.memory())`
@@ -67,8 +68,9 @@ class AppDatabase extends _$AppDatabase {
   /// v18: çizgi -> soru bağı (ink_strokes.question_id), çözüm katmanları.
   /// v19: kalemli defter (ink_notebooks, ink_note_pages) ve etiket/kişi bağları.
   /// v20: PDF sayfa katmanları (pdf_page_layers): filigran temizleme/örtü, dosya değişmez.
+  /// v21: el yazısı metni (ink_page_text): sayfa başına türev metin, çizgiler değişmez.
   @override
-  int get schemaVersion => 20;
+  int get schemaVersion => 21;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -84,6 +86,7 @@ class AppDatabase extends _$AppDatabase {
           await _createInkIndexes();
           await _createNotebookIndexes();
           await _createPdfLayerIndexes();
+          await _createPageTextIndexes();
         },
         onUpgrade: (m, from, to) async {
           if (from < 2) {
@@ -203,6 +206,11 @@ class AppDatabase extends _$AppDatabase {
             await m.createTable(pdfPageLayers);
             await _createPdfLayerIndexes();
           }
+          // v21: tablo yoksa kurulur (14/17/19/20 → 21 hepsi buradan).
+          if (from < 21) {
+            await m.createTable(inkPageText);
+            await _createPageTextIndexes();
+          }
           // Tablolar yeniden kurulmuş ya da sütun eklenmiş olabilir: tetikleyiciler baştan.
           await LedgerService(this).installTriggers(rebuild: true);
         },
@@ -230,6 +238,10 @@ class AppDatabase extends _$AppDatabase {
   Future<void> _createPdfLayerIndexes() async {
     await customStatement(
         'CREATE INDEX IF NOT EXISTS ix_pdf_layer_doc ON pdf_page_layers(pdf_document_id, page)');
+  }
+
+  Future<void> _createPageTextIndexes() async {
+    await customStatement('CREATE INDEX IF NOT EXISTS ix_page_text_page ON ink_page_text(page_id)');
   }
 
   Future<void> _createNotebookIndexes() async {

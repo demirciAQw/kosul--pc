@@ -21,20 +21,57 @@ class PdfLayersHub {
 
   /// true: katmanlar uygulanmaz, özgün sayfa görünür.
   final showOriginal = ValueNotifier<bool>(false);
+
+  /// Kalem çizgilerinin görünümü (yalnız görünüm; çizgi silinmez). Çizgiler sayfa
+  /// koordinatında, katmanlardan bağımsız saklanır ve HER ZAMAN katmanların üstüne
+  /// çizilir (okuyucuda `PdfPageInkLayer` katman örtüsünden sonra gelir; çözüm
+  /// ekranında katmanlı arka planın üstündedir). "Orijinali göster" çizgileri gizlemez.
+  final inkVisible = ValueNotifier<bool>(true);
   StreamSubscription<void>? _sub;
+  StreamSubscription<List<PdfPageLayer>>? _dbSub;
   bool _disposed = false;
   int _gen = 0;
 
-  /// Katmanları okur ve depodaki her yazmadan sonra yeniden okur. Veritabanı AKIŞI
-  /// kullanılmaz (tek seferlik okuma): başka cihazdan eşitlemeyle gelen katman,
-  /// [refresh] çağrılana (panel açılınca) ya da okuyucu yeniden açılınca görünür.
-  void start() {
+  DateTime? _lastRead;
+
+  /// Katmanları okur ve depodaki her yazmadan sonra (bellek içi bildirim) yeniden okur.
+  ///
+  /// Başka cihazdan eşitlemeyle gelen ekleme/silme/gizleme için: veritabanı AKIŞI
+  /// ([watchDatabase], `repository.watchAll`) varsayılan KAPALIDIR. Okuyucu testlerinde
+  /// (sahte zaman) Drift akışı bir sonraki kareyi hiç tamamlatmayıp testi kilitliyor
+  /// (denendi: `pdf_reader_page_test` zaman aşımı). Bunun yerine okuyucu sayfa
+  /// değişince [refreshIfStale] ile yeniden okur (en çok 2 sn'de bir), panel de
+  /// açılınca [refresh] çağırır; eşitleme farkı en geç bir sayfa çevirmede görünür.
+  void start({bool watchDatabase = false}) {
     _sub = repository.changes.listen((_) => refresh());
+    if (watchDatabase) {
+      try {
+        _dbSub = repository.watchAll(documentId).listen(
+          (l) {
+            if (!_disposed) {
+              ++_gen; // uçuştaki eski okuma sonucu ezmesin
+              layers.value = l;
+            }
+          },
+          onError: (Object _) {},
+        );
+      } catch (_) {
+        _dbSub = null;
+      }
+    }
     refresh();
+  }
+
+  /// Son okumadan [maxAge] geçtiyse yeniden okur (sayfa değişiminde ucuz güncelleme).
+  void refreshIfStale({Duration maxAge = const Duration(seconds: 2)}) {
+    final t = _lastRead;
+    if (t != null && DateTime.now().difference(t) < maxAge) return;
+    unawaited(refresh());
   }
 
   Future<void> refresh() async {
     final gen = ++_gen;
+    _lastRead = DateTime.now();
     try {
       final l = await repository.all(documentId);
       if (!_disposed && gen == _gen) layers.value = l;
@@ -56,8 +93,10 @@ class PdfLayersHub {
   Future<void> dispose() async {
     _disposed = true;
     await _sub?.cancel();
+    await _dbSub?.cancel();
     layers.dispose();
     showOriginal.dispose();
+    inkVisible.dispose();
     await renderer.dispose();
   }
 }
@@ -106,6 +145,7 @@ class _PdfPageLayerOverlayState extends State<PdfPageLayerOverlay> {
   double _dpr = 1;
   int _gen = 0;
   bool _disposed = false;
+  LayerJobToken _token = LayerJobToken(); // bu sayfanın bekleyen işleri
 
   PdfLayersHub get _hub => widget.hub;
 
@@ -120,6 +160,7 @@ class _PdfPageLayerOverlayState extends State<PdfPageLayerOverlay> {
   @override
   void dispose() {
     _disposed = true;
+    _token.cancel(); // görünmeyen sayfanın bekleyen işi düşer
     _timer?.cancel();
     _hub.layers.removeListener(_onChange);
     _hub.showOriginal.removeListener(_onChange);
@@ -146,46 +187,51 @@ class _PdfPageLayerOverlayState extends State<PdfPageLayerOverlay> {
     _timer = Timer(widget.settle, () => _request());
   }
 
-  List<PdfPageLayer> get _wmLayers => [
-        for (final l in _hub.visibleFor(widget.page))
-          if (l.kind == PdfLayerKind.watermark) l,
-      ];
+  /// Bu sayfanın görünür katmanları (z sırasıyla; filigran ve örtü).
+  List<PdfPageLayer> get _ordered => _hub.visibleFor(widget.page);
 
   int _wantedBucket() => layerBucketFor(_layoutWidth * _lastZoom * _dpr);
 
   void _request() {
     if (_disposed || _layoutWidth <= 0 || _hub.showOriginal.value) return;
-    final wm = _wmLayers;
+    // Önceki isteğin henüz başlamamış işleri düşer (zum / sayfa / katman değişti).
+    _token.cancel();
+    final token = _token = LayerJobToken();
+    final ordered = _ordered;
     final gen = ++_gen;
     // Artık görünmeyen / değişen katmanların görüntüleri bırakılır.
-    final live = {for (final l in wm) l.id: l.paramKey};
+    final live = {for (final l in ordered) if (l.kind == PdfLayerKind.watermark) l.id};
     for (final id in _shown.keys.toList()) {
-      if (live[id] == null) _shown.remove(id)!.image.dispose();
+      if (!live.contains(id)) _shown.remove(id)!.image.dispose();
     }
     final want = _wantedBucket();
-    for (var i = 0; i < wm.length; i++) {
-      final l = wm[i];
-      final chain = wm.sublist(0, i + 1);
+    for (var i = 0; i < ordered.length; i++) {
+      final l = ordered[i];
+      if (l.kind != PdfLayerKind.watermark) continue;
+      // Zincir: bu katmandan alttaki TÜM katmanlar (örtüler dahil), z sırası korunur.
+      final chain = layerChainUpTo(ordered, i);
       final chainKey = chain.map((c) => c.paramKey).join(';');
       final cur = _shown[l.id];
       if (cur != null && cur.paramKey == chainKey && cur.bucket == want) continue;
       // Hiç görüntü yoksa (ya da parametre değiştiyse) önce düşük çözünürlük.
       if (cur == null || cur.paramKey != chainKey) {
         final low = want < layerWidthBuckets.first ? want : layerWidthBuckets.first;
-        if (low != want) _load(gen, l, chain, chainKey, low);
+        if (low != want) _load(gen, token, l, chain, chainKey, low);
       }
-      _load(gen, l, chain, chainKey, want);
+      _load(gen, token, l, chain, chainKey, want);
     }
   }
 
-  Future<void> _load(int gen, PdfPageLayer l, List<PdfPageLayer> chain, String chainKey, int bucket) async {
-    final img = await _hub.renderer.imageFor(widget.page, l, chain, bucket);
+  Future<void> _load(int gen, LayerJobToken token, PdfPageLayer l, List<PdfPageLayer> chain, String chainKey, int bucket) async {
+    final img = await _hub.renderer.imageFor(widget.page, l, chain, bucket, token: token);
     if (img == null) return;
     final cur = _shown[l.id];
+    final ordered = _ordered;
+    final idx = ordered.indexWhere((x) => x.id == l.id);
     final stillWanted = !_disposed &&
         mounted &&
-        _wmLayers.any((x) => x.id == l.id) &&
-        _wmLayers.take(chain.length).map((c) => c.paramKey).join(';') == chainKey;
+        idx >= 0 &&
+        layerChainUpTo(ordered, idx).map((c) => c.paramKey).join(';') == chainKey;
     // Daha keskin görüntü varsa onu bozma (geç gelen düşük çözünürlük).
     final worse = cur != null && cur.paramKey == chainKey && cur.bucket > bucket;
     if (!stillWanted || worse) {

@@ -36,6 +36,23 @@ class _PdfImportDialogState extends State<_PdfImportDialog> {
   bool get _exists => _info.existing != null;
   bool get _linked => _info.existing?.bookId != null;
 
+  /// Satır varsa başlık, kitap bağı ve ofset korunur: bu yüzden başlık alanı kapalı.
+  String _existsMessage() {
+    final d = _info.existing!;
+    final String first;
+    if (d.deleted) {
+      first = 'Bu PDF daha önce eklenmişti ve listeden kaldırılmıştı; geri getirilir.';
+    } else if (!_info.fileOnDevice) {
+      first = 'Bu PDF başka cihazdan eşitlenmiş; dosya bu cihaza kopyalanır.';
+    } else {
+      first = _linked ? 'Bu PDF zaten kitaplıkta ve bir kitaba bağlı.' : 'Bu PDF zaten kitaplıkta. Yeniden kopyalanmaz.';
+    }
+    final kept = _linked
+        ? ' Eski başlık ve kitap bağı korunur; bu yüzden başlık değişmez ve "kitap olarak ekle" gösterilmez.'
+        : ' Eski başlık korunur; bu yüzden başlık değişmez.';
+    return '$first$kept';
+  }
+
   @override
   void initState() {
     super.initState();
@@ -68,9 +85,7 @@ class _PdfImportDialogState extends State<_PdfImportDialog> {
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(color: scheme.secondaryContainer, borderRadius: BorderRadius.circular(8)),
                 child: Text(
-                  _linked
-                      ? 'Bu PDF zaten kitaplıkta ve bir kitaba bağlı.'
-                      : 'Bu PDF zaten kitaplıkta. Yeniden kopyalanmaz.',
+                  _existsMessage(),
                   style: TextStyle(color: scheme.onSecondaryContainer),
                 ),
               ),

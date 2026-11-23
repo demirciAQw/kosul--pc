@@ -66,8 +66,22 @@ class PdfQuestionService {
   final OcrRepository? ocrRepository;
   final String ocrEngineVersion;
 
-  /// Varsa kırpma, sayfanın görünür filigran/örtü katmanlarıyla yapılır (önizleme ve OCR).
+  /// Katman deposu. Kalıcı önizleme VARSAYILAN olarak katmansız, özgün sayfadan alınır
+  /// (içeriği yanlışlıkla silen bir katman karta işlenmesin); yalnız kullanıcı
+  /// `save(applyLayersToPreview: true)` derse görünür filigran/örtü katmanları uygulanır.
+  /// OCR ve otomatik etiket HER ZAMAN katmansız özgün görüntüden okur (metin okuma için doğru).
   final PdfLayersRepository? layers;
+
+  /// Sayfada uygulanacak görünür katman var mı ("katmanları önizlemeye uygula" anahtarı için).
+  Future<bool> hasVisibleLayers(String documentId, int page) async {
+    final r = layers;
+    if (r == null) return false;
+    try {
+      return visibleLayersFor(await r.forPage(documentId, page), page).isNotEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
 
   static const previewWidth = 480;
   static const ocrWidth = 1400;
@@ -167,7 +181,7 @@ class PdfQuestionService {
         i += 4;
       }
     }
-    // Görünür katmanlar (filigran temizleme / örtü) kırpmaya da uygulanır.
+    // [documentId] verilirse görünür katmanlar (filigran temizleme / örtü) kırpmaya uygulanır.
     final visible = (layers == null || documentId == null)
         ? const <PdfPageLayer>[]
         : visibleLayersFor(await layers!.forPage(documentId, page), page);
@@ -201,6 +215,7 @@ class PdfQuestionService {
     Book? book,
     String? topicText,
     String? mebNodeId,
+    bool applyLayersToPreview = false,
   }) async {
     final context = book == null
         ? null
@@ -211,7 +226,8 @@ class PdfQuestionService {
       final doc = await engine.openFile(pdfPath);
       final EncodedPreview preview;
       try {
-        final crop = await _crop(doc, page, box, previewWidth, documentId: document.id);
+        final crop = await _crop(doc, page, box, previewWidth,
+            documentId: applyLayersToPreview ? document.id : null);
         preview = await encodePreview(crop.rgba, crop.width, crop.height);
       } finally {
         await doc.close();

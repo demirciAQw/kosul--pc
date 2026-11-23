@@ -36,19 +36,23 @@ String layerScopeLabel(PdfPageLayer l) => switch (l.scope) {
 
 /// "Filigran / Katmanlar" panelini alttan sheet olarak açar. Sonuç, okuyucunun
 /// yapacağı iş ([LayersPanelAction]) ya da null.
-Future<LayersPanelAction?> showPdfLayersPanel(BuildContext context, {required PdfLayersHub hub, required int page}) {
+Future<LayersPanelAction?> showPdfLayersPanel(BuildContext context,
+    {required PdfLayersHub hub, required int page, int Function()? inkCount}) {
   return showModalBottomSheet<LayersPanelAction>(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
     constraints: const BoxConstraints(maxWidth: 640),
-    builder: (_) => PdfLayersPanel(hub: hub, page: page),
+    builder: (_) => PdfLayersPanel(hub: hub, page: page, inkCount: inkCount),
   );
 }
 
 class PdfLayersPanel extends StatefulWidget {
-  const PdfLayersPanel({super.key, required this.hub, required this.page});
+  const PdfLayersPanel({super.key, required this.hub, required this.page, this.inkCount});
   final PdfLayersHub hub;
+
+  /// Bu sayfadaki kalem çizgisi sayısı (null: "Çizimler" satırı gösterilmez).
+  final int Function()? inkCount;
 
   /// 0'dan.
   final int page;
@@ -152,6 +156,19 @@ class _PdfLayersPanelState extends State<PdfLayersPanel> {
                   ),
                 ),
                 const Divider(height: 1),
+                if (widget.inkCount != null)
+                  ValueListenableBuilder<bool>(
+                    valueListenable: hub.inkVisible,
+                    builder: (_, v, _) => SwitchListTile(
+                      key: const Key('layers-ink-row'),
+                      contentPadding: EdgeInsets.zero,
+                      secondary: const Icon(Icons.draw_outlined),
+                      title: const Text('Çizimler'),
+                      subtitle: Text('${widget.inkCount!()} çizgi · katmanların üstünde; gizlemek çizgiyi silmez'),
+                      value: v,
+                      onChanged: (x) => hub.inkVisible.value = x,
+                    ),
+                  ),
                 Flexible(
                   child: list.isEmpty
                       ? const Padding(

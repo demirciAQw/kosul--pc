@@ -36,7 +36,11 @@ class NotePageEditor extends ConsumerStatefulWidget {
     required this.onSpacing,
     this.stylusOnlyOverride,
     this.onGrow,
+    this.onTranscribe,
   });
+
+  /// "Sayfayı metne çevir" (araç yuvasının Sayfa penceresinde düğme olur); null = yok.
+  final VoidCallback? onTranscribe;
 
   /// Sonsuz sayfa alt kenara yaklaşınca yeni yükseklikle çağrılır (depo
   /// `setPageSize`). Yalnız kalem havadayken (görünüm kilidi açıkken) çağrılır:
@@ -351,6 +355,7 @@ class NotePageEditorState extends ConsumerState<NotePageEditor> {
                         onTemplateAll: widget.onTemplateAll,
                         onBackground: widget.onBackground,
                         onSpacing: widget.onSpacing,
+                        onTranscribe: widget.onTranscribe,
                       ),
                     ),
                   ),

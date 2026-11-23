@@ -65,11 +65,21 @@ String cleanBookTitle(String fileName) {
   return name;
 }
 
+/// Sıradan sözcük olarak da geçen yayınevi adları: yalnız hemen ardından
+/// "yayın..." (Yayınları, Yayıncılık, Yayınevi) gelirse eşleşir
+/// ("Orijinal soru", "Zafer Bayramı", "Antrenman programı" yayınevi sayılmaz).
+const _ambiguousPublishers = {'Orijinal', 'Aydın', 'Nitelik', 'Zafer', 'Antrenman', 'Paraf', 'Fenomen'};
+
 /// Metinde (katlanmış, tam sözcük) geçen ilk bilinen yayınevi; yoksa null.
 String? findPublisher(String text) {
   final t = ' ${normalizeTr(text)} ';
   for (final p in knownPublishers) {
-    if (t.contains(' ${normalizeTr(p)} ')) return p;
+    final n = normalizeTr(p);
+    if (_ambiguousPublishers.contains(p)) {
+      if (RegExp('(^| )${RegExp.escape(n)} yayin').hasMatch(t)) return p;
+    } else if (t.contains(' $n ')) {
+      return p;
+    }
   }
   return null;
 }

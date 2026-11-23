@@ -159,11 +159,20 @@ class _PdfBookFormPageState extends State<PdfBookFormPage> {
     );
   }
 
+  bool _done = false;
+
+  /// Çift dokunuşta ikinci `pop` alttaki PDF kitaplığını da kapatırdı:
+  /// bir kez ve yalnızca bu sayfa en üstteyken kapanır.
+  void _finish(PdfBookFormResult result) {
+    if (_done || !(ModalRoute.of(context)?.isCurrent ?? false)) return;
+    _done = true;
+    Navigator.pop(context, result);
+  }
+
   void _save() {
     if (!_valid) return;
     final pub = _publisher.text.trim();
-    Navigator.pop(
-      context,
+    _finish(
       PdfBookFormResult.newBook(
         title: _title.text.trim(),
         exam: _exam!,
@@ -196,14 +205,14 @@ class _PdfBookFormPageState extends State<PdfBookFormPage> {
               key: const Key('book-apply-template'),
               text: 'Şablonla eşleşti: ${t.title}',
               action: 'Uygula',
-              onTap: () => Navigator.pop(context, PdfBookFormResult.fromTemplate(t, firstPdfPage: _firstValue!)),
+              onTap: () => _finish(PdfBookFormResult.fromTemplate(t, firstPdfPage: _firstValue!)),
             ),
           if (e != null)
             _banner(
               key: const Key('book-link-existing'),
               text: 'Kitaplığında benzer kitap var: ${e.title}',
               action: 'Bağla',
-              onTap: () => Navigator.pop(context, PdfBookFormResult.existing(e.bookId, firstPdfPage: _firstValue!)),
+              onTap: () => _finish(PdfBookFormResult.existing(e.bookId, firstPdfPage: _firstValue!)),
             ),
           if (t != null || e != null) const SizedBox(height: 8),
           TextField(

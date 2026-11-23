@@ -83,7 +83,7 @@ class PdfLayersController {
     if (!ctx.mounted) return;
     final page = currentPage();
     unawaited(hub.refresh()); // eşitlemeyle gelen değişiklikler
-    final a = await showPdfLayersPanel(ctx, hub: hub, page: page);
+    final a = await showPdfLayersPanel(ctx, hub: hub, page: page, inkCount: () => session.penFor(page).strokes.length);
     if (a == null) return;
     switch (a) {
       case EditLayerAction(:final layer):

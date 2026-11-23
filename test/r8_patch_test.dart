@@ -16,6 +16,14 @@ void main() {
     expect(kept, contains(r8Marker));
   });
 
+  test('proguard-rules.pro: el yazısı eklentisi korunur; eski yamalı dosyaya tek kural eklenir', () {
+    expect(patchProguardRules(null), contains(r8InkRule));
+    const old = '$r8Marker\n-keep class com.google.mlkit.** { *; }\n';
+    final up = patchProguardRules(old);
+    expect(up, contains('-keep class com.google_mlkit_digital_ink_recognition.** { *; }'));
+    expect(patchProguardRules(up), up);
+  });
+
   test('Gradle: sürüm derlemesi kuralları kullanır; iki kez eklenmez', () {
     final kts = patchR8Kts('android {}\n');
     expect(kts, contains('getByName("release")'));

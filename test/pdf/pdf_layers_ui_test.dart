@@ -25,6 +25,7 @@ import 'package:kocum/features/pdf/domain/watermark.dart';
 import 'package:kocum/features/pdf/pdf_layers_providers.dart';
 import 'package:kocum/features/pdf/pdf_providers.dart';
 import 'package:kocum/features/pdf/presentation/layer_overlay.dart';
+import 'package:kocum/features/pdf/presentation/pdf_page_ink_layer.dart';
 import 'package:kocum/features/pdf/presentation/pdf_ink_session.dart';
 import 'package:kocum/features/pdf/presentation/pdf_layers_controller.dart';
 import 'package:kocum/features/pdf/presentation/pdf_layers_panel.dart';
@@ -41,9 +42,14 @@ import 'pdf_test_support.dart';
 
 final _id = 'e' * 64;
 
-/// Sayfada (100..400 x, 292..492 y; sol-üst) açık gri (0.85 = 217) dikdörtgen: "filigran".
-/// Ayrıca (500..560, 100..160) 0.75 (191) ikinci bir leke.
-const _content = '0.85 g 100 300 300 200 re f\n0.75 g 500 632 60 60 re f\n0 g';
+/// Sayfada (100..400 x, 292..492 y; sol-üst) açık gri (0.85 = 217) yatay ŞERİTLER: "filigran".
+/// (Düz dolu dikdörtgen "geniş dolgu" sayılıp korunurdu; şeritler ince yazı gibi davranır.)
+/// Ayrıca (500..560, 100..160) 0.75 (191) şeritli ikinci bir leke.
+final _content = [
+  for (var y = 294; y < 494; y += 20) '0.85 g 100 $y 300 14 re f',
+  for (var y = 632; y < 692; y += 14) '0.75 g 500 $y 60 8 re f',
+  '0 g',
+].join('\n');
 const _wm = WatermarkParams(tone: 217, toneRange: 8);
 const _wm2 = WatermarkParams(tone: 191, toneRange: 8);
 
@@ -107,6 +113,32 @@ void main() {
   }
 
   // ───────────── Üretici ve önbellek ─────────────
+
+  testWidgets('hub: başka kaynaktan (eşitleme) gelen katman, aynı depoyu kullanmayan yazmayla da görünür', (t) async {
+    await setup(t);
+    expect(hub.layers.value, isEmpty);
+    // Akış açık ikinci hub (varsayılan hub akışsızdır: okuyucu testlerini kilitler).
+    final watched = PdfLayersHub(documentId: _id, repository: repo, renderer: renderer);
+    await t.runAsync(() async => watched.start(watchDatabase: true));
+    addTearDown(() => t.runAsync(() => watched.dispose().timeout(const Duration(seconds: 3), onTimeout: () {})));
+    // Hub'ın deposundan BAĞIMSIZ ikinci depo = eşitleme gibi dış yazma (bellek içi bildirim yok).
+    final other = PdfLayersRepository(db, ids: _Ids());
+    await t.runAsync(() => other.add(documentId: _id, page: 0, kind: PdfLayerKind.watermark, params: _wm.toJson()));
+    await settle(t, 400);
+    expect(watched.layers.value, hasLength(1));
+    // Akışsız varsayılan hub görmez; sayfa çevirince (refreshIfStale) görür.
+    expect(hub.layers.value, isEmpty);
+    hub.refreshIfStale(maxAge: Duration.zero);
+    await settle(t, 300);
+    expect(hub.layers.value, hasLength(1));
+    final id = watched.layers.value.single.id;
+    await t.runAsync(() => other.setVisible(id, false));
+    await settle(t, 400);
+    expect(watched.layers.value.single.visible, isFalse);
+    await t.runAsync(() => other.softDelete(id));
+    await settle(t, 400);
+    expect(watched.layers.value, isEmpty);
+  });
 
   testWidgets('filigran katmanı sayfayı temizler; metin ve filigransız yerler değişmez; PDF dosyası değişmez', (t) async {
     await setup(t);
@@ -325,6 +357,7 @@ void main() {
     await t.pump(const Duration(milliseconds: 500));
     await waitPreview(t);
     expect(find.text('Sonra'), findsWidgets);
+    expect(find.byKey(const Key('layer-all-warning')), findsNothing); // tek sayfa: uyarı yok
     // Önce/Sonra: anahtar ham görüntüyü gösterir.
     await t.tap(find.byKey(const Key('layer-compare-switch')));
     await t.pump();
@@ -354,6 +387,18 @@ void main() {
     await t.tap(find.byKey(const Key('layers-add-all')));
     await t.pump(const Duration(milliseconds: 500));
     await t.pump(const Duration(milliseconds: 500));
+    await waitPreview(t);
+    // Kapsam uyarısı ve "başka sayfada önizle" çubuğu.
+    expect(find.byKey(const Key('layer-all-warning')), findsOneWidget);
+    expect(find.textContaining('2 sayfada uygulanır'), findsOneWidget);
+    expect(find.textContaining('Harita/grafik'), findsOneWidget);
+    expect(t.widget<Text>(find.byKey(const Key('layer-preview-page'))).data, '1 / 2');
+    await t.tap(find.byKey(const Key('layer-preview-next')));
+    await t.pump();
+    expect(t.widget<Text>(find.byKey(const Key('layer-preview-page'))).data, '2 / 2');
+    await waitPreview(t);
+    await t.tap(find.byKey(const Key('layer-preview-prev')));
+    await t.pump();
     await waitPreview(t);
     await tapSave(t);
     final l = (await t.runAsync(() => repo.all(_id).timeout(const Duration(seconds: 5))))!;
@@ -494,6 +539,20 @@ void main() {
     await t.pumpAndSettle();
     expect(find.text('Filigran / Katmanlar'), findsOneWidget);
     expect(find.text('Filigran temizleme · Tüm sayfalar'), findsOneWidget);
+    // "Çizimler" satırı: çizgi sayısı + göster/gizle (yalnız görünüm).
+    expect(find.byKey(const Key('layers-ink-row')), findsOneWidget);
+    expect(find.textContaining('0 çizgi'), findsOneWidget);
+    await t.tap(find.byKey(const Key('layers-ink-row')));
+    await t.pump();
+    expect(find.byKey(const Key('layers-ink-row')), findsOneWidget);
+    // Kapat -> sayfa kalem katmanı gizlenir (silinmez); örtü katmanından SONRA çizilir (üstte).
+    await t.tapAt(const Offset(5, 5));
+    await t.pumpAndSettle();
+    final order = t.allWidgets.toList();
+    final iLayer = order.indexWhere((w) => w is PdfPageLayerOverlay);
+    final iInk = order.indexWhere((w) => w is PdfPageInkLayer);
+    expect(iLayer, greaterThanOrEqualTo(0));
+    expect(iInk, greaterThan(iLayer), reason: 'çizgi katmanı filigran/örtü katmanının üstünde');
     await t.pumpWidget(const SizedBox());
     await t.pump(const Duration(seconds: 1));
     await t.runAsync(() => Future.delayed(const Duration(milliseconds: 300)));
@@ -539,7 +598,7 @@ void main() {
     expect(solveRegion(box, const PdfPageSize(612, 792)), isNotNull);
   });
 
-  testWidgets('soru önizleme kırpması görünür katmanı uygular', (t) async {
+  testWidgets('soru önizleme: varsayılan katmansız özgün, anahtar açıkken katmanlı; OCR hep özgün', (t) async {
     await setup(t);
     final dir = Directory('${tmp.path}/m');
     final svc = PdfQuestionService(
@@ -554,26 +613,35 @@ void main() {
       layers: repo,
     );
     final doc = PdfDocumentRecord(id: _id, sha256: _id, title: 'X', pageCount: 2, fileName: 'a.pdf');
-    Future<List<int>> previewPixel(int page) async {
+    Future<List<int>> previewPixel(int page, {bool layers = false}) async {
       final card = await svc.save(
-          document: doc, pdfPath: 'x.pdf', page: page, box: const PdfBox(72, 100, 372, 400), status: QuestionStatus.wrong, subject: 'TYT Matematik');
+          document: doc, pdfPath: 'x.pdf', page: page, box: const PdfBox(72, 100, 372, 400), status: QuestionStatus.wrong, subject: 'TYT Matematik', applyLayersToPreview: layers);
       final bytes = File('${dir.path}/${card.questionImage}').readAsBytesSync();
       final codec = await ui.instantiateImageCodec(bytes);
       final img = (await codec.getNextFrame()).image;
-      final px = await _px(img, 0.5, 0.5);
+      // Beyaz satır çizgisine denk gelmemek için birkaç örnekten en koyusu.
+      var px = await _px(img, 0.5, 0.5);
+      for (final fy in [0.46, 0.48, 0.52, 0.54]) {
+        final q = await _px(img, 0.5, fy);
+        if (q[0] + q[1] + q[2] < px[0] + px[1] + px[2]) px = q;
+      }
       img.dispose();
       return px;
     }
     expect((await t.runAsync(() => previewPixel(0)))![0], 217); // katman yok
     await t.runAsync(() => repo.add(documentId: _id, page: 0, kind: PdfLayerKind.watermark, params: _wm.toJson()));
-    expect(await t.runAsync(() => previewPixel(0)), [255, 255, 255]); // temizlendi
-    expect((await t.runAsync(() => previewPixel(1)))![0], 217); // başka sayfa: katman yok
+    expect((await t.runAsync(() => previewPixel(0)))![0], 217); // katman var ama VARSAYILAN: özgün (yıkıcı değil)
+    expect(await t.runAsync(() => svc.hasVisibleLayers(_id, 0)), isTrue);
+    expect(await t.runAsync(() => svc.hasVisibleLayers(_id, 1)), isFalse);
+    expect(await t.runAsync(() => previewPixel(0, layers: true)), [255, 255, 255]); // anahtar açık: temizlendi
+    expect((await t.runAsync(() => previewPixel(1, layers: true)))![0], 217); // başka sayfa: katman yok
     await t.runAsync(() => repo.add(documentId: _id, page: 1, kind: PdfLayerKind.cover, params: const CoverParams(color: 0xFF0000FF).toJson()));
-    expect(await t.runAsync(() => previewPixel(1)), [0, 0, 255]); // örtü
+    expect((await t.runAsync(() => previewPixel(1)))![0], 217); // örtü de varsayılanda uygulanmaz
+    expect(await t.runAsync(() => previewPixel(1, layers: true)), [0, 0, 255]); // örtü
   });
 }
 
-/// Tüm sayfası 217 gri (BGRA) veren sahte motor.
+/// Sayfası 217 gri, her 20. satır beyaz (BGRA) veren sahte motor.
 class _GrayEngine implements PdfEngine {
   @override
   Future<PdfEngineDocument> openBytes(Uint8List b) => throw UnimplementedError();
@@ -590,7 +658,11 @@ class _GrayDoc implements PdfEngineDocument {
   Future<PdfPageSize> pageSize(int page) async => const PdfPageSize(612, 792);
   @override
   Future<PdfRenderedImage> renderPage(int page, {required int width, required int height}) async {
+    // Her 20. satır beyaz: tek parça geniş dolgu olsaydı filigran sayılmayıp korunurdu.
     final b = Uint8List(width * height * 4)..fillRange(0, width * height * 4, 217);
+    for (var y = 0; y < height; y++) {
+      if (y % 20 == 0) b.fillRange(y * width * 4, (y + 1) * width * 4, 255);
+    }
     for (var i = 3; i < b.length; i += 4) {
       b[i] = 255;
     }

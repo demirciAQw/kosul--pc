@@ -20,6 +20,11 @@ telefon (konu düzeyi) hem tablet (soru düzeyi) için tarif edilmiştir.
   - `core/ledger/` değişiklik defteri: HLC, SQLite tetikleyicileri, uygulama/çakışma/geri alma
     (`LedgerService`). Her senkron tablosu tetikleyiciyle deftere yazılır; ayrıntı
     `docs/KABLOSUZ_AKTARIM.md`
+  - `features/handwriting/` el yazısı -> metin (ML Kit Digital Ink, `tr-TR`, model ~20 MB ilk
+    kullanımda indirilir, APK'ya gömülmez; yalnız Android, masaüstünde tanıyıcı `Unsupported`).
+    Domain: satır gruplama (`line_grouping.dart`), tanıyıcı arayüzü, sayfa metni, `strokeSignature`.
+    Metin `ink_page_text` tablosunda TÜREV veridir (id = sayfa kimliği); çizgilere dokunulmaz.
+    Drift akış tuzağı: önbellek anahtarı yalnız SQL metni; düz `SELECT 1` akışları çakışır
   - `features/anlik/` anlık notlar, ortak etiketler, kişiler (`((etiket))`, `@kişi`)
   - `features/ledger/` Claude'un değişiklikleri, çakışmalar, silme önerileri ekranları
   - `lib/cli/` + `bin/kocum.dart`: Claude'un veriye eli (`docs/KOCUM_ARACI.md`)

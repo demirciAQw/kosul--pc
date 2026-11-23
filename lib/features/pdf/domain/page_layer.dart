@@ -106,3 +106,10 @@ PdfBox? clampLayerBox(PdfBox b, double pageW, double pageH) {
   if (r - l < 1 || bt - t < 1) return null;
   return PdfBox(l, t, r, bt);
 }
+
+/// Z sıralı görünür katmanlarda [index]'teki katmanın görüntüsünü üretmek için
+/// uygulanacak zincir: ondan ALTTAKİ tüm katmanlar (filigran VE örtü) ve kendisi.
+/// Okuyucu üst katmanı (z sırasıyla çizdiği örtüleri) kendisi çizer; çözüm ekranı
+/// ve önizleme `applyLayersToPixels` ile tüm listeyi aynı sırayla uygular: üçü
+/// aynı sonucu verir.
+List<PdfPageLayer> layerChainUpTo(List<PdfPageLayer> ordered, int index) => ordered.sublist(0, index + 1);

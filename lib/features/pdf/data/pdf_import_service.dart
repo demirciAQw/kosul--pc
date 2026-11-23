@@ -23,12 +23,20 @@ class PdfImportResult {
 
 /// Seçilen dosyanın içe aktarma öncesi özeti (pencere için).
 class PdfFileInfo {
-  const PdfFileInfo({required this.sha256, required this.pageCount, this.existing});
+  const PdfFileInfo({required this.sha256, required this.pageCount, this.existing, this.fileOnDevice = false});
   final String sha256;
   final int pageCount;
 
-  /// Aynı PDF zaten kitaplıkta (silinmemiş ve dosyası bu cihazda var).
+  /// Bu PDF için daha önce açılmış satır (silinmiş ya da başka cihazdan gelmiş
+  /// olabilir; bkz. `existing.deleted`, [fileOnDevice]). Yoksa null. İçe
+  /// aktarma satırı geri getirir ama başlığı, kitap bağını ve ofseti KORUR.
   final PdfDocumentRecord? existing;
+
+  /// Dosya bu cihazın veri klasöründe var.
+  final bool fileOnDevice;
+
+  /// Zaten kitaplıkta görünen (silinmemiş, dosyası bu cihazda var) PDF.
+  bool get alreadyLive => existing != null && !existing!.deleted && fileOnDevice;
 }
 
 /// PDF'i uygulama veri klasörüne `pdfs/<sha256>.pdf` olarak alır.
@@ -61,11 +69,12 @@ class PdfImportService {
       await doc.close();
     }
     if (pages <= 0) throw const PdfOpenException('Sayfa yok');
-    final existing = await repository.findBySha(sha);
+    final existing = await repository.findBySha(sha, includeDeleted: true);
     return PdfFileInfo(
       sha256: sha,
       pageCount: pages,
-      existing: existing != null && File(p.join(pdfDir.path, storedFileName(sha))).existsSync() ? existing : null,
+      existing: existing,
+      fileOnDevice: File(p.join(pdfDir.path, storedFileName(sha))).existsSync(),
     );
   }
 

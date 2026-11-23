@@ -53,25 +53,37 @@ class _QuestionViewerScreenState extends ConsumerState<QuestionViewerScreen> {
           duration: const Duration(seconds: 2),
         ));
     }
-    if (deleted) {
-      if (_cards.length <= 1) {
-        Navigator.of(context).pop();
-        return;
-      }
-      setState(() {
-        _cards.removeAt(_index);
-        if (_index >= _cards.length) _index = _cards.length - 1;
-        _showSolution = false;
-      });
-      if (_pages.hasClients) _pages.jumpToPage(_index);
+    if (deleted) _drop(card.id);
+  }
+
+  /// Kartı listeden düşürür (silinmiş); son kartsa ekranı kapatır. Aynı kart
+  /// iki yoldan (eylem dönüşü, akış) gelse de ikinci çağrı etkisizdir.
+  void _drop(String id) {
+    final at = _cards.indexWhere((c) => c.id == id);
+    if (at < 0 || !mounted) return;
+    if (_cards.length <= 1) {
+      Navigator.of(context).pop();
+      return;
     }
+    setState(() {
+      _cards.removeAt(at);
+      if (at < _index) _index--;
+      if (_index >= _cards.length) _index = _cards.length - 1;
+      _showSolution = false;
+    });
+    if (_pages.hasClients) _pages.jumpToPage(_index);
   }
 
   @override
   Widget build(BuildContext context) {
     final stored = _cards[_index];
     // Düzenleme dönüşünde güncel kart (akış); yoksa listedeki.
-    final card = ref.watch(questionByIdProvider(stored.id)).value ?? stored;
+    final live = ref.watch(questionByIdProvider(stored.id));
+    // Akış yüklendi ve kart yoksa (ayrıntı ekranında silindi): eski kopyayı gösterme.
+    if (live.hasValue && live.value == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _drop(stored.id));
+    }
+    final card = live.value ?? stored;
     return Scaffold(
       appBar: AppBar(
         bottom: QuestionActionBar(card: card, keyPrefix: 'viewer', onAction: (a) => _onAction(card, a)),

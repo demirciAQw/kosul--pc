@@ -4,10 +4,14 @@ import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:kocum/app/platform.dart';
 import 'package:kocum/core/database/app_database.dart';
 import 'package:kocum/core/di/core_providers.dart';
 import 'package:kocum/features/library/data/library_data.dart';
 import 'package:kocum/features/library/domain/library.dart';
+import 'package:kocum/features/notes/data/note_tool_prefs_store.dart';
+import 'package:kocum/features/notes/presentation/note_tool_dock.dart';
+import 'package:kocum/features/notes/presentation/note_tool_settings.dart';
 import 'package:kocum/features/pdf/domain/pdf_document_record.dart';
 import 'package:kocum/features/pdf/domain/pdf_engine.dart' show PdfBox;
 import 'package:kocum/features/pdf/pdf_providers.dart';
@@ -57,7 +61,7 @@ void main() {
     await settle(t, 300);
   }
 
-  Future<void> open(WidgetTester t, {bool analysis = false, int? bookless}) async {
+  Future<void> open(WidgetTester t, {bool analysis = false, int? bookless, DockPosition? dock}) async {
     tmp = await t.runAsync(() => Directory.systemTemp.createTemp('analiz')) as Directory;
     addTearDown(() => t.runAsync(() => tmp.delete(recursive: true)));
     final path = '${tmp.path}/a.pdf';
@@ -88,6 +92,7 @@ void main() {
       await cards.insert(_card('k2', QuestionStatus.blank, 't1', 5, page: 1, box: const PdfBox(50, 50, 300, 300)));
       await cards.insert(_card('k3', QuestionStatus.wrong, 't2', 2));
       await cards.insert(_card('k4', QuestionStatus.correct, 't2', 4));
+      if (dock != null) await NoteToolPrefsStore(db, key: isDesktop ? NoteToolPrefsStore.desktopKey : NoteToolPrefsStore.phoneKey).save({'dock.pos': dock.name});
     });
     addTearDown(() async {
       await t.pumpWidget(const SizedBox());
@@ -202,5 +207,41 @@ void main() {
     await t.tap(find.byKey(const Key('analysis-prev')));
     await glide(t);
     expect(find.text('Öncesi yok.'), findsOneWidget);
+  });
+
+  for (final pos in DockPosition.values) {
+    testWidgets('analiz paneli açıkken araç yuvası (${pos.name}) panelin altında kalmaz', (t) async {
+      await open(t, analysis: true, dock: pos);
+      await settle(t, 400);
+      expect(find.byKey(const Key('analysis-panel')), findsOneWidget);
+      final panel = t.getRect(find.byKey(const Key('analysis-panel')));
+      final dock = t.getRect(find.byType(NoteToolDock));
+      expect(dock.overlaps(panel), isFalse, reason: 'yuva $dock panel $panel');
+      // Yuva gerçekten istenen kenarda mı (ayar yüklendi mi)?
+      expect(switch (pos) {
+        DockPosition.top => dock.top < 100,
+        DockPosition.bottom => dock.bottom > 1200,
+        DockPosition.left => dock.left < 100,
+        DockPosition.right => dock.right > 600,
+      }, isTrue, reason: '$pos: $dock');
+      // Panel kapanınca yuva yerine döner (sağdaysa ekranın sağ kenarına yaslanır).
+      await t.tap(find.byKey(const Key('analysis-panel-close')));
+      await settle(t, 300);
+      expect(find.byKey(const Key('analysis-panel')), findsNothing);
+      if (pos == DockPosition.right) {
+        await t.pumpAndSettle(const Duration(milliseconds: 100), EnginePhase.sendSemanticsUpdate, const Duration(seconds: 3));
+        expect(t.getRect(find.byType(NoteToolDock)).right, greaterThan(900));
+      }
+    });
+  }
+
+  test('toolDockRightInset: panel kapalı 0; sağ yuva panel genişliği; dar ekranda üst/alt değişmez', () {
+    for (final p in DockPosition.values) {
+      expect(toolDockRightInset(panelOpen: false, screenWidth: 1000, position: p), 0);
+    }
+    expect(toolDockRightInset(panelOpen: true, screenWidth: 1000, position: DockPosition.right), 320);
+    expect(toolDockRightInset(panelOpen: true, screenWidth: 400, position: DockPosition.right), 320);
+    expect(toolDockRightInset(panelOpen: true, screenWidth: 1000, position: DockPosition.bottom), 320);
+    expect(toolDockRightInset(panelOpen: true, screenWidth: 700, position: DockPosition.bottom), 0);
   });
 }

@@ -171,7 +171,7 @@ class _PdfLibraryPageState extends ConsumerState<PdfLibraryPage> {
         iconColor: Colors.white,
         iconSize: 20,
         padding: EdgeInsets.zero,
-        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+        constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
         tooltip: 'Daha fazla',
         onSelected: (a) => _menu(a, d),
         itemBuilder: (_) => [

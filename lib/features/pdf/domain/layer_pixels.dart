@@ -39,7 +39,7 @@ Uint8List applyLayersToPixels(
     }
     switch (l.kind) {
       case PdfLayerKind.watermark:
-        cur = removeWatermark(cur, w, h, l.watermark, region: rect, order: order);
+        cur = removeWatermark(cur, w, h, l.watermark, region: rect, order: order, pxPerUnit: pxPerUnitX);
         copied = true;
       case PdfLayerKind.cover:
         if (!copied) {

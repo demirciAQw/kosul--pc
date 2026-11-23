@@ -635,7 +635,7 @@ class InkStrokes extends Table {
 /// defter satırı HLC'si yeni olan sürümle tümden yazar; kaybeden sürüm
 /// (kitap bağı, ofset) Çakışmalar'da kalır (geri alınabilir). Alan alan
 /// birleştirme yoktur. `ink_strokes.pdfDocumentId` bu kimliği taşır.
-/// Kitap sayfa no = pdf sayfa no (1'den) + `pageOffset`. Silme yumuşaktır.
+/// `bookPageOf = pdfIndex + 1 + pageOffset` (pdfIndex 0 tabanlı). Silme yumuşaktır.
 @DataClassName('PdfDocumentRow')
 class PdfDocuments extends Table {
   TextColumn get id => text()();
@@ -808,4 +808,33 @@ class InkPagePeople extends Table {
   List<Set<Column>> get uniqueKeys => [
         {pageId, personId},
       ];
+}
+
+// ───────────── El yazısı metni (v21) ─────────────
+
+/// Defter sayfasının el yazısından çevrilmiş metni (ML Kit). Metin TÜREV veridir:
+/// orijinal çizgiler (`ink_strokes`) hiç değişmez/silinmez. Sayfa başına tek satır:
+/// `id` = sayfa kimliği (iki cihaz aynı sayfayı çevirirse satır çakışmaz, defter
+/// alan alan birleştirir); `pageId` ayrıca saklanır. `strokeSig`: kayıt anında
+/// sayfadaki görünür çizgilerin özeti; şimdiki özetten farklıysa metin "güncel
+/// değil" gösterilir. Sayfa için yabancı anahtar yok (sıra bozuk eşitlenirse takılmasın).
+@DataClassName('InkPageTextRow')
+class InkPageText extends Table {
+  TextColumn get id => text()();
+  TextColumn get pageId => text()();
+
+  /// Düzenlenebilir sayfa metni (kullanıcı düzeltince burası değişir).
+  TextColumn get body => text().withDefault(const Constant(''))();
+
+  /// Tanınan satırlar (JSON; konum, çizgi kimlikleri). Bkz. `TranscriptLine`.
+  TextColumn get linesJson => text().withDefault(const Constant('[]'))();
+  TextColumn get languageCode => text().withDefault(const Constant('tr-TR'))();
+  TextColumn get strokeSig => text().withDefault(const Constant(''))();
+  DateTimeColumn get recognizedAt => dateTime()();
+  BoolColumn get deleted => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
 }

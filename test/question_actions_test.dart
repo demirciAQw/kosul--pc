@@ -167,14 +167,14 @@ void main() {
       await close(t);
     });
 
-    testWidgets('kart: uzun basış menüsü ve ⋮ menüsü eylemleri sunar', (t) async {
+    testWidgets('kart: ⋮ menüsü eylemleri sunar', (t) async {
       await pump(
         t,
         (c) => Scaffold(body: SizedBox(width: 200, height: 260, child: QuestionTile(card: c.first))),
         [_card('p1', pdf: true)],
         size: const Size(1250, 800),
       );
-      await t.longPress(find.byType(QuestionTile));
+      await t.tap(find.byTooltip('Soru işlemleri'));
       await settle(t);
       for (final label in ['Düzenle', 'PDF\'te aç', 'Çiz / Çöz', 'Seç', 'Sil']) {
         expect(find.text(label), findsOneWidget, reason: label);
@@ -185,20 +185,57 @@ void main() {
       await close(t);
     });
 
-    testWidgets('kart: ⋮ ile Seç seçer; uzun basış seçmez', (t) async {
-      await pump(
-        t,
-        (c) => Scaffold(body: SizedBox(width: 200, height: 260, child: QuestionTile(card: c.first))),
-        [_card('p1', image: 'x.png')],
-        size: const Size(412, 900),
-      );
-      final container = ProviderScope.containerOf(t.element(find.byType(QuestionTile)));
-      await t.longPress(find.byType(QuestionTile));
+    for (final size in [const Size(1250, 800), const Size(412, 900)]) {
+      testWidgets('kart: uzun basış SEÇİM başlatır (menü açmaz), ⋮ ile Seç de seçer (${size.width.toInt()} dp)', (t) async {
+        await pump(
+          t,
+          (c) => Scaffold(body: SizedBox(width: 200, height: 260, child: QuestionTile(card: c.first))),
+          [_card('p1', pdf: true)],
+          size: size,
+        );
+        final container = ProviderScope.containerOf(t.element(find.byType(QuestionTile)));
+        await t.longPress(find.byType(QuestionTile));
+        await settle(t);
+        expect(container.read(questionSelectionProvider), {'p1'});
+        expect(find.text('Sil'), findsNothing, reason: 'menü açılmamalı');
+        container.read(questionSelectionProvider.notifier).clear();
+        await settle(t);
+        expect(find.byTooltip('Soru işlemleri'), findsOneWidget);
+        await t.tap(find.byTooltip('Soru işlemleri'));
+        await settle(t);
+        await t.pump(const Duration(milliseconds: 500));
+        await t.tap(find.byKey(const Key('menu-select')));
+        await settle(t);
+        expect(container.read(questionSelectionProvider), {'p1'});
+        await close(t);
+      });
+    }
+
+    testWidgets('görüntüleyici: kart başka yerde silinince eski kopya gösterilmez', (t) async {
+      await pump(t, (c) => QuestionViewerScreen(cards: c, initialIndex: 0), [_card('p1', image: 'x.png'), _card('p2', image: 'y.png')],
+          size: const Size(412, 900));
+      expect(find.text('1 / 2'), findsOneWidget);
+      final container = ProviderScope.containerOf(t.element(find.byType(QuestionViewerScreen)));
+      await t.runAsync(() => container.read(deleteQuestionCardProvider).call('p1'));
       await settle(t);
-      expect(container.read(questionSelectionProvider), isEmpty);
-      await t.tap(find.byKey(const Key('menu-select')));
       await settle(t);
-      expect(container.read(questionSelectionProvider), {'p1'});
+      expect(find.text('1 / 1'), findsOneWidget);
+      expect(find.text('2 / 2'), findsNothing);
+      await close(t);
+    });
+
+    testWidgets('görüntüleyici: silinen kart seçimden çıkar', (t) async {
+      await pump(t, (c) => QuestionViewerScreen(cards: c, initialIndex: 0), [_card('p1', image: 'x.png'), _card('p2', image: 'y.png')],
+          size: const Size(1250, 800));
+      final container = ProviderScope.containerOf(t.element(find.byType(QuestionViewerScreen)));
+      container.read(questionSelectionProvider.notifier).selectAll(['p1', 'p2']);
+      await settle(t);
+      await t.tap(find.byKey(const Key('viewer-delete')));
+      await settle(t);
+      await t.tap(find.descendant(of: find.byType(AlertDialog), matching: find.text('Sil')));
+      await settle(t);
+      await settle(t);
+      expect(container.read(questionSelectionProvider), {'p2'});
       await close(t);
     });
   });

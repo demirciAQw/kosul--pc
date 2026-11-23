@@ -72,7 +72,7 @@ class PdfDocumentRepository {
   /// Belgeyi kitaba bağlar; [bookId] null ise bağı kaldırır. Bulunamazsa false.
   Future<bool> linkBook(String id, String? bookId) => _update(id, PdfDocumentsCompanion(bookId: Value(bookId)));
 
-  /// Kitap sayfa no = pdf sayfa no (1'den) + [offset]. Negatif olabilir
+  /// `bookPageOf = pdfIndex + 1 + offset` (pdfIndex 0 tabanlı). Negatif olabilir
   /// (PDF'te kapak/içindekiler kitapta numarasızsa).
   Future<bool> setOffset(String id, int offset) => _update(id, PdfDocumentsCompanion(pageOffset: Value(offset)));
 

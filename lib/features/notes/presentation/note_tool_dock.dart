@@ -1204,7 +1204,11 @@ class PageStyleControl {
     required this.onTemplateAll,
     required this.onBackground,
     required this.onSpacing,
+    this.onTranscribe,
   });
+
+  /// "Sayfayı metne çevir" (el yazısı tanıma); null ise düğme gösterilmez.
+  final VoidCallback? onTranscribe;
 
   final PageTemplate template;
   final int background;
@@ -1326,6 +1330,15 @@ class _PageStylePanelState extends State<PageStylePanel> {
               ),
           ],
         ),
+        if (c.onTranscribe != null) ...[
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            key: const Key('note-transcribe-dock'),
+            onPressed: c.onTranscribe,
+            icon: const Icon(Icons.text_fields_rounded),
+            label: const Text('Sayfayı metne çevir'),
+          ),
+        ],
       ],
     );
   }

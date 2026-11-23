@@ -15,6 +15,9 @@ abstract final class AppRoutes {
   static const pdfLibrary = '/pdf';
   static const notebooks = '/defter';
   static String inkNotebook(String id) => '/defter/$id';
+
+  /// Defteri belirli sayfada aç (el yazısı metin araması).
+  static String inkNotebookAt(String id, String pageId) => '/defter/$id?sayfa=${Uri.encodeQueryComponent(pageId)}';
   static String pdfReader(String id) => '/pdf/$id';
 
   /// Soru kartından PDF'e: sayfa (0'dan) ve kutu `sol,üst,sağ,alt` (sayfa birimi).

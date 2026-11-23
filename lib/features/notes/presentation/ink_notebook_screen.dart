@@ -6,6 +6,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/tablet.dart';
+import '../../handwriting/handwriting_providers.dart';
+import '../../handwriting/presentation/notebook_text_screen.dart';
+import '../../handwriting/presentation/page_text_sheet.dart';
 import '../../ink/data/ink_outline.dart';
 import '../../ink/domain/ink_models.dart';
 import '../../ink/domain/ink_stroke_record.dart';
@@ -29,8 +32,12 @@ class InkNotebookScreen extends ConsumerStatefulWidget {
     super.key,
     required this.notebookId,
     this.stylusOnlyOverride,
+    this.initialPageId,
   });
   final String notebookId;
+
+  /// Açılışta gösterilecek sayfa (el yazısı metin araması); geçersizse ilk sayfa.
+  final String? initialPageId;
 
   /// Testte: parmak/fare davranışını sabitlemek için.
   final bool? stylusOnlyOverride;
@@ -108,9 +115,13 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
 
   Future<void> _open() async {
     try {
-      final id = await ref
-          .read(inkNotebookRepositoryProvider)
-          .ensureVisiblePage(widget.notebookId);
+      final repo = ref.read(inkNotebookRepositoryProvider);
+      var id = await repo.ensureVisiblePage(widget.notebookId);
+      final want = widget.initialPageId;
+      if (want != null) {
+        final p = await repo.findPage(want);
+        if (p != null && !p.deleted && p.notebookId == widget.notebookId) id = want;
+      }
       if (mounted) setState(() => _pageId = id);
     } catch (e) {
       if (mounted) setState(() => _openError = e);
@@ -380,6 +391,9 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
               'size' => _pageSize(current!),
               'tags' => _tagsPanel(current),
               'strip' => setState(() => _strip = !_strip),
+              'totext' => _pageToText(current!),
+              'seltext' => _selectionToText(current!),
+              'nbtext' => _notebookText(),
               _ => null,
             },
             itemBuilder: (_) => [
@@ -400,6 +414,28 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
                   child: Text(_strip ? 'Sayfa şeridini gizle' : 'Sayfa şeridini göster'),
                 ),
               ],
+              const PopupMenuDivider(),
+              PopupMenuItem(
+                value: 'totext',
+                key: const Key('note-page-totext'),
+                child: Text(
+                  ref.read(handwritingAvailableProvider)
+                      ? 'Sayfayı metne çevir'
+                      : 'Sayfa metnini göster',
+                ),
+              ),
+              if (ref.read(handwritingAvailableProvider) &&
+                  (_editorKey.currentState?.session.hasSelection ?? false))
+                const PopupMenuItem(
+                  value: 'seltext',
+                  key: Key('note-sel-totext'),
+                  child: Text('Seçimi metne çevir'),
+                ),
+              const PopupMenuItem(
+                value: 'nbtext',
+                key: Key('note-nb-text'),
+                child: Text('Defterin metin kopyası'),
+              ),
               const PopupMenuDivider(),
               const PopupMenuItem(
                 value: 'add',
@@ -454,6 +490,7 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
                     if (showStrip)
                       _PageStrip(
                         pages: shown,
+                        withText: ref.watch(pageTextsProvider).value?.keys.toSet() ?? const {},
                         currentId: current!.id,
                         onTap: (p) => setState(() => _pageId = p.id),
                         onAdd: () => _add(pages, afterCurrent: false),
@@ -467,6 +504,7 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
                         tools: _tools,
                         stylusOnlyOverride: widget.stylusOnlyOverride,
                         onGrow: (h) => _repo.setPageSize(current!.id, current.width, h),
+                        onTranscribe: () => _pageToText(current!),
                         spacing: _spacing,
                         onSpacing: (f) => setState(() => _spacing = f),
                         onBackground: (c) =>
@@ -485,6 +523,34 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
                 );
               },
             ),
+    );
+  }
+
+  /// Sayfayı metne çevir (kayıtlı metin varsa önce onu gösterir).
+  Future<void> _pageToText(InkNotePageRecord p) async {
+    await _editorKey.currentState?.flush(); // bekleyen çizgiler kayda geçsin
+    if (!mounted) return;
+    await showPageTextSheet(context, page: p);
+  }
+
+  /// Kement seçimini metne çevir (kaydedilmez; kopyalanır).
+  Future<void> _selectionToText(InkNotePageRecord p) async {
+    final session = _editorKey.currentState?.session;
+    if (session == null || !session.hasSelection) {
+      _msg('Önce kement ile çizgi seç.');
+      return;
+    }
+    final ids = {for (final o in session.selectionOriginals) o.id};
+    await _editorKey.currentState?.flush();
+    if (!mounted) return;
+    await showPageTextSheet(context, page: p, selectedIds: ids);
+  }
+
+  Future<void> _notebookText() async {
+    await _editorKey.currentState?.flush();
+    if (!mounted) return;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(builder: (_) => NotebookTextScreen(notebookId: widget.notebookId)),
     );
   }
 
@@ -671,8 +737,12 @@ class _PageStrip extends StatelessWidget {
     required this.onTap,
     required this.onAdd,
     required this.onReorder,
+    this.withText = const {},
   });
   final List<InkNotePageRecord> pages;
+
+  /// Kayıtlı el yazısı metni olan sayfalar ("Aa" rozeti).
+  final Set<String> withText;
   final String currentId;
   final ValueChanged<InkNotePageRecord> onTap;
   final VoidCallback onAdd;
@@ -700,22 +770,43 @@ class _PageStrip extends StatelessWidget {
                     padding: const EdgeInsets.all(6),
                     child: Column(
                       children: [
-                        Container(
-                          key: Key('note-thumb-${p.id}'),
-                          decoration: BoxDecoration(
-                            border: Border.all(
-                              color: p.id == currentId
-                                  ? cs.primary
-                                  : cs.outlineVariant,
-                              width: 2,
+                        Stack(
+                          children: [
+                            Container(
+                              key: Key('note-thumb-${p.id}'),
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                  color: p.id == currentId
+                                      ? cs.primary
+                                      : cs.outlineVariant,
+                                  width: 2,
+                                ),
+                              ),
+                              child: AspectRatio(
+                                // Sonsuz sayfada yalnız üst kısım (A4 oranında) görünür.
+                                aspectRatio: p.width /
+                                    (isInfinitePage(p.height) ? a4PageHeight : p.height),
+                                child: _PageThumb(page: p),
+                              ),
                             ),
-                          ),
-                          child: AspectRatio(
-                            // Sonsuz sayfada yalnız üst kısım (A4 oranında) görünür.
-                            aspectRatio: p.width /
-                                (isInfinitePage(p.height) ? a4PageHeight : p.height),
-                            child: _PageThumb(page: p),
-                          ),
+                            if (withText.contains(p.id))
+                              Positioned(
+                                right: 2,
+                                top: 2,
+                                child: Container(
+                                  key: Key('note-thumb-text-${p.id}'),
+                                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                  decoration: BoxDecoration(
+                                    color: cs.primaryContainer,
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    'Aa',
+                                    style: Theme.of(context).textTheme.labelSmall,
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
                         Text(
                           '${i + 1}',

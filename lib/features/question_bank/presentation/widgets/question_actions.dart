@@ -74,6 +74,10 @@ Future<bool> confirmDeleteQuestion(BuildContext context, WidgetRef ref, Question
   );
   if (ok != true) return false;
   await ref.read(deleteQuestionCardProvider).call(card.id);
+  // Silinen kart seçimde kalmasın ("n soru seçili" ve toplu eylem yanlış sayar).
+  if (ref.read(questionSelectionProvider).contains(card.id)) {
+    ref.read(questionSelectionProvider.notifier).toggle(card.id);
+  }
   return true;
 }
 

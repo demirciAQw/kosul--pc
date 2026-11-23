@@ -1,7 +1,7 @@
 name: kocum
 description: "Koçum: YKS öğrencileri için tamamen çevrimdışı çalışma, süre ve hata analizi takipçisi."
 publish_to: 'none'
-version: 9.18.0+78
+version: 9.19.0+79
 
 environment:
   sdk: ^3.14.0
@@ -45,6 +45,9 @@ dependencies:
   flutter_local_notifications: ^19.0.0
   # Fotoğraftaki metni telefonda okuma (Latin modeli gömülü, internetsiz)
   google_mlkit_text_recognition: ^0.15.0
+  # El yazısı tanıma (kalem çizgileri -> metin). MIT. Türkçe model ilk kullanımda
+  # indirilir (~20 MB), APK'ya gömülmez. Yalnız Android; masaüstünde çağrılmaz.
+  google_mlkit_digital_ink_recognition: ^0.14.0
   # Zamanlanmış hatırlatıcılar için (flutter_local_notifications da bunu kullanır)
   timezone: any
 

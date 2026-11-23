@@ -84,4 +84,27 @@ void main() {
     expect(t.takeException(), isNull);
     expect(find.textContaining('%0'), findsOneWidget);
   });
+
+  testWidgets('raf tembel kurulur: uzun listede yalnız görünen satırlar; başlık ilk öğe', (t) async {
+    final items = [for (var i = 0; i < 200; i++) _p(_book('k$i', 'Kitap $i'))];
+    t.view.physicalSize = const Size(412, 900);
+    t.view.devicePixelRatio = 1;
+    addTearDown(t.view.reset);
+    await t.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: ShelfLayout<BookProgress>(
+          items: items,
+          header: const Text('BASLIK', key: Key('hdr')),
+          itemBuilder: (_, p) => Text(p.book.title),
+        ),
+      ),
+    ));
+    expect(find.byKey(const Key('hdr')), findsOneWidget);
+    expect(find.text('Kitap 0'), findsOneWidget);
+    expect(find.text('Kitap 199'), findsNothing); // ekran dışı: kurulmadı
+    expect(find.byType(ListView), findsOneWidget);
+    await t.scrollUntilVisible(find.text('Kitap 199'), 500, scrollable: find.byType(Scrollable));
+    expect(find.text('Kitap 199'), findsOneWidget);
+    expect(find.byKey(const Key('hdr')), findsNothing);
+  });
 }

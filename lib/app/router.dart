@@ -251,7 +251,10 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/defter/:id',
         builder: (context, state) => TabletFrame(
           selected: RailItem.defterler,
-          child: InkNotebookScreen(notebookId: state.pathParameters['id']!),
+          child: InkNotebookScreen(
+            notebookId: state.pathParameters['id']!,
+            initialPageId: state.uri.queryParameters['sayfa'],
+          ),
         ),
       ),
       GoRoute(

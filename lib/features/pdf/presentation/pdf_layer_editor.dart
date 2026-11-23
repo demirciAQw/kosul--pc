@@ -53,7 +53,10 @@ class _PdfLayerEditorPageState extends State<PdfLayerEditorPage> {
   bool _saving = false;
   bool _disposed = false;
   int _gen = 0;
+  int _loadId = 0;
   Timer? _debounce;
+  late int _page = widget.page; // önizlenen sayfa ("Tüm sayfalar"da değiştirilebilir)
+  int? _pageCount;
 
   WatermarkParams _wm = const WatermarkParams();
   CoverParams _cover = const CoverParams(color: 0xFFFFFFFF, opacity: 1);
@@ -80,7 +83,7 @@ class _PdfLayerEditorPageState extends State<PdfLayerEditorPage> {
       _cover = ex.cover;
     } else if (widget.kind == PdfLayerKind.watermark) {
       // İkinci katman için farklı bir başlangıç tonu; kullanıcı ayarlar ya da otomatik tespit eder.
-      final n = widget.hub.listFor(widget.page).where((l) => l.kind == PdfLayerKind.watermark).length;
+      final n = widget.hub.listFor(_page).where((l) => l.kind == PdfLayerKind.watermark).length;
       if (n > 0) _wm = const WatermarkParams(tone: 185, toneRange: 25);
     } else {
       _cover = const CoverParams(color: 0xFFFFFFFF, opacity: 1);
@@ -103,7 +106,7 @@ class _PdfLayerEditorPageState extends State<PdfLayerEditorPage> {
   List<PdfPageLayer> _below() {
     final ex = _ex;
     return [
-      for (final l in widget.hub.visibleFor(widget.page))
+      for (final l in widget.hub.visibleFor(_page))
         if (ex == null || (l.id != ex.id && l.z < ex.z)) l,
     ];
   }
@@ -114,14 +117,26 @@ class _PdfLayerEditorPageState extends State<PdfLayerEditorPage> {
     return c.future;
   }
 
+  /// Kapsam birden çok sayfayı kapsıyor mu ("Tüm sayfalar" / "Bölge, tüm sayfalar").
+  bool get _multiPage => widget.allPages || (_ex?.isAllPages ?? false);
+
   Future<void> _load() async {
+    final id = ++_loadId;
     setState(() => _busy = true);
     try {
-      final raw = await widget.hub.renderer.renderRaw(widget.page, box: _box, widthPx: widget.previewWidth);
+      if (_multiPage && _pageCount == null) {
+        try {
+          final n = await widget.hub.renderer.pageCount();
+          if (!_disposed) setState(() => _pageCount = n);
+        } catch (_) {
+          // sayfa sayısı bilinmezse uyarı sayısız gösterilir
+        }
+      }
+      final raw = await widget.hub.renderer.renderRaw(_page, box: _box, widthPx: widget.previewWidth);
       final base = await applyLayersInIsolate(raw.bytes, raw.width, raw.height, raw.pxPerUnit, raw.pxPerUnit, _below(),
           originX: raw.box.left, originY: raw.box.top, order: raw.order);
       final before = await _decode(base, raw.width, raw.height, raw.order);
-      if (_disposed) {
+      if (_disposed || id != _loadId) {
         before.dispose();
         return;
       }
@@ -132,16 +147,95 @@ class _PdfLayerEditorPageState extends State<PdfLayerEditorPage> {
       });
       await _recompute();
     } catch (e) {
-      if (mounted) setState(() => _error = 'Sayfa çizilemedi: $e');
+      if (mounted && id == _loadId) setState(() => _error = 'Sayfa çizilemedi: $e');
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted && id == _loadId) setState(() => _busy = false);
     }
+  }
+
+  /// "Tüm sayfalar" kapsamında başka bir sayfada önizle (kayıt kapsamı değişmez).
+  void _previewPage(int n) {
+    final max = (_pageCount ?? n + 1) - 1;
+    final target = n.clamp(0, max < 0 ? 0 : max);
+    if (target == _page) return;
+    setState(() {
+      _page = target;
+      _error = null;
+    });
+    unawaited(_load());
+  }
+
+  Future<void> _askPage() async {
+    final ctrl = TextEditingController(text: '${_page + 1}');
+    final v = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Başka sayfada önizle'),
+        content: TextField(
+          key: const Key('layer-preview-page-field'),
+          controller: ctrl,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          decoration: InputDecoration(helperText: _pageCount == null ? null : '1 ile $_pageCount arası'),
+          onSubmitted: (t) => Navigator.pop(ctx, int.tryParse(t.trim())),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Vazgeç')),
+          FilledButton(
+            key: const Key('layer-preview-page-ok'),
+            onPressed: () => Navigator.pop(ctx, int.tryParse(ctrl.text.trim())),
+            child: const Text('Göster'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (v != null && mounted) _previewPage(v - 1);
+  }
+
+  Widget _multiPageBar(BuildContext context) {
+    final n = _pageCount;
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      key: const Key('layer-all-warning'),
+      color: cs.secondaryContainer,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      child: Row(
+        children: [
+          Icon(Icons.info_outline, size: 18, color: cs.onSecondaryContainer),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '${n == null ? 'Tüm' : '$n'} sayfada uygulanır; önizleme yalnız bu sayfada. '
+              'Harita/grafik sayfalarını kontrol et.',
+              style: TextStyle(color: cs.onSecondaryContainer, fontSize: 12.5),
+            ),
+          ),
+          IconButton(
+            key: const Key('layer-preview-prev'),
+            tooltip: 'Önceki sayfa',
+            visualDensity: VisualDensity.compact,
+            onPressed: _page > 0 ? () => _previewPage(_page - 1) : null,
+            icon: const Icon(Icons.chevron_left),
+          ),
+          Text('${_page + 1}${n == null ? '' : ' / $n'}', key: const Key('layer-preview-page')),
+          IconButton(
+            key: const Key('layer-preview-next'),
+            tooltip: 'Sonraki sayfa',
+            visualDensity: VisualDensity.compact,
+            onPressed: n == null || _page + 1 < n ? () => _previewPage(_page + 1) : null,
+            icon: const Icon(Icons.chevron_right),
+          ),
+          TextButton(key: const Key('layer-preview-other'), onPressed: _askPage, child: const Text('Başka sayfada önizle')),
+        ],
+      ),
+    );
   }
 
   PdfPageLayer _candidate() => PdfPageLayer(
         id: 'onizleme',
         documentId: widget.hub.documentId,
-        page: widget.page,
+        page: _page,
         kind: widget.kind,
         // Önizleme zaten bölgeye kırpılmış: kutu verilmez (tüm piksel).
         params: widget.kind == PdfLayerKind.watermark ? _wm.toJson() : _cover.toJson(),
@@ -229,6 +323,7 @@ class _PdfLayerEditorPageState extends State<PdfLayerEditorPage> {
       ),
       body: Column(
         children: [
+          if (_multiPage) _multiPageBar(context),
           Expanded(
             child: Container(
               color: Theme.of(context).colorScheme.surfaceContainerHighest,

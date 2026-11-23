@@ -1,9 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/database/app_database.dart';
 import '../../../core/di/core_providers.dart';
 import '../../../core/text/turkish_text.dart';
+import '../../../core/utils/id_generator.dart';
+import '../../library/domain/book_template_usecases.dart';
 import '../../library/domain/library.dart';
 import '../../library/library_providers.dart';
 import '../../library/presentation/library_sheet.dart' show BundledTemplate, bundledTemplatesProvider;
@@ -12,30 +17,124 @@ import '../../ocr/domain/auto_tags.dart';
 import '../domain/book_autofill.dart';
 import '../domain/pdf_document_record.dart';
 import '../domain/pdf_import_rules.dart';
+import '../data/pdf_document_repository.dart';
+import '../data/pdf_import_service.dart' show PdfImportService;
 import '../pdf_providers.dart';
 import 'pdf_book_form_page.dart';
 
 /// Şablon dosyasını okur (testte değiştirilir).
 final templateAssetLoaderProvider = Provider<Future<String> Function(String asset)>((ref) => rootBundle.loadString);
 
+/// Kitap + bağ + ofset TEK işlemde: ortada hata olursa üçü de geri alınır
+/// (yetim kitap kalmaz). [createBook] yeni kitabı yazıp kimliğini döndürür
+/// (var olan kitaba bağlanıyorsa null). Belge satırı yoksa [StateError].
+Future<String> commitPdfBook({
+  required AppDatabase db,
+  required PdfDocumentRepository pdfs,
+  required String docId,
+  required int pageOffset,
+  String? existingBookId,
+  Future<String> Function()? createBook,
+}) {
+  return db.transaction(() async {
+    final bookId = existingBookId ?? await createBook!();
+    if (!await pdfs.linkBook(docId, bookId)) throw StateError('PDF kaydı bulunamadı');
+    if (!await pdfs.setOffset(docId, pageOffset)) throw StateError('PDF kaydı bulunamadı');
+    return bookId;
+  });
+}
+
 /// PDF'i kitap olarak ekler: formu uygulama doldurur, kullanıcı eksikleri
 /// tamamlar. Kayıtta kitap oluşur, `bookId` ve `pageOffset` yazılır.
 /// Kitap bağlandıysa true.
 Future<bool> addPdfAsBook(BuildContext context, WidgetRef ref, PdfDocumentRecord doc) async {
+  // Form sayfayı kapatabilir: tüm bağımlılıklar İLK await'ten önce okunur,
+  // sonrasında `ref` kullanılmaz.
   final messenger = ScaffoldMessenger.of(context);
   final navigator = Navigator.of(context);
-  final svc = await ref.read(pdfImportServiceProvider.future);
-  final text = await svc.sampleText(doc);
-  TopicLexicon? lexicon;
-  try {
-    lexicon = await ref.read(topicLexiconProvider.future);
-  } catch (_) {}
-  var templates = const <BundledTemplate>[];
-  try {
-    templates = await ref.read(bundledTemplatesProvider.future);
-  } catch (_) {}
+  final svcFuture = ref.read(pdfImportServiceProvider.future);
+  final lexiconFuture = ref.read(topicLexiconProvider.future).then<TopicLexicon?>((v) => v, onError: (_) => null);
+  final templatesFuture = ref
+      .read(bundledTemplatesProvider.future)
+      .then<List<BundledTemplate>>((v) => v, onError: (_) => const <BundledTemplate>[]);
   final books = ref.read(libraryProvider).value ?? const <Book>[];
-  final candidates = await ref.read(pdfDocumentRepositoryProvider).bookCandidates();
+  final pdfs = ref.read(pdfDocumentRepositoryProvider);
+  final db = ref.read(appDatabaseProvider);
+  final library = ref.read(libraryRepositoryProvider);
+  final importTemplate = ref.read(importBookTemplateProvider);
+  final loadTemplate = ref.read(templateAssetLoaderProvider);
+  final ids = ref.read(idGeneratorProvider);
+  final now = ref.read(clockProvider);
+
+  // İkinci dokunuş ikinci form/kitap açmasın; hazırlık sürerken yükleniyor göstergesi.
+  if (_addBookRunning[navigator] == true) return false;
+  _addBookRunning[navigator] = true;
+  try {
+    return await _addPdfAsBook(
+      context: context,
+      doc: doc,
+      messenger: messenger,
+      navigator: navigator,
+      svcFuture: svcFuture,
+      lexiconFuture: lexiconFuture,
+      templatesFuture: templatesFuture,
+      books: books,
+      pdfs: pdfs,
+      db: db,
+      library: library,
+      importTemplate: importTemplate,
+      loadTemplate: loadTemplate,
+      ids: ids,
+      now: now,
+    );
+  } finally {
+    _addBookRunning[navigator] = false;
+  }
+}
+
+/// Gezgin başına (ağaçlar arasında sızmaz).
+final _addBookRunning = Expando<bool>('addPdfAsBook');
+
+Future<bool> _addPdfAsBook({
+  required BuildContext context,
+  required PdfDocumentRecord doc,
+  required ScaffoldMessengerState messenger,
+  required NavigatorState navigator,
+  required Future<PdfImportService> svcFuture,
+  required Future<TopicLexicon?> lexiconFuture,
+  required Future<List<BundledTemplate>> templatesFuture,
+  required List<Book> books,
+  required PdfDocumentRepository pdfs,
+  required AppDatabase db,
+  required LibraryRepository library,
+  required ImportBookTemplate importTemplate,
+  required Future<String> Function(String asset) loadTemplate,
+  required IdGenerator ids,
+  required DateTime Function() now,
+}) async {
+  // Yükleniyor göstergesi (kapatılamaz; ikinci dokunuşu da keser).
+  unawaited(showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    useRootNavigator: false,
+    builder: (_) => const PopScope(
+      canPop: false,
+      child: Center(child: CircularProgressIndicator(key: Key('pdf-book-loading'))),
+    ),
+  ));
+  final TopicLexicon? lexicon;
+  final List<BundledTemplate> templates;
+  final String text;
+  final List<BookCandidate> candidates;
+  try {
+    final svc = await svcFuture;
+    text = await svc.sampleText(doc);
+    lexicon = await lexiconFuture;
+    templates = await templatesFuture;
+    candidates = await pdfs.bookCandidates();
+  } finally {
+    if (navigator.mounted) navigator.pop(); // göstergeyi kapat
+  }
   if (!context.mounted) return false;
 
   // doc.title: kullanıcının içe aktarma penceresinde onayladığı başlık.
@@ -66,26 +165,22 @@ Future<bool> addPdfAsBook(BuildContext context, WidgetRef ref, PdfDocumentRecord
   );
   if (res == null) return false;
 
-  final String bookId;
-  if (res.existingBookId != null) {
-    bookId = res.existingBookId!;
-  } else if (res.template != null) {
-    final t = res.template!;
-    final same = books.where((b) => b.title == t.title).firstOrNull;
-    if (same != null) {
-      bookId = same.id;
-    } else {
-      try {
-        final raw = await ref.read(templateAssetLoaderProvider)(t.asset);
-        bookId = (await ref.read(importBookTemplateProvider).call(raw)).book.id;
-      } on BookTemplateException catch (e) {
-        messenger.showSnackBar(SnackBar(content: Text('Kitap eklenemedi: ${e.message}')));
-        return false;
+  try {
+    Future<String> Function()? create;
+    String? existingId = res.existingBookId;
+    if (existingId == null && res.template != null) {
+      final t = res.template!;
+      final same = books.where((b) => b.title == t.title).firstOrNull;
+      if (same != null) {
+        existingId = same.id;
+      } else {
+        final raw = await loadTemplate(t.asset); // işlemden önce: G/Ç işlemi tutmasın
+        create = () async => (await importTemplate.call(raw)).book.id;
       }
-    }
-  } else {
-    bookId = ref.read(idGeneratorProvider).next();
-    await ref.read(libraryRepositoryProvider).save(
+    } else if (existingId == null) {
+      final bookId = ids.next();
+      create = () async {
+        await library.save(
           Book(
             id: bookId,
             title: res.title!,
@@ -94,13 +189,27 @@ Future<bool> addPdfAsBook(BuildContext context, WidgetRef ref, PdfDocumentRecord
             subject: res.subject!,
             pageCount: res.pageCount!,
             avgQuestionsPerPage: 0.5,
-            createdAt: ref.read(clockProvider)(),
+            createdAt: now(),
           ),
         );
+        return bookId;
+      };
+    }
+    await commitPdfBook(
+      db: db,
+      pdfs: pdfs,
+      docId: doc.id,
+      pageOffset: res.pageOffset,
+      existingBookId: existingId,
+      createBook: create,
+    );
+  } on BookTemplateException catch (e) {
+    messenger.showSnackBar(SnackBar(content: Text('Kitap eklenemedi: ${e.message}')));
+    return false;
+  } catch (e) {
+    messenger.showSnackBar(SnackBar(content: Text('Kitap eklenemedi: $e')));
+    return false;
   }
-  final repo = ref.read(pdfDocumentRepositoryProvider);
-  await repo.linkBook(doc.id, bookId);
-  await repo.setOffset(doc.id, res.pageOffset);
   messenger
     ..hideCurrentSnackBar()
     ..showSnackBar(SnackBar(content: Text('"${res.title ?? doc.title}" kitap olarak eklendi.')));
