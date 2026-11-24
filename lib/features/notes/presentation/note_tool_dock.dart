@@ -8,6 +8,7 @@ import '../../ink/domain/pen_profiles.dart';
 import '../../ink/domain/shape_recognizer.dart';
 import '../../pdf/presentation/pdf_ink_session.dart';
 import '../domain/page_template.dart';
+import 'dock_placement.dart';
 import 'note_tool_settings.dart';
 import 'page_template_painter.dart';
 
@@ -119,9 +120,22 @@ class NoteToolDock extends StatelessWidget {
     this.axis,
     this.selecting = false,
     this.onSelect,
+    this.dockDrag,
+    this.itemTools = false,
+    this.onPhoto,
   });
 
   final NoteToolSettings tools;
+
+  /// Konum düğmesini basılı tutup sürükleme (serbest konum); null ise eski davranış:
+  /// bırakılan noktaya en yakın kenara taşınır (PDF okuyucu).
+  final DockDragHandler? dockDrag;
+
+  /// Metin / Foto / Alt sayfa düğmeleri (yalnız defter editörü).
+  final bool itemTools;
+
+  /// "Foto" eylemi (kaynak seçici açar); [itemTools] ile birlikte.
+  final VoidCallback? onPhoto;
 
   /// Yuvanın yönü; null ise `tools.dockPosition` (sol/sağ dikey, üst/alt yatay).
   final Axis? axis;
@@ -149,12 +163,7 @@ class NoteToolDock extends StatelessWidget {
       builder: (context, _) {
         final t = tools;
         final pos = t.dockPosition;
-        final vertical =
-            (axis ??
-                (pos == DockPosition.left || pos == DockPosition.right
-                    ? Axis.vertical
-                    : Axis.horizontal)) ==
-            Axis.vertical;
+        final vertical = (axis ?? t.dockAxis) == Axis.vertical;
         final actions = t.lasso && session != null
             ? _LassoActions(
                 tools: t,
@@ -173,6 +182,9 @@ class NoteToolDock extends StatelessWidget {
           vertical: vertical,
           selecting: selecting,
           onSelect: onSelect,
+          dockDrag: dockDrag,
+          itemTools: itemTools,
+          onPhoto: onPhoto,
         );
         if (vertical) {
           final inner =
@@ -221,7 +233,13 @@ class _DockBar extends StatelessWidget {
     required this.vertical,
     required this.selecting,
     required this.onSelect,
+    required this.dockDrag,
+    required this.itemTools,
+    required this.onPhoto,
   });
+  final DockDragHandler? dockDrag;
+  final bool itemTools;
+  final VoidCallback? onPhoto;
   final NoteToolSettings tools;
   final PdfInkSession? session;
   final PageStyleControl? page;
@@ -236,7 +254,12 @@ class _DockBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = tools;
     final cs = Theme.of(context).colorScheme;
-    final free = !selecting && !t.eraser && !t.lasso && t.shapeTool == null;
+    final free =
+        !selecting &&
+        !t.eraser &&
+        !t.lasso &&
+        t.shapeTool == null &&
+        t.itemTool == ItemTool.none;
     final penActive = free && t.kind != PenKind.highlighter;
     final hlActive = free && t.kind == PenKind.highlighter;
     final kind = t.lastPenKind;
@@ -361,6 +384,35 @@ class _DockBar extends StatelessWidget {
           size: size,
           onTap: (_) => onSelect!(),
         ),
+      if (itemTools) ...[
+        _DockButton(
+          key: const Key('note-tool-text'),
+          icon: Icons.text_fields,
+          tooltip: 'Metin kutusu (sayfaya dokun, yaz)',
+          selected: !selecting && t.itemTool == ItemTool.text,
+          size: size,
+          onTap: (_) => t.itemTool == ItemTool.text
+              ? t.setKind(kind)
+              : pick(() => t.setItemTool(ItemTool.text)),
+        ),
+        _DockButton(
+          key: const Key('note-tool-photo'),
+          icon: Icons.add_photo_alternate_outlined,
+          tooltip: 'Fotoğraf ekle',
+          size: size,
+          onTap: onPhoto == null ? null : (_) => pick(onPhoto!),
+        ),
+        _DockButton(
+          key: const Key('note-tool-child'),
+          icon: Icons.subdirectory_arrow_right,
+          tooltip: 'Alt sayfa (sayfada istediğin yere)',
+          selected: !selecting && t.itemTool == ItemTool.child,
+          size: size,
+          onTap: (_) => t.itemTool == ItemTool.child
+              ? t.setKind(kind)
+              : pick(() => t.setItemTool(ItemTool.child)),
+        ),
+      ],
       if (!vertical) gap,
       if (!vertical)
         history(
@@ -387,9 +439,22 @@ class _DockBar extends StatelessWidget {
         ),
       // Odak modunda ([small]) Konum düğmesi kaydırılan listenin DIŞINDA sabit
       // durur: yuva küçülse de taşıma her zaman erişilebilir.
-      if (!small) _PositionButton(tools: t, size: size, vertical: vertical),
+      if (!small)
+        _PositionButton(
+          tools: t,
+          size: size,
+          vertical: vertical,
+          dockDrag: dockDrag,
+        ),
     ];
-    final pinned = small ? _PositionButton(tools: t, size: size, vertical: vertical) : null;
+    final pinned = small
+        ? _PositionButton(
+            tools: t,
+            size: size,
+            vertical: vertical,
+            dockDrag: dockDrag,
+          )
+        : null;
 
     Widget content;
     final screen = MediaQuery.sizeOf(context);
@@ -546,42 +611,54 @@ class _NoListenable implements Listenable {
   void removeListener(VoidCallback listener) {}
 }
 
-/// "Konum": dokununca dört yönlü küçük menü; basılı tutup sürükleyince bırakılan
-/// noktaya en yakın kenara taşınır.
+/// "Konum": dokununca küçük menü (kenar / serbest / yön); basılı tutup sürükleyince
+/// ([dockDrag] varsa) yuva parmağı izler, bırakılınca serbest durur ya da kenara
+/// yaklaşmışsa yapışır; [dockDrag] yoksa bırakılan noktaya en yakın kenara taşınır.
 class _PositionButton extends StatelessWidget {
   const _PositionButton({
     required this.tools,
     required this.size,
     required this.vertical,
+    this.dockDrag,
   });
   final NoteToolSettings tools;
   final double size;
   final bool vertical;
+  final DockDragHandler? dockDrag;
 
   @override
   Widget build(BuildContext context) {
+    final h = dockDrag;
     return _DockButton(
       key: const Key('note-dock-move'),
       icon: Icons.open_with,
       tooltip: 'Yuva konumu (dokun: seç, basılı tut ve sürükle: taşı)',
       size: size,
-      // Düğmenin kendi uzun basışı (ipucununkini yener): bırakılan noktaya en yakın kenar.
-      onLongPressEnd: (p) => tools.setDockPosition(
-        nearestDockPosition(p, MediaQuery.sizeOf(context)),
-      ),
+      onLongPressStart: h?.start,
+      onLongPressMove: h?.update,
+      onLongPressCancel: h?.cancel,
+      // Düğmenin kendi uzun basışı (ipucununkini yener).
+      onLongPressEnd: h != null
+          ? h.end
+          : (p) => tools.setDockPosition(
+              nearestDockPosition(p, MediaQuery.sizeOf(context)),
+            ),
       onTap: (r) => showToolPopover(
         context,
         r,
         side: vertical,
-        builder: (_) => _PositionPanel(tools: tools),
+        builder: (_) => _PositionPanel(tools: tools, free: h != null),
       ),
     );
   }
 }
 
 class _PositionPanel extends StatelessWidget {
-  const _PositionPanel({required this.tools});
+  const _PositionPanel({required this.tools, this.free = false});
   final NoteToolSettings tools;
+
+  /// Serbest konum bu ekranda desteklenir (defter).
+  final bool free;
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -601,17 +678,71 @@ class _PositionPanel extends StatelessWidget {
                 key: Key('note-dock-pos-${p.name}'),
                 avatar: Icon(_positionInfo[p]!.$1, size: 18),
                 label: Text(_positionInfo[p]!.$2),
-                selected: tools.dockPosition == p,
+                selected: !tools.dockFree && tools.dockPosition == p,
                 onSelected: (_) {
                   tools.setDockPosition(p);
                   Navigator.pop(context);
                 },
               ),
+            if (free)
+              ChoiceChip(
+                key: const Key('note-dock-pos-free'),
+                avatar: const Icon(Icons.open_with, size: 18),
+                label: const Text('Serbest'),
+                selected: tools.dockFree,
+                onSelected: (_) {
+                  // Şu anki yerinde serbest kalır (yer değiştirmez).
+                  if (!tools.dockFree) tools.setDockFree(tools.dockFx, tools.dockFy);
+                  Navigator.pop(context);
+                },
+              ),
           ],
         ),
+        if (free && tools.dockFree) ...[
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              ChoiceChip(
+                key: const Key('note-dock-free-horizontal'),
+                avatar: const Icon(Icons.more_horiz, size: 18),
+                label: const Text('Yatay'),
+                selected: !tools.dockFreeVertical,
+                onSelected: (_) => tools.setDockFreeVertical(false),
+              ),
+              ChoiceChip(
+                key: const Key('note-dock-free-vertical'),
+                avatar: const Icon(Icons.more_vert, size: 18),
+                label: const Text('Dikey'),
+                selected: tools.dockFreeVertical,
+                onSelected: (_) => tools.setDockFreeVertical(true),
+              ),
+              ActionChip(
+                key: const Key('note-dock-snap'),
+                avatar: const Icon(Icons.vertical_align_bottom, size: 18),
+                label: const Text('Kenara yapıştır'),
+                onPressed: () {
+                  final a = MediaQuery.sizeOf(context);
+                  // Yuvanın oranı yerinden kabaca ekran noktası: en yakın kenar.
+                  tools.setDockPosition(
+                    nearestDockPosition(
+                      Offset(tools.dockFx * a.width, tools.dockFy * a.height),
+                      a,
+                    ),
+                  );
+                  Navigator.pop(context);
+                },
+              ),
+            ],
+          ),
+        ],
         const SizedBox(height: 4),
         Text(
-          'Konum düğmesini basılı tutup kenara sürükleyebilirsin.',
+          free
+              ? 'Konum düğmesini basılı tutup ekranın herhangi bir yerine sürükleyebilirsin; '
+                    'kenara yaklaştırınca yapışır.'
+              : 'Konum düğmesini basılı tutup kenara sürükleyebilirsin.',
           style: Theme.of(context).textTheme.bodySmall,
         ),
       ],
@@ -631,8 +762,14 @@ class _DockButton extends StatelessWidget {
     this.dot,
     this.label,
     this.onLongPressEnd,
+    this.onLongPressStart,
+    this.onLongPressMove,
+    this.onLongPressCancel,
   });
   final void Function(Offset global)? onLongPressEnd;
+  final void Function(Offset global)? onLongPressStart;
+  final void Function(Offset global)? onLongPressMove;
+  final VoidCallback? onLongPressCancel;
   final IconData icon;
   final String tooltip;
   final double size;
@@ -667,6 +804,13 @@ class _DockButton extends StatelessWidget {
                     onTap!(box.localToGlobal(Offset.zero) & box.size);
                   },
             child: GestureDetector(
+              onLongPressStart: onLongPressStart == null
+                  ? null
+                  : (d) => onLongPressStart!(d.globalPosition),
+              onLongPressMoveUpdate: onLongPressMove == null
+                  ? null
+                  : (d) => onLongPressMove!(d.globalPosition),
+              onLongPressCancel: onLongPressCancel,
               onLongPressEnd: onLongPressEnd == null
                   ? null
                   : (d) => onLongPressEnd!(d.globalPosition),

@@ -9,11 +9,16 @@ import '../../../core/text/turkish_text.dart';
 import '../../anlik/domain/tag_tree.dart';
 import '../../handwriting/data/page_text_repository.dart' show PageTextHit;
 import '../../handwriting/handwriting_providers.dart';
+import '../domain/ink_folder.dart';
 import '../domain/ink_notebook.dart';
 import '../domain/notebook_filter.dart';
 import '../domain/page_size.dart';
 import '../domain/page_template.dart';
 import '../notes_providers.dart';
+import 'by_konu_view.dart';
+import 'curriculum_notebook_dialog.dart';
+import 'folder_dialogs.dart';
+import 'folder_nav.dart';
 import 'ink_notebook_screen.dart' show PageSizePicker;
 import 'page_template_painter.dart';
 
@@ -27,6 +32,11 @@ const notebookCoverColors = <int>[
   0xFF8E24AA,
   0xFF5F6368,
 ];
+
+/// Silinmiş klasörler (Silinenler bölümü için).
+final inkDeletedFoldersProvider = StreamProvider.autoDispose<List<InkFolderRecord>>(
+  (ref) => ref.watch(inkFolderRepositoryProvider).watchFolders(includeDeleted: true).map((l) => [for (final f in l) if (f.deleted) f]),
+);
 
 /// Defterler listesi: yeni defter, yeniden adlandır, sırala, yumuşak sil (onaylı) ve geri al.
 class NotebooksScreen extends ConsumerStatefulWidget {
@@ -44,7 +54,11 @@ class NotebooksScreen extends ConsumerStatefulWidget {
 
 class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
   bool _showDeleted = false;
+  bool _byKonu = false;
   String? _tagFilter;
+
+  /// Açık klasör (null = ana düzey).
+  String? _folderId;
 
   /// Arama: defter adı ve kayıtlı el yazısı metni ([normalizeTr]).
   String _query = '';
@@ -63,6 +77,15 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
       f(context, n);
     } else {
       context.push(AppRoutes.inkNotebookAt(n.id, h.pageId));
+    }
+  }
+
+  void _openKonuPage(InkNotebookRecord n, InkNotePageRecord p) {
+    final f = widget.onOpen;
+    if (f != null) {
+      f(context, n);
+    } else {
+      context.push(AppRoutes.inkNotebookAt(n.id, p.id));
     }
   }
 
@@ -85,6 +108,35 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
     }
   }
 
+  void _toast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  List<InkFolderRecord> get _folders => ref.read(inkFoldersProvider).value ?? const [];
+
+  /// Gerçekten var olan açık klasör (silinmişse ana düzey).
+  String? get _curFolder => _folderId != null && _folders.any((f) => f.id == _folderId) ? _folderId : null;
+
+  void _goFolder(String? id) => setState(() => _folderId = id);
+
+  void _up() {
+    final cur = _curFolder;
+    if (cur == null) return;
+    final parent = _folders.firstWhere((f) => f.id == cur).parentId;
+    _goFolder(parent != null && _folders.any((f) => f.id == parent) ? parent : null);
+  }
+
+  void _enterFolder(String id) {
+    _searchCtl.clear();
+    setState(() {
+      _query = '';
+      _folderId = id;
+    });
+  }
+
   Future<void> _create() async {
     final res = await showDialog<NotebookDialogResult>(
       context: context,
@@ -101,8 +153,121 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
       pageWidth: dim.width,
       pageHeight: dim.height,
     );
+    final cur = _curFolder;
+    if (cur != null) await repo.moveNotebookToFolder(id, cur);
     final n = await repo.findNotebook(id);
     if (n != null && mounted) _open(n);
+  }
+
+  Future<void> _createFromCurriculum() async {
+    final id = await createNotebookFromCurriculumFlow(context, ref, currentFolderId: _curFolder);
+    if (id == null || !mounted) return;
+    final n = await ref.read(inkNotebookRepositoryProvider).findNotebook(id);
+    if (n != null && mounted) _open(n);
+  }
+
+  Future<void> _newFolder() async {
+    final res = await showFolderDialog(context);
+    if (res == null || !mounted) return;
+    await ref.read(inkFolderRepositoryProvider).createFolder(res.name, parentId: _curFolder, color: res.color);
+  }
+
+  Future<void> _editFolder(InkFolderRecord f) async {
+    final res = await showFolderDialog(context, initial: f);
+    if (res == null) return;
+    final repo = ref.read(inkFolderRepositoryProvider);
+    await repo.renameFolder(f.id, res.name);
+    if (res.color != f.color) await repo.setFolderColor(f.id, res.color);
+  }
+
+  Future<void> _moveFolder(InkFolderRecord f) async {
+    final r = await showFolderPicker(context, folders: _folders, currentId: f.parentId, title: 'Klasör nereye taşınsın?');
+    if (r == null) return;
+    try {
+      await ref.read(inkFolderRepositoryProvider).moveFolder(f.id, r.id);
+    } on ArgumentError {
+      _toast('Klasör kendi altına taşınamaz.');
+    } on StateError {
+      _toast('Hedef klasör bulunamadı.');
+    }
+  }
+
+  Future<void> _deleteFolder(InkFolderRecord f) async {
+    final subs = _folders.where((x) => x.parentId == f.id).length;
+    if (!await confirmDeleteFolder(context, f, subfolders: subs) || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final wasHere = _folderId == f.id;
+    final parent = f.parentId;
+    await ref.read(inkFolderRepositoryProvider).deleteFolder(f.id);
+    if (wasHere && mounted) _goFolder(parent);
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text('"${f.name.isEmpty ? 'Adsız klasör' : f.name}" silindi.'),
+          action: SnackBarAction(
+            label: 'Geri al',
+            onPressed: () => ref.read(inkFolderRepositoryProvider).restoreFolder(f.id),
+          ),
+        ),
+      );
+  }
+
+  Future<void> _moveNotebook(InkNotebookRecord n) async {
+    final r = await showFolderPicker(context, folders: _folders, currentId: n.folderId);
+    if (r == null) return;
+    try {
+      await ref.read(inkNotebookRepositoryProvider).moveNotebookToFolder(n.id, r.id);
+    } on StateError {
+      _toast('Hedef klasör bulunamadı.');
+    }
+  }
+
+  Future<void> _folderSheet(InkFolderRecord f) => _actionSheet(
+    title: f.name.isEmpty ? 'Adsız klasör' : f.name,
+    actions: [
+      ('folder-act-rename', Icons.edit_outlined, 'Yeniden adlandır / renk', () => _editFolder(f)),
+      ('folder-act-move', Icons.drive_file_move_outlined, 'Taşı…', () => _moveFolder(f)),
+      ('folder-act-delete', Icons.delete_outline, 'Sil', () => _deleteFolder(f)),
+    ],
+  );
+
+  Future<void> _notebookSheet(InkNotebookRecord n) => _actionSheet(
+    title: _name(n),
+    actions: [
+      ('nb-act-rename', Icons.edit_outlined, 'Yeniden adlandır', () => _rename(n)),
+      ('nb-act-move', Icons.drive_file_move_outlined, 'Taşı…', () => _moveNotebook(n)),
+      ('nb-act-delete', Icons.delete_outline, 'Sil', () => _delete(n)),
+    ],
+  );
+
+  Future<void> _actionSheet({
+    required String title,
+    required List<(String, IconData, String, Future<void> Function())> actions,
+  }) async {
+    final run = await showModalBottomSheet<Future<void> Function()>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(title, style: Theme.of(ctx).textTheme.titleMedium),
+            ),
+            for (final a in actions)
+              ListTile(
+                key: Key(a.$1),
+                leading: Icon(a.$2),
+                title: Text(a.$3),
+                onTap: () => Navigator.pop(ctx, a.$4),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (run != null && mounted) await run();
   }
 
   Future<void> _rename(InkNotebookRecord n) async {
@@ -166,7 +331,7 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
   /// İyimser yerel sıra (tüm silinmemiş defterler); akış aynı sırayı getirince ya da hata olunca düşer.
   List<String>? _order;
 
-  /// [shown] süzülmüş (etiket) liste olabilir; yeni sıra TÜM silinmemiş defterlere yazılır:
+  /// [shown] süzülmüş (etiket/klasör) liste olabilir; yeni sıra TÜM silinmemiş defterlere yazılır:
   /// süzülmüş defterler kendi yerlerini, süzülmeyenler yerlerini korur.
   Future<void> _reorder(
     List<InkNotebookRecord> aliveAll,
@@ -195,37 +360,38 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
   void _failOrder(String msg) {
     if (!mounted) return;
     setState(() => _order = null);
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(msg)));
+    _toast(msg);
   }
 
-  Widget _subtitle(InkNotebookRecord n, Set<String> tagIds, List<Tag> allTags) {
+  Widget _subtitle(InkNotebookRecord n, Set<String> tagIds, List<Tag> allTags, {String? location}) {
     final mine = [
       for (final t in allTags)
         if (tagIds.contains(t.id)) t,
     ];
-    if (mine.isEmpty) return Text('${n.pageCount} sayfa');
+    if (mine.isEmpty && location == null) return Text('${n.pageCount} sayfa');
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('${n.pageCount} sayfa'),
-        Wrap(
-          key: Key('notebook-tags-${n.id}'),
-          spacing: 4,
-          children: [
-            for (final t in mine)
-              Chip(
-                key: Key('notebook-chip-${n.id}-${t.id}'),
-                visualDensity: VisualDensity.compact,
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                label: Text(
-                  tagPathLabel(allTags, t.id),
-                  style: Theme.of(context).textTheme.labelSmall,
+        if (location != null)
+          Text(location, key: Key('notebook-loc-${n.id}'), maxLines: 1, overflow: TextOverflow.ellipsis),
+        if (mine.isNotEmpty)
+          Wrap(
+            key: Key('notebook-tags-${n.id}'),
+            spacing: 4,
+            children: [
+              for (final t in mine)
+                Chip(
+                  key: Key('notebook-chip-${n.id}-${t.id}'),
+                  visualDensity: VisualDensity.compact,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  label: Text(
+                    tagPathLabel(allTags, t.id),
+                    style: Theme.of(context).textTheme.labelSmall,
+                  ),
                 ),
-              ),
-          ],
-        ),
+            ],
+          ),
       ],
     );
   }
@@ -233,9 +399,66 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
   static String _name(InkNotebookRecord n) =>
       n.title.isEmpty ? 'Adsız defter' : n.title;
 
+  Widget _crumbs(List<InkFolderRecord> path) {
+    final theme = Theme.of(context);
+    Widget crumb(Key k, String text, VoidCallback? onTap) => TextButton(
+      key: k,
+      style: TextButton.styleFrom(
+        minimumSize: const Size(0, 36),
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        textStyle: onTap == null ? theme.textTheme.titleSmall : null,
+      ),
+      onPressed: onTap,
+      child: Text(text),
+    );
+    return SingleChildScrollView(
+      key: const Key('folder-crumbs'),
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          crumb(const Key('crumb-root'), 'Defterler', path.isEmpty ? null : () => _goFolder(null)),
+          for (var i = 0; i < path.length; i++) ...[
+            const Icon(Icons.chevron_right, size: 18),
+            crumb(
+              Key('crumb-${path[i].id}'),
+              path[i].name.isEmpty ? 'Adsız klasör' : path[i].name,
+              i == path.length - 1 ? null : () => _goFolder(path[i].id),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _folderCard(InkFolderRecord f, List<InkFolderRecord> all) {
+    final subs = all.where((x) => x.parentId == f.id).length;
+    return Card(
+      key: ValueKey('foldercard-${f.id}'),
+      child: ListTile(
+        key: Key('folder-${f.id}'),
+        leading: Icon(Icons.folder, size: 40, color: Color(f.color)),
+        title: Text(f.name.isEmpty ? 'Adsız klasör' : f.name),
+        subtitle: Text('${f.notebookCount} defter${subs > 0 ? ' · $subs klasör' : ''}'),
+        onTap: () => _enterFolder(f.id),
+        onLongPress: () => _folderSheet(f),
+        trailing: IconButton(
+          key: Key('folder-more-${f.id}'),
+          tooltip: 'Klasör işlemleri',
+          icon: const Icon(Icons.more_vert),
+          onPressed: () => _folderSheet(f),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final all = ref.watch(inkNotebooksProvider);
+    final folders = ref.watch(inkFoldersProvider).value ?? const <InkFolderRecord>[];
+    final cur = _folderId != null && folders.any((f) => f.id == _folderId) ? _folderId : null;
+    final folderIds = {for (final f in folders) f.id};
+    final narrow = MediaQuery.sizeOf(context).width < 600;
     final body = all.when(
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => Center(child: Text('Defterler okunamadı: $e')),
@@ -280,26 +503,52 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
                 for (final h in ref.watch(pageTextSearchProvider(_query)).value ?? const <PageTextHit>[])
                   if (byTag.any((n) => n.id == h.notebookId)) h,
               ];
-        final alive = q.isEmpty
+        final matching = q.isEmpty
             ? byTag
             : [for (final n in byTag) if (normalizeTr(_name(n)).contains(q)) n];
+        // Arama ya da etiket süzgeci klasörler boyunca (düz); aksi halde yalnız açık klasör.
+        final flat = q.isNotEmpty || filtering;
+        String? effFolder(InkNotebookRecord n) => n.folderId != null && folderIds.contains(n.folderId) ? n.folderId : null;
+        final alive = flat ? matching : [for (final n in matching) if (effFolder(n) == cur) n];
+        final shownFolders = q.isNotEmpty
+            ? [for (final f in folders) if (normalizeTr(f.name).contains(q)) f]
+            : filtering
+            ? const <InkFolderRecord>[]
+            : childFolders(folders, cur);
         final deleted = [
           for (final n in list)
             if (n.deleted || _hidden.contains(n.id)) n,
         ];
+        final deletedFolders = ref.watch(inkDeletedFoldersProvider).value ?? const <InkFolderRecord>[];
         return ListView(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 88),
           children: [
-            if (widget.embedded)
-              Align(
-                alignment: Alignment.centerLeft,
-                child: FilledButton.icon(
-                  key: const Key('notebook-new'),
-                  onPressed: _create,
-                  icon: const Icon(Icons.add),
-                  label: const Text('Yeni defter'),
+            _crumbs(folderCrumbs(cur, folders)),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                if (widget.embedded)
+                  FilledButton.icon(
+                    key: const Key('notebook-new'),
+                    onPressed: _create,
+                    icon: const Icon(Icons.add),
+                    label: const Text('Yeni defter'),
+                  ),
+                OutlinedButton.icon(
+                  key: const Key('folder-new'),
+                  onPressed: _newFolder,
+                  icon: const Icon(Icons.create_new_folder_outlined),
+                  label: const Text('Yeni klasör'),
                 ),
-              ),
+                OutlinedButton.icon(
+                  key: const Key('curriculum-notebook-new'),
+                  onPressed: _createFromCurriculum,
+                  icon: const Icon(Icons.account_tree_outlined),
+                  label: const Text('Konu ağacından defter oluştur'),
+                ),
+              ],
+            ),
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 4),
               child: TextField(
@@ -315,7 +564,10 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
                           key: const Key('notebook-search-clear'),
                           tooltip: 'Aramayı temizle',
                           icon: const Icon(Icons.close),
-                          onPressed: () => setState(() => _query = ''),
+                          onPressed: () {
+                            _searchCtl.clear();
+                            setState(() => _query = '');
+                          },
                         ),
                 ),
                 controller: _searchCtl,
@@ -344,7 +596,7 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
                   ],
                 ),
               ),
-            if (alive.isEmpty && hits.isEmpty)
+            if (alive.isEmpty && hits.isEmpty && shownFolders.isEmpty)
               Padding(
                 padding: const EdgeInsets.all(32),
                 child: Center(
@@ -353,10 +605,13 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
                         ? 'Aramayla eşleşen defter ya da metin yok.'
                         : filtering
                         ? 'Bu etikette defter yok.'
+                        : cur != null
+                        ? 'Bu klasör boş.'
                         : 'Henüz defter yok. "Yeni defter" ile başla.',
                   ),
                 ),
               ),
+            for (final f in shownFolders) _folderCard(f, folders),
             ReorderableListView.builder(
               key: const Key('notebook-list'),
               shrinkWrap: true,
@@ -366,29 +621,46 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
               onReorderItem: (a, b) => _reorder(aliveAll, alive, a, b),
               itemBuilder: (context, i) {
                 final n = alive[i];
+                final loc = flat && effFolder(n) != null ? folderPathLabel(effFolder(n), folders) : null;
                 return Card(
                   key: ValueKey(n.id),
                   child: ListTile(
                     key: Key('notebook-${n.id}'),
                     leading: _Cover(n.coverColor),
                     title: Text(_name(n)),
-                    subtitle: _subtitle(n, tagsOf[n.id] ?? const {}, allTags),
+                    subtitle: _subtitle(n, tagsOf[n.id] ?? const {}, allTags, location: loc),
                     onTap: () => _open(n),
+                    onLongPress: () => _notebookSheet(n),
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        IconButton(
-                          key: Key('notebook-rename-${n.id}'),
-                          tooltip: 'Yeniden adlandır',
-                          icon: const Icon(Icons.edit_outlined),
-                          onPressed: () => _rename(n),
-                        ),
-                        IconButton(
-                          key: Key('notebook-del-${n.id}'),
-                          tooltip: 'Sil',
-                          icon: const Icon(Icons.delete_outline),
-                          onPressed: () => _delete(n),
-                        ),
+                        if (narrow)
+                          IconButton(
+                            key: Key('notebook-more-${n.id}'),
+                            tooltip: 'Defter işlemleri',
+                            icon: const Icon(Icons.more_vert),
+                            onPressed: () => _notebookSheet(n),
+                          )
+                        else ...[
+                          IconButton(
+                            key: Key('notebook-rename-${n.id}'),
+                            tooltip: 'Yeniden adlandır',
+                            icon: const Icon(Icons.edit_outlined),
+                            onPressed: () => _rename(n),
+                          ),
+                          IconButton(
+                            key: Key('notebook-move-${n.id}'),
+                            tooltip: 'Taşı…',
+                            icon: const Icon(Icons.drive_file_move_outlined),
+                            onPressed: () => _moveNotebook(n),
+                          ),
+                          IconButton(
+                            key: Key('notebook-del-${n.id}'),
+                            tooltip: 'Sil',
+                            icon: const Icon(Icons.delete_outline),
+                            onPressed: () => _delete(n),
+                          ),
+                        ],
                         ReorderableDragStartListener(
                           index: i,
                           child: const Padding(
@@ -429,8 +701,22 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
                   style: Theme.of(context).textTheme.titleSmall,
                 ),
               ),
-              if (deleted.isEmpty)
-                const ListTile(title: Text('Silinen defter yok.')),
+              if (deleted.isEmpty && deletedFolders.isEmpty)
+                const ListTile(title: Text('Silinen defter ya da klasör yok.')),
+              for (final f in deletedFolders)
+                Card(
+                  key: ValueKey('delfolder-${f.id}'),
+                  child: ListTile(
+                    leading: Opacity(opacity: 0.5, child: Icon(Icons.folder, size: 40, color: Color(f.color))),
+                    title: Text(f.name.isEmpty ? 'Adsız klasör' : f.name),
+                    subtitle: const Text('Klasör'),
+                    trailing: TextButton(
+                      key: Key('folder-restore-${f.id}'),
+                      onPressed: () => ref.read(inkFolderRepositoryProvider).restoreFolder(f.id),
+                      child: const Text('Geri getir'),
+                    ),
+                  ),
+                ),
               for (final n in deleted)
                 Card(
                   key: ValueKey('del-${n.id}'),
@@ -457,23 +743,51 @@ class _NotebooksScreenState extends ConsumerState<NotebooksScreen> {
       icon: const Icon(Icons.restore_from_trash_outlined),
       onPressed: () => setState(() => _showDeleted = !_showDeleted),
     );
-    if (widget.embedded) {
-      return Stack(
-        children: [
-          body,
-          Positioned(right: 8, top: 0, child: deletedToggle),
+    final tabs = Padding(
+      padding: EdgeInsets.fromLTRB(12, 8, widget.embedded ? 56 : 12, 0),
+      child: SegmentedButton<bool>(
+        key: const Key('notebooks-view-toggle'),
+        showSelectedIcon: false,
+        segments: const [
+          ButtonSegment(value: false, icon: Icon(Icons.folder_outlined), label: Text('Defterler')),
+          ButtonSegment(value: true, icon: Icon(Icons.account_tree_outlined), label: Text('Konuya göre')),
         ],
-      );
-    }
-    return Scaffold(
-      appBar: AppBar(title: const Text('Defterler'), actions: [deletedToggle]),
-      body: body,
-      floatingActionButton: FloatingActionButton.extended(
-        key: const Key('notebook-new'),
-        onPressed: _create,
-        icon: const Icon(Icons.add),
-        label: const Text('Yeni defter'),
+        selected: {_byKonu},
+        onSelectionChanged: (s) => setState(() => _byKonu = s.first),
       ),
+    );
+    final content = Column(
+      children: [
+        tabs,
+        Expanded(
+          child: _byKonu ? ByKonuView(onOpenPage: _openKonuPage) : body,
+        ),
+      ],
+    );
+    final Widget page = widget.embedded
+        ? Stack(
+            children: [
+              content,
+              Positioned(right: 8, top: 0, child: deletedToggle),
+            ],
+          )
+        : Scaffold(
+            appBar: AppBar(title: const Text('Defterler'), actions: [deletedToggle]),
+            body: content,
+            floatingActionButton: FloatingActionButton.extended(
+              key: const Key('notebook-new'),
+              onPressed: _create,
+              icon: const Icon(Icons.add),
+              label: const Text('Yeni defter'),
+            ),
+          );
+    // Geri tuşu: önce bir üst klasöre.
+    return PopScope(
+      canPop: cur == null,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _up();
+      },
+      child: page,
     );
   }
 }

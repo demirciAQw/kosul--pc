@@ -66,7 +66,8 @@ class PageTemplatePainter extends CustomPainter {
         to,
       );
     } else {
-      lines = templateLines(template, pageWidth, pageHeight, spacing: step);
+      final all = templateLines(template, pageWidth, pageHeight, spacing: step);
+      lines = _visibleOnly(all, step, sx, sy);
     }
     if (lines.isEmpty) return;
     final paint = Paint()
@@ -92,6 +93,28 @@ class PageTemplatePainter extends CustomPainter {
     for (final x in lines.vertical) {
       canvas.drawLine(Offset(x * sx, 0), Offset(x * sx, size.height), paint);
     }
+  }
+
+  /// Yüksek zumda yalnız görünen çizgiler (bir aralık paylı) çizilir: %6000'de bile
+  /// çizim sayısı sabit kalır. Görünüm bilinmiyorsa ya da zum küçükse hepsi çizilir.
+  TemplateLines _visibleOnly(TemplateLines all, double step, double sx, double sy) {
+    final m = viewTransform?.value, vs = viewSize;
+    if (m == null || vs == null || vs.isEmpty) return all;
+    final z = m.getMaxScaleOnAxis();
+    if (z < 3) return all;
+    final t = m.getTranslation();
+    final left = -t.x / z / sx - step, right = (-t.x + vs.width) / z / sx + step;
+    final top = -t.y / z / sy - step, bottom = (-t.y + vs.height) / z / sy + step;
+    return TemplateLines(
+      horizontal: [
+        for (final y in all.horizontal)
+          if (y >= top && y <= bottom) y,
+      ],
+      vertical: [
+        for (final x in all.vertical)
+          if (x >= left && x <= right) x,
+      ],
+    );
   }
 
   @override

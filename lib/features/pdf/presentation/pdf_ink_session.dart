@@ -731,8 +731,19 @@ class PdfInkSession extends ChangeNotifier {
   @visibleForTesting
   int get cachedPages => _pens.length;
 
-  /// [global] noktasındaki sayfa katmanı (yoksa null).
+  /// Kalem girişi kapalı (defterde Metin/Alt sayfa araçları): hiçbir katman kalem
+  /// olayı almaz; kalem de parmak gibi görünümü kaydırır. Çizgiler olduğu gibi durur.
+  bool _inkInputOff = false;
+  bool get inkInputOff => _inkInputOff;
+  void setInkInputOff(bool v) {
+    if (_inkInputOff == v) return;
+    _inkInputOff = v;
+    _ping();
+  }
+
+  /// [global] noktasındaki sayfa katmanı (yoksa null; giriş kapalıysa hep null).
   PdfPageInkLayerState? layerAt(ui.Offset global) {
+    if (_inkInputOff) return null;
     for (final l in _layers.reversed) {
       if (l.containsGlobal(global)) return l;
     }

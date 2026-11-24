@@ -1,19 +1,15 @@
 import 'dart:async';
-import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart' show mapEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../../app/routes.dart';
 import '../../../app/tablet.dart';
 import '../../handwriting/handwriting_providers.dart';
 import '../../handwriting/presentation/notebook_text_screen.dart';
 import '../../handwriting/presentation/page_text_sheet.dart';
-import '../../ink/data/ink_outline.dart';
-import '../../ink/domain/ink_models.dart';
-import '../../ink/domain/ink_stroke_record.dart';
-import '../../ink/domain/pen_profiles.dart';
-import '../../pdf/pdf_providers.dart';
 import '../data/ink_notebook_repository.dart';
 import '../data/note_tool_prefs_store.dart';
 import '../domain/ink_notebook.dart';
@@ -23,7 +19,8 @@ import 'ink_tags_panel.dart';
 import 'note_page_editor.dart';
 import 'note_tool_dock.dart';
 import 'note_tool_settings.dart';
-import 'page_template_painter.dart';
+import 'page_info_sheet.dart';
+import 'page_thumb.dart';
 
 /// Defter içi: yan şeritte sayfa küçük resimleri, ortada sayfa düzenleyicisi.
 /// Açılışta `ensureVisiblePage` çağrılır (senkronda tüm sayfalar silinmiş olabilir).
@@ -56,6 +53,19 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
   /// Yerel işlem (ekle/çoğalt/geri al) yeni sayfayı seçti ama liste henüz getirmedi:
   /// gelene kadar eski sayfa açık kalır (oturum bir kare için açılıp kapanmasın).
   String? _pendingId;
+
+  /// Alt sayfaya girerken geçilen sayfalar (geri düğmesi/sistem geri tuşu ebeveyne döner).
+  final List<String> _trail = [];
+
+  void _openChild(String childId, String fromId) => setState(() {
+    _trail.add(fromId);
+    _pageId = childId;
+  });
+
+  void _goParent(String parentId) => setState(() {
+    if (_trail.isNotEmpty && _trail.last == parentId) _trail.removeLast();
+    _pageId = parentId;
+  });
   bool _ensuring = false;
 
   /// Şeritte iyimser yerel sıra (kayıt sürerken); akış aynı sırayı getirince ya da hata olunca düşer.
@@ -341,11 +351,35 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
     final title = nb == null || nb.title.isEmpty ? 'Adsız defter' : nb.title;
     final wide = MediaQuery.sizeOf(context).width >= 600;
     final i = current == null ? -1 : pages.indexOf(current);
-    return Scaffold(
+    final parentId = current?.parentPageId;
+    final parentPage = parentId == null ? null : pages.where((p) => p.id == parentId).firstOrNull;
+    return PopScope(
+      canPop: _trail.isEmpty,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _trail.isNotEmpty) setState(() => _pageId = _trail.removeLast());
+      },
+      child: Scaffold(
       appBar: AppBar(
         toolbarHeight: 52,
         titleSpacing: 0,
         title: Text(title, overflow: TextOverflow.ellipsis),
+        bottom: parentPage == null
+            ? null
+            : PreferredSize(
+                preferredSize: const Size.fromHeight(36),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    key: const Key('note-parent-bar'),
+                    onPressed: () => _goParent(parentPage.id),
+                    icon: const Icon(Icons.arrow_back, size: 16),
+                    label: Text(
+                      'Ebeveyn: ${(parentPage.title ?? '').trim().isEmpty ? 'Sayfa ${pages.indexOf(parentPage) + 1}' : parentPage.title!.trim()}',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+              ),
         actions: [
           _PagePill(
             index: i,
@@ -362,6 +396,12 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
             onAdd: current == null ? null : () => _add(pages, afterCurrent: true),
           ),
           const FocusModeButton(),
+          IconButton(
+            key: const Key('note-board-btn'),
+            tooltip: 'Pano',
+            icon: const Icon(Icons.hub_outlined),
+            onPressed: () => context.push(AppRoutes.inkBoard(widget.notebookId)),
+          ),
           if (wide) ...[
             IconButton(
               key: const Key('note-tags-btn'),
@@ -390,6 +430,7 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
               'down' => _move(pages, 1),
               'size' => _pageSize(current!),
               'tags' => _tagsPanel(current),
+              'info' => showPageInfoSheet(context, current!),
               'strip' => setState(() => _strip = !_strip),
               'totext' => _pageToText(current!),
               'seltext' => _selectionToText(current!),
@@ -401,6 +442,11 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
                 value: 'style',
                 key: Key('note-page-style'),
                 child: Text('Şablon ve arka plan…'),
+              ),
+              const PopupMenuItem(
+                value: 'info',
+                key: Key('note-page-info'),
+                child: Text('Sayfa bilgisi…'),
               ),
               if (!wide) ...[
                 const PopupMenuItem(
@@ -505,6 +551,7 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
                         stylusOnlyOverride: widget.stylusOnlyOverride,
                         onGrow: (h) => _repo.setPageSize(current!.id, current.width, h),
                         onTranscribe: () => _pageToText(current!),
+                        onOpenPage: (id) => _openChild(id, current!.id),
                         spacing: _spacing,
                         onSpacing: (f) => setState(() => _spacing = f),
                         onBackground: (c) =>
@@ -523,6 +570,7 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
                 );
               },
             ),
+      ),
     );
   }
 
@@ -767,9 +815,15 @@ class _PageStrip extends StatelessWidget {
                   key: ValueKey(p.id),
                   onTap: () => onTap(p),
                   child: Padding(
-                    padding: const EdgeInsets.all(6),
+                    // Alt sayfalar girintili ve oklu gösterilir.
+                    padding: EdgeInsets.fromLTRB(p.parentPageId != null ? 18 : 6, 6, 6, 6),
                     child: Column(
                       children: [
+                        if (p.parentPageId != null)
+                          const Align(
+                            alignment: Alignment.centerLeft,
+                            child: Icon(Icons.subdirectory_arrow_right, size: 14, key: Key('note-strip-child-icon')),
+                          ),
                         Stack(
                           children: [
                             Container(
@@ -786,7 +840,7 @@ class _PageStrip extends StatelessWidget {
                                 // Sonsuz sayfada yalnız üst kısım (A4 oranında) görünür.
                                 aspectRatio: p.width /
                                     (isInfinitePage(p.height) ? a4PageHeight : p.height),
-                                child: _PageThumb(page: p),
+                                child: PageThumb(page: p),
                               ),
                             ),
                             if (withText.contains(p.id))
@@ -808,10 +862,7 @@ class _PageStrip extends StatelessWidget {
                               ),
                           ],
                         ),
-                        Text(
-                          '${i + 1}',
-                          style: Theme.of(context).textTheme.labelSmall,
-                        ),
+                        PageStripLabel(page: p, number: i + 1),
                       ],
                     ),
                   ),
@@ -832,158 +883,4 @@ class _PageStrip extends StatelessWidget {
       ),
     );
   }
-}
-
-/// Küçük resim: şablon + sayfanın çizgileri. Çizgiler akışta TEK abonelikle izlenir
-/// (State'te), sonuç bir kez `ui.Picture`'a kaydedilir (yeniden boyamada outline hesabı yok);
-/// ardışık güncellemeler [_ThumbState.delay] ile geciktirilir.
-class _PageThumb extends ConsumerStatefulWidget {
-  const _PageThumb({required this.page});
-  final InkNotePageRecord page;
-
-  @override
-  ConsumerState<_PageThumb> createState() => _ThumbState();
-}
-
-class _ThumbState extends ConsumerState<_PageThumb> {
-  /// Peş peşe çizgi değişikliklerinde yeniden çözme/çizme bekleme süresi.
-  static const delay = Duration(milliseconds: 400);
-
-  StreamSubscription<List<InkStroke>>? _sub;
-  Timer? _timer;
-  List<InkStroke>? _pending;
-  bool _first = true;
-  ui.Picture? _picture;
-
-  @override
-  void initState() {
-    super.initState();
-    _listen();
-  }
-
-  void _listen() {
-    _sub?.cancel();
-    _timer?.cancel();
-    _first = true;
-    _pending = null;
-    final p = widget.page;
-    _sub = ref
-        .read(inkStrokeRepositoryProvider)
-        .watchPage(
-          NotePageOwner(p.id, p.pageNo),
-          attemptNo: 0,
-          layer: 0,
-          noQuestion: true,
-        )
-        .listen(_onData);
-  }
-
-  void _onData(List<InkStroke> strokes) {
-    if (_first) {
-      _first = false;
-      _apply(strokes);
-      return;
-    }
-    _pending = strokes;
-    _timer ??= Timer(delay, () {
-      _timer = null;
-      final d = _pending;
-      _pending = null;
-      if (d != null && mounted) _apply(d);
-    });
-  }
-
-  void _apply(List<InkStroke> strokes) {
-    final old = _picture;
-    _picture = _record(strokes);
-    setState(() {});
-    old?.dispose();
-  }
-
-  ui.Picture _record(List<InkStroke> strokes) {
-    final rec = ui.PictureRecorder();
-    final c = Canvas(rec);
-    for (final s in strokes) {
-      final t = parseToolColumn(s.tool);
-      final kind = penProfiles.keys.where((k) => k.name == t.name).firstOrNull;
-      final brush = InkBrush(
-        tool: kind == PenKind.highlighter ? InkTool.highlighter : InkTool.pen,
-        color: s.color,
-        width: s.width,
-        kind: kind,
-        hardness: t.hardness,
-      );
-      final pts = [
-        for (final p in s.points)
-          InkPoint(
-            x: p.x,
-            y: p.y,
-            pressure: p.pressure,
-            tilt: p.tilt,
-            tMs: p.t.toDouble(),
-          ),
-      ];
-      c.drawPath(
-        inkOutlinePath(pts, brush, complete: true),
-        inkPaintFor(brush),
-      );
-    }
-    return rec.endRecording();
-  }
-
-  @override
-  void didUpdateWidget(_PageThumb old) {
-    super.didUpdateWidget(old);
-    if (old.page.id != widget.page.id ||
-        old.page.pageNo != widget.page.pageNo) {
-      _listen();
-    }
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    _sub?.cancel();
-    _picture?.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => RepaintBoundary(
-    child: CustomPaint(
-      painter: _ThumbPainter(widget.page, _picture),
-      size: Size.infinite,
-    ),
-  );
-}
-
-class _ThumbPainter extends CustomPainter {
-  _ThumbPainter(this.page, this.strokes);
-  final InkNotePageRecord page;
-  final ui.Picture? strokes;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    // Sonsuz sayfada küçük resim yalnız üst A4 kadarını gösterir.
-    final inf = isInfinitePage(page.height);
-    final shownH = inf ? a4PageHeight : page.height;
-    PageTemplatePainter(
-      template: page.template,
-      background: page.background,
-      pageWidth: page.width,
-      pageHeight: shownH,
-      infinite: inf,
-    ).paint(canvas, size);
-    final pic = strokes;
-    if (pic == null) return;
-    canvas.save();
-    canvas.clipRect(Offset.zero & size);
-    canvas.scale(size.width / page.width, size.height / shownH);
-    canvas.drawPicture(pic);
-    canvas.restore();
-  }
-
-  @override
-  bool shouldRepaint(_ThumbPainter old) =>
-      old.page != page || !identical(old.strokes, strokes);
 }

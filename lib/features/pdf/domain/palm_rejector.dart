@@ -8,7 +8,7 @@
 /// başladığı andaki dönüşüme geri alır, avuç kalkana dek onu yutar/kilitler.
 ///
 /// Eşikler ÖLÇÜLMEDİ (tahmin): gerçek avuç `radiusMajor` değeri ve süreleri
-/// Ahmet'in tanı günlüğünden (`KocumPen ... rMaj=`) ayarlanacak.
+/// kullanıcının tanı günlüğünden (`KocumPen ... rMaj=`) ayarlanacak.
 library;
 
 import 'dart:math' as math;

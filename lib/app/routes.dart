@@ -17,6 +17,7 @@ abstract final class AppRoutes {
   static const huaweiImport = '/saglik/huawei';
   static const notebooks = '/defter';
   static String inkNotebook(String id) => '/defter/$id';
+  static String inkBoard(String id) => '/defter/$id/pano';
 
   /// Defteri belirli sayfada aç (el yazısı metin araması).
   static String inkNotebookAt(String id, String pageId) => '/defter/$id?sayfa=${Uri.encodeQueryComponent(pageId)}';

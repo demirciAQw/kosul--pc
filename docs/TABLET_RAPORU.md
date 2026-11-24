@@ -1,6 +1,6 @@
 # Tablet + PDF raporu
 
-Dal: `tablet-1`. Her adım: saat, sonuç, ölçüm, "Ahmet elle denesin".
+Dal: `tablet-1`. Her adım: saat, sonuç, ölçüm, "kullanıcı elle denesin".
 
 ## T0: Ortam (22.11.2026)
 - Android SDK zaten kurulu (`~/Android/Sdk`, platform 36, build-tools 36.0.0); `flutter doctor` Android için temiz.
@@ -9,7 +9,7 @@ Dal: `tablet-1`. Her adım: saat, sonuç, ölçüm, "Ahmet elle denesin".
 - Not: `flutter build --profile` son ek almaz (Flutter profile'ı kendi kopyalar); kullanılmıyor, derlenmedi.
 - **Tablet `unauthorized`:** `adb devices` PADH10005831 için yetki istiyor. Tablete ölçüm yapılamadı.
 
-### Ahmet elle denesin
+### kullanıcı elle denesin
 - Tablette USB hata ayıklama iznini onayla (açılan "bu bilgisayara izin ver" penceresi), sonra `adb devices` "device" göstermeli.
 - Sonra `flutter build apk --debug` ve `adb install -r build/app/outputs/flutter-apk/app-debug.apk`; "Koçum (deneme)" gerçek Koçum'un yanında ayrı simge olarak açılmalı.
 
@@ -29,7 +29,7 @@ Dal: `tablet-1`. Her adım: saat, sonuç, ölçüm, "Ahmet elle denesin".
 - Seçim: ölçüm olmadığı için şimdilik **Android'de A, diğer platformlarda B** (görev dosyasının kuralı; kanıtsız ama varsayılan).
 - Bilinen sınır: A'da parmak kaydırma/yakınlaştırma yok (dokunuşu yerel görünüm alıyor), A'da silgi devre dışı. AndroidView dokunuşu Dart üzerinden yerele sentetik iletiyor; ek gidiş-dönüş gecikmesi olabilir, bu ölçülmeli.
 
-### Ahmet elle denesin (T1)
+### kullanıcı elle denesin (T1)
 - Ayarlar → Araçlar → Kalem denemesi. A ve B'yi kalemle çiz: hangisi daha az geriden geliyor? Hızlı daireler/yazı dene.
 - Çizerken avucunu ekrana koy: çizgi bozulmamalı, görünüm kaymamalı.
 - Parmakla iki parmak yakınlaştır/kaydır (B'de çalışmalı).
@@ -64,7 +64,7 @@ Dal: `tablet-1`. Her adım: saat, sonuç, ölçüm, "Ahmet elle denesin".
 - Gerçek PdfViewer + gerçek PDFium ile widget testi: parmak kaydırır, kalem kaydırmaz, çizgi doğru sayfaya düşer. 449 test; APK ve Linux debug derlendi.
 - Doğrulanmadı: kalem hissi/gecikme, gerçek avuç, uzun belge ve çok çizgi performansı, release (R8).
 
-### Ahmet elle denesin (T3)
+### kullanıcı elle denesin (T3)
 - Ayarlar → PDF'ler → bir YKS PDF'i içe aktar; aç, kalemle yaz, parmakla kaydır/yakınlaştır. Avucunu koyarak yaz.
 - 300+ sayfalık bir PDF aç: kaydırma akıcı mı, uygulama belleği? (`adb shell dumpsys meminfo com.kocum.kocum.gece`)
 - Uygulamayı kapat-aç: çizgiler yerinde mi (zum farklıyken de)?
@@ -85,7 +85,7 @@ Dal: `tablet-1`. Her adım: saat, sonuç, ölçüm, "Ahmet elle denesin".
 - Defterde PDF kartına dokununca okuyucu sayfaya atlar, kutuyu vurgular; PDF yoksa ayrıntı sayfası.
 - Doğrulanmadı: Android'de gerçek WebP çıktısı, ML Kit yolu gerçek cihazda (yalnız sahte motorla), okuyucudan karta dönüş yok, soru türü ayrı alan değil (OcrRecord'dan türetilir).
 
-### Ahmet elle denesin (T4)
+### kullanıcı elle denesin (T4)
 - PDF'te "Soru seç" ile bir soruyu çerçevele, Yanlış işaretle; Defter'de kart görünüyor mu, dokununca PDF'e gidiyor mu?
 - Taranmış (metinsiz) PDF'te ders/konu önerisi ML Kit'ten geliyor mu?
 - Telefon (PDF'siz): kart önizleme resmiyle görünüyor mu?
@@ -99,7 +99,7 @@ Dal: `tablet-1`. Her adım: saat, sonuç, ölçüm, "Ahmet elle denesin".
 - Bilinen sınır: iki cihaz çevrimdışıyken aynı soruda "Yeniden çöz" derse ikisi de aynı deneme numarasını alır; çizgiler karışır, süre birleşir (veri kaybı yok). Kart silinirse çizgileri yumuşak silinir; kutu değişirse çizgiler sayfa koordinatında olduğundan yerinde kalır.
 - 542 test, APK ve Linux debug derlendi. Kalem hissi tablette denenmedi.
 
-### Ahmet elle denesin (T5)
+### kullanıcı elle denesin (T5)
 - Bir soruda "Çöz": yaz, kapat, tekrar aç (çizim duruyor mu); "Yeniden çöz": temiz sayfa mı; eski çözümü saydam göster; iki denemeyi üst üste bindir.
 - Süre makul mu (duraksayınca sayılmıyor)?
 
@@ -121,7 +121,7 @@ Dal: `tablet-1`. Her adım: saat, sonuç, ölçüm, "Ahmet elle denesin".
 - Sapmalar: geri al için `InkCommandStack` yerine mevcut `InkHistory` (kimlikle kalıcı); çizgi silgisi T3b'nin `eraseAt`'ı ile; sertlik yazarken baskıya uygulanır (saklanan baskı biçimlenmiş).
 - Doğrulanmadı: gerçek kalem, avuç, Casper'da `InteractiveViewer` + stylus; fosforlu multiply yalnız çizgi katmanında; çok sayfada küçük resim performansı.
 
-### Ahmet elle denesin (T6)
+### kullanıcı elle denesin (T6)
 - Defterler → yeni defter → çizgili/kareli sayfa; dört kalem türü; sertlik ayarı baskıya göre kalınlığı değiştiriyor mu?
 - Çizgi silgisi / alan silgisi / geri al / yinele; uygulamayı kapat-aç: çizgiler yerinde mi?
 - Sayfa şeridi: sayfa ekle, çoğalt, sırala.
@@ -147,7 +147,7 @@ Sürümler v9.0 → v9.10.3, 8 şema artışı (14 → 19 + question_cards/ink_s
 - **Yapılamayan: tablet ölçümleri.** `adb devices` PADH10005831 için hep `unauthorized` kaldı. Hiçbir şey gerçek kalemle/gerçek tablette denenmedi: kalem gecikmesi, avuç, `radiusMajor` eşiği, basılı tutma süresi, 2560×1600 görünüm, uzun PDF belleği.
 - T1 seçimi: ölçüm olmadığı için Android'de A (yerel Ink), diğer platformlarda B. Ama okuyucu ve defter şimdilik B (saf Flutter) kullanıyor: A'da parmakla kaydırma/yakınlaştırma yok. A/B kararı elle karşılaştırmaya bağlı.
 
-### Ahmet için sıralı yapılacaklar
+### kullanıcı için sıralı yapılacaklar
 1. Tablette "USB hata ayıklama" iznini onayla (`adb devices` → `device`).
 2. `flutter build apk --debug` → `adb install -r build/app/outputs/flutter-apk/app-debug.apk` ("Koçum (deneme)", gerçek Koçum'dan ayrı).
 3. Ayarlar → Araçlar → **Kalem denemesi**: A ve B'yi kalemle karşılaştır; `adb logcat -s KocumInk` çıktısını al (A: giris->vsync, B: giris->vsync ve giris->raster).
@@ -167,8 +167,8 @@ Sürümler v9.0 → v9.10.3, 8 şema artışı (14 → 19 + question_cards/ink_s
 
 ## Tablette ilk deneme sonrası düzeltmeler (v9.11, 22.11.2026)
 Casper PAD H10'da (SDK 36, 1600×2560) deneme sürümü kuruldu ve gerçek kalemle denendi.
-- **Ölçüm:** gerçek kalem Flutter'a `stylus` olarak, basınç 0–1 (çizerken ~0.1–0.55), eğimli, `radiusMajor=0` ve hover olaylarıyla geliyor; çizgi doğru sayfaya yönleniyor. Parmak teması `radiusMajor` 75–143 (iki parmak yakınlaştırma): avuç eşiği 24 doğru ayırıyor. Ahmet'in hissi: gecikme fark edilmiyor.
-- **Ahmet'in eksik listesi ve karşılığı:** sınırlı zum (1–6x) → 0.1–30x, sonsuz kenar boşluğu, çift dokunuşla sığdır, zum göstergesi; yeni defterde şablon (düz/çizgili/kareli/noktalı) ve sayfa boyutu (A4 / ekrana tam / sınırsız-büyük tuval) seçimi; görünür "Yeni sayfa" düğmesi ve sayfa okları; sayfa varsayılan tam genişlik; kalem/fosforlu/silgi için ayrı boyut paneli ve silgi daire imleci; fosforlu için kendi paleti (saydam, multiply, kesik uç); Şekil paneli (otomatik düzelt anahtarı + çizgi, ok, daire, elips, dikdörtgen, üçgen araçları), basılı tutma eşiği 10 px / 600 ms (kalem titremesi için).
+- **Ölçüm:** gerçek kalem Flutter'a `stylus` olarak, basınç 0–1 (çizerken ~0.1–0.55), eğimli, `radiusMajor=0` ve hover olaylarıyla geliyor; çizgi doğru sayfaya yönleniyor. Parmak teması `radiusMajor` 75–143 (iki parmak yakınlaştırma): avuç eşiği 24 doğru ayırıyor. kullanıcının hissi: gecikme fark edilmiyor.
+- **kullanıcının eksik listesi ve karşılığı:** sınırlı zum (1–6x) → 0.1–30x, sonsuz kenar boşluğu, çift dokunuşla sığdır, zum göstergesi; yeni defterde şablon (düz/çizgili/kareli/noktalı) ve sayfa boyutu (A4 / ekrana tam / sınırsız-büyük tuval) seçimi; görünür "Yeni sayfa" düğmesi ve sayfa okları; sayfa varsayılan tam genişlik; kalem/fosforlu/silgi için ayrı boyut paneli ve silgi daire imleci; fosforlu için kendi paleti (saydam, multiply, kesik uç); Şekil paneli (otomatik düzelt anahtarı + çizgi, ok, daire, elips, dikdörtgen, üçgen araçları), basılı tutma eşiği 10 px / 600 ms (kalem titremesi için).
 - Sınırsız tuval gerçek sonsuz DEĞİL: 1404 × 14040 sabit büyük sayfa (veri modeli sayfa boyutlu).
 - Açık: boyutlar yalnız oturumda tutuluyor (`toSizes`/`restoreSizes` hazır, ekran bağlamadı); `recognizeShape` tam dikdörtgeni tanımıyor (elle dikdörtgen aracı var); fosforlu uç yönü yatay çizgide kalınlık kadar (metin vurgulamak için); 30x zumda keskinlik tablette bakılmalı.
 
@@ -180,7 +180,7 @@ Casper PAD H10'da (SDK 36, 1600×2560) deneme sürümü kuruldu ve gerçek kalem
 - Kalıcı: kalem/fosforlu/silgi boyutu ve yuva konumu `app_meta`'da (`defter.arac_ayari`, masaüstünde `masaustu.` önekli); 0,5 sn gecikmeli yazılır, ekran kapanırken de yazılır.
 
 ## v9.12: tabletteki ikinci deneme sonrası (22.11.2026)
-Ahmet: "parmakla büyütme/küçültme yok, PDF'te el ile hareket yok, silinen defter listeden kaybolmuyor, çizim arayüzü pratik değil, hâlâ sadece çizgili sayfa var, soru defterinde çizim olmalı".
+kullanıcı: "parmakla büyütme/küçültme yok, PDF'te el ile hareket yok, silinen defter listeden kaybolmuyor, çizim arayüzü pratik değil, hâlâ sadece çizgili sayfa var, soru defterinde çizim olmalı".
 - **Kök neden (parmak):** avuç süzgeci `radiusMajor >= 24`'ü avuç sayıyordu; tablette gerçek parmak teması 75–143. Her parmak yutuluyordu, kaydırma ve zum (defter + PDF) hiç çalışmıyordu. Eşik 260 yapıldı; asıl koruma kalem yakınlığı (hover) ve çizerken kilit. Gerçek avuç boyutu ÖLÇÜLMEDİ (260 tahmin).
 - Silinen defter/PDF listeden anında gizlenir (iyimser gizleme; yazma hatasında geri gelir). Cihazdaki gecikmenin kök nedeni bulunamadı.
 - Çizim arayüzü: ince üst çubuk, alta yüzen araç yuvası (≥52 dp), seçili araca tekrar dokununca ayar penceresi (boyut, renk, şekil, kalem türü, sertlik, silgi modu), ⇅ ile alta/üste, "Sayfa" penceresi (Düz/Çizgili/Kareli/Noktalı, arka plan, çizgi aralığı [yalnız oturumda]), sayfa şeridi varsayılan kapalı, kalem/silgi boyutları kalıcı (`defter.arac_ayari`).
@@ -188,7 +188,7 @@ Ahmet: "parmakla büyütme/küçültme yok, PDF'te el ile hareket yok, silinen d
 - 829 test. Açık: yuva kalemle sürüklenmiyor (yalnız ⇅); koyu arka planda varsayılan siyah kalem görünmez; ayar penceresi açıkken sayfaya çizilemez; fotoğraf başka oranlı resimle değiştirilirse eski çizgiler kayar.
 
 ## v9.13: sonsuz defter, 4 kenar yuva, silgi, PDF araçları, tam sol menü (22.11.2026)
-Ahmet'in isteği: "sonsuz aşağı kayan defter; kalem menüsü yana/üste/alta kayabilsin; geri al/ileri al; silgi kalınlık modu; PDF'te aynı araçlar; tablette her şey, sol menüde hepsi, doğrudan sol menüde".
+kullanıcının isteği: "sonsuz aşağı kayan defter; kalem menüsü yana/üste/alta kayabilsin; geri al/ileri al; silgi kalınlık modu; PDF'te aynı araçlar; tablette her şey, sol menüde hepsi, doğrudan sol menüde".
 - **Sonsuz (aşağı kayan) sayfa:** genişlik 1404, yükseklik 4300+ ise sonsuz sayılır (şema değişmedi; eski 1404×14040 sayfalar da); kalem/çizgi alta 600 birim yaklaşınca +2000 uzar (üst sınır 200000), kalem basılıyken uzamaz, çizgi koordinatı değişmez, şablon yalnız görünen aralığa çizilir. Yeni sonsuz sayfa 1404×4400 başlar.
 - **Yuva:** üst/alt/sol/sağ; "Konum" düğmesi (4 yönlü menü) ya da basılı tutup sürükleyerek en yakın kenara; dikey düzen; kalıcı. Defter, PDF okuyucu ve çözüm ekranı aynı `NoteToolDock`/`FloatingToolDock`u kullanır; ayarlar ortak (`defter.arac_ayari`).
 - **Geri al/yinele:** yuvada hep görünür, büyük; basılı tutunca hızlı tekrar.
@@ -205,7 +205,7 @@ Ahmet'in isteği: "sonsuz aşağı kayan defter; kalem menüsü yana/üste/alta 
 - Doğrulanmadı: gerçek ekranda kapak/raf görünümü; "Claude'un değişiklikleri" gibi uzun adlar 232 dp'de elips olabilir.
 
 ## v9.15 – v9.18 (23.11.2026): çoklu cihaz, hız, PDF kitap, filigran, analiz modu
-Ahmet'in istekleri ve karşılıkları:
+kullanıcının istekleri ve karşılıkları:
 - **Aynı anda telefon + tablet + bilgisayar (v9.15):** bilgisayar en çok 4 cihazı AYNI ANDA eşleşik tutar (her birinin kendi anahtarı/oturumu/sıra sayacı; biri kalkınca öbürleri kopmaz; eski tek-cihaz `esitleme.json` göçlü). Yeni eşleşen cihaz bilgisayardaki tüm güncel satırları alır (tam durum; telefondaki eski veri tablete de gelir; imleç yalnız boş cihazda çekilir: ara değişiklikler kaybolmaz). PDF dosyaları iki yönlü: cihaz→bilgisayar (`PUT`), bilgisayar→cihaz (`pdf-al`, üçüncü dar istisna; iki ayar da varsayılan KAPALI). Telefon↔tablet doğrudan eşleşme yok (bilgisayar merkez). İnceleme düzeltmeleri: imleç veri kaybı, kilit bekleme sınırı (20 sn, 409 meşgul), kaldırılan cihazın akışı kesilir, silinmiş PDF verilmez, foto izni cihaza özel. Bilinen sınır: istekteki defter kimliği eşleşme kimliğine bağlı değil.
 - **Açılış hızı (v9.15.1):** tablette şimdiye dek DEBUG (JIT) sürüm vardı. Hızlı deneme sürümü: `flutter build apk --profile --target-platform android-arm64` (AOT; `.gece` kimliği profile'a da verildi). Ağır başlatmalar ilk kareden sonraya ertelendi (bildirim init, MEB tohumu, OCR/GenAI/kamera dinleyicileri 1,5 sn sonra); `KocumStart` açılış izi (`adb logcat -s flutter | grep KocumStart`). Gerçek ölçüm yapılmadı (tablet yetkisizdi).
 - **PDF içe aktarma + kitap (v9.16):** içe aktarma penceresi ("Kitap olarak da ekle", varsayılan açık); kitap formu otomatik dolar (başlık, sayfa sayısı, ders/sınav/yayınevi tahmini, şablon eşleşmesi), dolduramadıkları kırmızı "Doldur", Kaydet hepsi dolunca açılır; sayfa ofseti sorulur. PDF kitaplığı kapak rafı; kitap kapağında PDF rozeti ve "PDF'te aç". Doğrulanmadı: PDF metadata (Title/Author) motordan beslenmiyor.
@@ -217,7 +217,7 @@ Ahmet'in istekleri ve karşılıkları:
 - Açık: eşitlemeyle gelen katman panel açılınca görünür (canlı değil); katman yeniden adlandırma arayüzü yok; yuva sağdayken analiz paneli üst üste binebilir; tam test 1051 geçti.
 
 ## El yazısını metne çevirme (şema 21)
-Ahmet: "defterlerin el yazılı kopyasını (metin hâlini) oluşturmak için kullanılabiliyorsa ekle".
+kullanıcı: "defterlerin el yazılı kopyasını (metin hâlini) oluşturmak için kullanılabiliyorsa ekle".
 - **Paket:** `google_mlkit_digital_ink_recognition` 0.14.2 (MIT; `pub get` yalnız bu paketi ekledi, `google_mlkit_commons` zaten vardı). Yerel kitaplık `com.google.mlkit:digital-ink-recognition:19.0.0`. R8: `tool/r8_patch.dart` eklenti sınıfını korur (`r8InkRule`; eski yamalı dosyaya tek kural eklenir, testli).
 - **Model:** Türkçe `tr-TR`, ~20 MB, ilk kullanımda indirilir (APK'ya gömülmez). Eklenti ilerleme ve iptal vermez: arayüz "ilerleme yüzdesi yok" der, "Beklemeyi bırak" yalnız beklemeyi bırakır (indirme arka planda bitebilir).
 - **Satır gruplama (`line_grouping.dart`):** tanıyıcı tek satır varsayar. Gövde çizgileri y-merkezine göre kümelenir (eğik yazı için en yakın x komşusuna göre), nokta/virgül/aksan en yakın satıra bağlanır, yan yana kalan parçalar birleşir, üst üste satırlar birleşmez. Çok uzun düz çizgi, fosforlu, silinmiş atlanır; büyük kapalı şekil "[şekil]" satırı olur. Tanıyıcıya giden çizgiler satır sol-üstüne taşınır, soldan sağa sıralanır, zamanı artan yapılır; yazı alanı bir satır kadar yüksek; bağlam = önceki satırın son 20 karakteri.
@@ -235,10 +235,10 @@ Ahmet: "defterlerin el yazılı kopyasını (metin hâlini) oluşturmak için ku
 - **Açık:** Drift akış önbelleği anahtarı yalnız SQL metni: eski `watchNotebooks`/`watchPages` aynı düz `SELECT` ile karışabilir (yeni akış benzersiz SQL kullanır).
 - **APK boyutu (abi):** ML Kit eklentileri x86_64/armeabi-v7a `.so` dosyalarını da getiriyordu (profile 131,5 MB). `tool/abi_patch.dart` (`patch_android.dart` çağırır) `ndk.abiFilters`'ı yalnız `arm64-v8a`'ya indirir; test `test/abi_patch_test.dart`.
 - Sonuç: profile 131,5 -> 94,0 MB (`lib/arm64-v8a/` tek), release 63,5 MB (R8 uyarısız, paket kimlikleri değişmedi: `.gece` / `com.kocum.kocum`).
-- Release APK tablete KURULMADI (adb yok); Ahmet elle denesin: ML Kit el yazısı/OCR arm64'te çalışmalı.
+- Release APK tablete KURULMADI (adb yok); kullanıcı elle denesin: ML Kit el yazısı/OCR arm64'te çalışmalı.
 
 ## Sağlık verisi: uyku, nabız, stres (şema 22)
-Ahmet: HUAWEI WATCH FIT 2 + Huawei Sağlık; "stres ve uyku verilerini Koçum'a almanın yolu".
+kullanıcı: HUAWEI WATCH FIT 2 + Huawei Sağlık; "stres ve uyku verilerini Koçum'a almanın yolu".
 - **Gerçekler (araştırma; ikincil kaynak):** Health Connect'te SleepSession (derin/hafif/REM/uyanık), HeartRate, RestingHeartRate, HRV, SpO2, Steps VAR; STRES türü YOK. Huawei Sağlık'ın Health Connect'e yazıp yazmadığı DOĞRULANAMADI (ikincil kaynaklar "yazmıyor" diyor). Bu yüzden önce TANI: Ayarlar > Sağlık verisi > "Son 14 günü tara" hangi paketlerin (ör. `com.huawei.health`) hangi türde kaç kayıt yazdığını listeler; Huawei yoksa açıkça ZIP yolunu önerir.
 - **Karar (A):** `health` paketi yerine doğrudan Kotlin kanalı. `health` 14.x compileSdk 37 + AGP 9.1+ + FlutterFragmentActivity ister (bu makinede yalnız android-36; MainActivity genai/ink yamalı FlutterActivity). `pub add health --dry-run` çözülür ama derleme gereksinimi uymaz; denenmedi. Kanal: `tool/health_patch.dart` (+ `test/health_patch_test.dart`): `connect-client:1.1.0` bağımlılığı, 6 salt okuma izni, `<queries>`, rationale + `VIEW_PERMISSION_USAGE` alias, `KocumHealth.kt` (FlutterPlugin + ActivityAware; izin Intent'i `PermissionController.createRequestPermissionResultContract()`), MainActivity'ye `flutterEngine.plugins.add(KocumHealthPlugin())`. Debug ve release (arm64) derlemeleri geçti (aşağı bak).
 - **Veri (C):** `saglik_gunluk`, `saglik_stres`, `saglik_uyku_oturum`; tekilleştirme (aynı kaynak + gün/zaman/başlangıç ikinci kez çift kayıt yapmaz). Defter/senkron DIŞI (`healthTables`), masaüstü birleştirmede alınmaz, Claude raporuna varsayılan KAPALI anahtarla küçük günlük özet. Yedek ZIP'e girer (kartta yazılı). Silme düğmesi onaylı.
@@ -248,7 +248,7 @@ Ahmet: HUAWEI WATCH FIT 2 + Huawei Sağlık; "stres ve uyku verilerini Koçum'a 
 - **Açık:** `kocum` CLI aracı sağlık tablolarına özel komut sunmuyor; masaüstünde ZIP içe aktarma yapılmadı; `pubspec` sürümü artırılmadı.
 
 ## T7 veri: Defter klasörleri, Pano, alt sayfa, sayfa öğeleri (şema 23; arayüz ayrı)
-- İstek (Ahmet): defterler klasör/dosya olsun, FİZİK defterinin sayfaları MEB konularıyla eşleşsin; %10'a küçültünce sayfalar zihin haritası gibi dursun ve çizgiyle bağlanabilsin; sayfa içinde istediğim yerde 2. sayfa açılsın; sayfaya metin ve foto eklenebilsin.
+- İstek (kullanıcı): defterler klasör/dosya olsun, FİZİK defterinin sayfaları MEB konularıyla eşleşsin; %10'a küçültünce sayfalar zihin haritası gibi dursun ve çizgiyle bağlanabilsin; sayfa içinde istediğim yerde 2. sayfa açılsın; sayfaya metin ve foto eklenebilsin.
 - Tablolar (`from < 23`, `createTable` + PRAGMA korumalı `addColumn` + `IF NOT EXISTS` indeksler; 14/17/19/20/22 -> 23 testli): `ink_folders`; `ink_notebooks.folderId`; `ink_note_pages.title|konuId|parentPageId|boardX|boardY|boardW|boardH`; `ink_page_links` (kind link|child|konu, çapa `fromX/fromY`); `ink_page_items` (kind text|image, x/y/w/h/rotation/z, `payload` JSON). Hepsi senkron tablosu (tetikleyici, birleştirici, `kocum` aracı otomatik); `change_view` etiketleri "Klasör", "Sayfa bağlantısı", "Sayfa öğesi". Yabancı anahtar yok (sıra bozuk eşitlenirse takılmasın).
 - Karar (sapma): görsel yolu `payload` içinde DEĞİL `ink_page_items.mediaPath` sütununda. `mediaPathsIn` yalnız `"notes/…"` biçimindeki JSON dizgesini görür; yük metin sütununda kaçışlı (`\"`) olunca fotoğraf eşitlenmezdi.
 - Karar: klasör silme yumuşak; içindeki defterler ve alt klasörler silinenin ebeveynine (yoksa köke) çıkar, hiçbir defter gizlenmez. Klasörü kendi altına/torununun altına taşıma reddedilir (`wouldCreateFolderCycle`); eşitlemeden gelen bozuk döngü okuyucuda kesilir.

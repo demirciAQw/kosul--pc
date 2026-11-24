@@ -36,6 +36,7 @@ import '../features/sync/presentation/send_to_computer_screen.dart';
 import 'app_shell.dart';
 import 'routes.dart';
 import 'tablet.dart';
+import '../features/notes/presentation/ink_board_screen.dart';
 import '../features/notes/presentation/ink_notebook_screen.dart';
 import '../features/notes/presentation/notebooks_screen.dart';
 import '../features/health/presentation/health_screen.dart';
@@ -266,6 +267,15 @@ final routerProvider = Provider<GoRouter>((ref) {
             initialPageId: state.uri.queryParameters['sayfa'],
           ),
         ),
+        routes: [
+          GoRoute(
+            path: 'pano',
+            builder: (context, state) => TabletFrame(
+              selected: RailItem.defterler,
+              child: InkBoardScreen(notebookId: state.pathParameters['id']!),
+            ),
+          ),
+        ],
       ),
       GoRoute(
         path: '/pdf/:id',
