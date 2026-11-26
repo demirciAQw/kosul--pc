@@ -41,9 +41,43 @@ Protokol v1, düz HTTP (`dart:io`). Portlar: TCP **47321**, UDP **47322** (bulma
 3. Telefon fotoğrafsız yedek ZIP'ini (`kocum_yedek.json` + `kocum.db`) PUT eder; bilgisayar `ImportService` ile birleştirir.
 4. Kopma olursa yeniden gönder: kaldığı yerden devam eder. 3 deneme; IP değiştiyse kimliğe göre yeniden bulunur.
 
+## Şifreleme (sürüm 2)
+
+Kod: `lib/features/sync/domain/sync_cipher.dart` (saf Dart), testler `test/sync_cipher_test.dart`.
+
+- **Algoritma:** ChaCha20-Poly1305 (RFC 8439, AEAD) `pointycastle` (MIT, saf Dart; yeni bağımlılık bu). Anahtar türetme HKDF-SHA256
+  (RFC 5869, `crypto` HMAC'iyle; RFC test vektörü testte). Kendi şifre algoritmamız yok. Android ve Linux'ta aynı saf Dart kod;
+  ölçüm (JIT, masaüstü) ~60 MB/sn, 300 MB PDF birkaç saniye (parça başına ~1 ms, arayüzü tıkamaz).
+- **Anahtar:** eşleşmede iki tarafta hesaplanan ve `esitleme.json` / `alici.json`'a yazılan eşleşme anahtarı (DH + kod). İmza
+  anahtarı o değerin kendisi; şifreleme anahtarı ondan HKDF ile ayrıca türetilir, yani MEVCUT eşleşmeler yeniden eşleşmeden
+  şifrelenir. HER İLETİ (istek ya da yanıt) için ayrı anahtar: `HKDF(eşleşme anahtarı, "ileti|yön|oturum|sıra")`. Yön:
+  `i2a` istemci → alıcı, `a2i` alıcı → istemci. Anahtar veritabanına, günlüğe, hata iletisine yazılmaz.
+- **Nonce:** 4 sıfır bayt + 64 bit parça sayacı. Anahtar zaten ileti başınadır (oturum kimliği rastgele, sıra numarası bir oturumda
+  bir kez kabul edilir: `SyncSession.claim`), bu yüzden (anahtar, nonce) çifti tekrar etmez. Aynı sıra numarasıyla ikinci istek
+  sunucuda reddedilir; hata yanıtları şifrelenmez (aynı anahtarla ikinci şifreleme olmasın).
+- **Çerçeve (parçalı akış):** gövde en çok 64 KiB'lık parçalara bölünür; her parça `4 bayt başlık (bit 31 = SON parça, 31 bit uzunluk) +
+  şifreli metin + 16 bayt etiket`. AAD: yön, oturum, sıra, yol, fotoğraf yolu başlığı, parça sırası, "son" bayrağı. Parça silinirse, yeri
+  değişirse, akış kesilirse (son parça yok), sonuna veri eklenirse ya da başka isteğe taşınırsa çözme hata verir; çözülen hiçbir bayt
+  etiket doğrulanmadan verilmez. Boş gövde çerçevesiz boştur (PDF "bu özet var mı?" sorusu). Büyük dosya (PDF, fotoğraf, yedek)
+  hiçbir yerde belleğe tamamen alınmaz: `sealStream` / `openStream`.
+- **İmza ve sıra korunur:** HMAC imzası ve sıra numarası olduğu gibi; imza DÜZ gövdenin özetindedir (şifreli metne değil), yani
+  sunucu çözdükten sonra doğrular. Yanıt imzası da düz gövdenin özetidir. `pdf-al` yanıt imzası "ad|başlangıç|toplam" üzerinde kalır
+  (toplam düz uzunluk; `Content-Length` şifreli uzunluktur, `plainLength` ile geri çıkarılır).
+- **Kapsam:** imzalı tüm istekler ve onların 200 yanıtları: defter değişiklikleri (`degisiklikler`, tam durum sayfaları dahil),
+  fotoğraf listesi / yükleme / `fotograf-al`, PDF `PUT /pdf` ve `pdf-al`, yedek ZIP. Başlık `x-kocum-sifre: chacha20-poly1305` şart.
+- **Sürüm uyumu:** `syncProtocolVersion = 2`. `merhaba` yanıtındaki `surum` uyuşmazsa istemci "Diğer cihazı güncelleyin" (ya da
+  "Bu cihazı güncelleyin") hatası verir; ŞİFRESİZE DÜŞÜLMEZ. Sunucu şifre başlığı olmayan imzalı isteği reddeder (400). Bulma (UDP) farklı
+  sürümlü cihazı da listeler ki bağlanınca anlaşılır hata çıksın.
+- **Düz kalanlar (bilerek):** UDP bulma ve `merhaba` yanıtı (kimlik, ad, platform, sürüm, açık DH değeri, meydan okuma); eşleştirme ve oturum
+  açma gövdeleri (yalnızca açık DH değerleri, kimlikler, cihaz adı, meydan okumalar, kanıtlar; sırlar zaten ağdan geçmez); istek başlıkları
+  (oturum, sıra, imza, `x-kocum-yol` = fotoğraf yolu ya da PDF özeti); yöntem, yol, boyut ve zamanlama; HTTP hata yanıtları (kısa
+  Türkçe ileti). Bunlar içerik değil üst veridir; ortak Wi-Fi'da yine de ağı dinleyen bunları görür.
+- **Bilinen sınır:** ileri gizlilik yok (eşleşme anahtarı sızarsa o eşleşmenin kayıtlı trafiği çözülür); anahtar yenilemek için eşleşmeyi
+  kaldırıp yeniden eşleştir. Saf Dart hız sınırı: çok eski telefonda 300 MB PDF belirgin yavaş olabilir.
+
 ## Bilinen sınırlar
 
-- **İçerik şifrelenmez, yalnızca imzalanır.** Ağı dinleyen görebilir ama değiştiremez ve senin yerine gönderemez. Okul, kafe gibi ortak Wi-Fi'da kullanma.
+- **İçerik şifreli ve imzalı (protokol sürüm 2).** Ayrıntı aşağıda "Şifreleme (sürüm 2)". Ortak Wi-Fi'da yine de üst veri (cihaz adı, fotoğraf yolu, PDF özeti, boyut, zamanlama) görünür.
 - Platform bildirimi taklit edilebilir; asıl kilit koddan türeyen anahtardır.
 - Android 17 hedefinde yerel ağ için çalışma zamanı izni (`ACCESS_LOCAL_NETWORK`) gerekecek; şimdilik INTERNET izni (`tool/network_patch.dart`) yeterli.
 - Güvenlik duvarı: `sudo ufw allow from 192.168.0.0/16 to any port 47321 proto tcp` ve `... port 47322 proto udp`.

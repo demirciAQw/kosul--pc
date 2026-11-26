@@ -37,8 +37,8 @@ class SendToComputerScreen extends ConsumerWidget {
 }
 
 const _footer = 'Yalnızca aynı ağdaki eşleşmiş cihazlara gider; İnternet ya da bulut kullanılmaz. '
-    'Anahtar ağdan hiç geçmez; fotoğraflar ve veriler şifrelenmeden gider, bu yüzden okul ya da kafe gibi '
-    'ortak Wi-Fi\'da kullanma.';
+    'Anahtar ağdan hiç geçmez; veriler ve fotoğraflar uçtan uca şifreli gider. Yine de okul ya da kafe gibi '
+    'ortak Wi-Fi\'da cihaz adı ve dosya adları görünebilir; mümkünse evde kullan. İki cihazın da Koçum\'u güncel olmalı.';
 
 String _kindLabel(String kind) => switch (kind) {
       deviceKindTablet => 'tablet',

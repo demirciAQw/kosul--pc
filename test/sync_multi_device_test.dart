@@ -17,6 +17,7 @@ import 'package:kocum/features/sync/data/ledger_sync.dart';
 import 'package:kocum/features/sync/data/pdf_pull.dart';
 import 'package:kocum/features/sync/data/phone_sync_store.dart';
 import 'package:kocum/features/sync/data/sync_client.dart';
+import 'package:kocum/features/sync/domain/sync_cipher.dart';
 import 'package:kocum/features/sync/domain/sync_crypto.dart';
 import 'package:kocum/features/sync/domain/sync_protocol.dart';
 
@@ -394,18 +395,27 @@ void main() {
     Future<(int, String)> rawPost(_Dev d, Object body, {bool sign = true, List<int>? key, int seq = 1, String? session}) async {
       final conn = session == null ? await d.client.connect(d.computer, phoneId: d.id) : null;
       final sess = session ?? conn!.session;
-      final data = utf8.encode(jsonEncode(body));
+      final plain = utf8.encode(jsonEncode(body));
+      final data = sealBytes(
+          plain,
+          SealContext(
+              pairingKey: d.computer.key,
+              direction: SealDirection.toReceiver,
+              session: sess,
+              sequence: seq,
+              path: SyncPaths.pdfGet));
       final http = HttpClient()..findProxy = ((_) => 'DIRECT');
       try {
         final req = await http.openUrl('POST', Uri.parse('http://127.0.0.1:${server.port}${SyncPaths.pdfGet}'));
         if (sign) {
           req.headers
+            ..set(SyncHeaders.cipher, syncCipherName)
             ..set(SyncHeaders.session, sess)
             ..set(SyncHeaders.sequence, '$seq')
             ..set(
               SyncHeaders.signature,
               requestSignature(key ?? d.computer.key,
-                  method: 'POST', path: SyncPaths.pdfGet, session: sess, sequence: seq, mediaPath: '', bodyHash: sha256Hex(data)),
+                  method: 'POST', path: SyncPaths.pdfGet, session: sess, sequence: seq, mediaPath: '', bodyHash: sha256Hex(plain)),
             );
         }
         req.contentLength = data.length;
@@ -656,11 +666,19 @@ void main() {
         try {
           final req = await http.postUrl(Uri.parse('http://127.0.0.1:${server.port}${SyncPaths.ledger}'));
           req.headers
+            ..set(SyncHeaders.cipher, syncCipherName)
             ..set(SyncHeaders.session, phone.conn.session)
             ..set(SyncHeaders.sequence, '$seq')
             ..set(SyncHeaders.signature,
                 requestSignature(key, method: 'POST', path: SyncPaths.ledger, session: phone.conn.session, sequence: seq, mediaPath: '', bodyHash: sha256Hex(body)));
-          req.add(body);
+          req.add(sealBytes(
+              body,
+              SealContext(
+                  pairingKey: phone.computer.key,
+                  direction: SealDirection.toReceiver,
+                  session: phone.conn.session,
+                  sequence: seq,
+                  path: SyncPaths.ledger)));
           final res = await req.close();
           await res.drain<void>();
           return res.statusCode;

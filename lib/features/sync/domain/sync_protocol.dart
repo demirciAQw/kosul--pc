@@ -1,4 +1,4 @@
-/// Telefon → bilgisayar kablosuz aktarımın ortak sözleşmesi (sürüm 1).
+/// Telefon → bilgisayar kablosuz aktarımın ortak sözleşmesi (sürüm 2: içerik şifreli).
 /// İki taraf da adları, sınırları ve mesajları yalnızca buradan alır.
 ///
 /// Akış:
@@ -8,12 +8,20 @@
 ///     ile iki tarafta ayrı ayrı hesaplanır; ağdan hiç geçmez.
 ///  3. Oturum: her bağlantıda iki taraf anahtarı bildiğini kanıtlar.
 ///  4. Aktarım: her istek imzalı ve sıra numaralı; aynı istek iki kez
-///     kabul edilmez.
+///     kabul edilmez. Sürüm 2'den beri imzalı isteklerin ve 200 yanıtlarının
+///     GÖVDESİ de şifrelidir (`sync_cipher.dart`, ChaCha20-Poly1305). Şifresiz
+///     konuşma yoktur: sürümler uyuşmazsa anlaşılır hata verilir.
+///
+/// Düz kalanlar (bilerek): bulma (UDP) ve `merhaba` yanıtı, eşleştirme ve oturum
+/// açma mesajları (yalnızca açık DH değerleri, meydan okumalar, kimlikler, ad ve
+/// kanıtlar; sırlar zaten ağdan geçmez), istek başlıkları (oturum, sıra, imza, yol
+/// = fotoğraf yolu ya da PDF özeti), HTTP yöntemi ve yolu, hata yanıtları
+/// (yalnızca kısa iletiler) ve gövde boyutu (parça başına sabit ek yük).
 library;
 
 import 'dart:convert';
 
-const syncProtocolVersion = 1;
+const syncProtocolVersion = 2;
 const syncAppName = 'kocum';
 
 /// Bilgisayarın dinlediği TCP portu (HTTP) ve bulma portu (UDP).
@@ -49,6 +57,9 @@ abstract final class SyncHeaders {
   static const sequence = 'x-kocum-sira';
   static const signature = 'x-kocum-imza';
   static const mediaPath = 'x-kocum-yol';
+
+  /// Gövde şifreli: değer [syncCipherName]. İmzalı her istekte ve her 200 yanıtında şart.
+  static const cipher = 'x-kocum-sifre';
 
   /// Bilgisayarın yanıt imzası (telefon doğrular; ağdaki biri yanıtı değiştiremez).
   static const responseSignature = 'x-kocum-yanit-imza';
@@ -189,7 +200,8 @@ class DiscoveryReply {
       final j = jsonDecode(utf8.decode(data));
       if (j is! Map) return null;
       final m = j.cast<String, Object?>();
-      if (m['uygulama'] != syncAppName || m['surum'] != syncProtocolVersion) return null;
+      // Sürüm farkı olan cihaz da listelenir: bağlanınca anlaşılır "güncelleyin" hatası çıkar.
+      if (m['uygulama'] != syncAppName || m['surum'] is! int) return null;
       final id = m['id'], name = m['ad'], port = m['port'], platform = m['platform'];
       if (id is! String || !isValidDeviceId(id)) return null;
       if (name is! String || port is! int || port <= 0 || port > 65535 || platform is! String) return null;
@@ -236,6 +248,13 @@ String? _strOrNull(Map<String, Object?> m, String key) {
 }
 
 bool _bool(Map<String, Object?> m, String key) => m[key] == true;
+
+/// Sürüm uyuşmazlığı: şifresiz konuşmaya düşülmez; hangi tarafın güncelleneceği söylenir.
+SyncException versionMismatch(Object? theirs) => SyncException(
+  theirs is int && theirs > syncProtocolVersion
+      ? 'Bu cihazdaki Koçum eski; karşıdaki daha yeni sürümle konuşamaz. Bu cihazı güncelleyin.'
+      : 'Karşıdaki cihazın Koçum sürümü eski (şifreli aktarım yok). Diğer cihazı güncelleyin.',
+);
 
 /// GET merhaba yanıtı: kimlik, durum ve tek kullanımlık meydan okuma.
 class SyncHello {
@@ -286,9 +305,8 @@ class SyncHello {
   factory SyncHello.fromJson(Object? json) {
     final m = _map(json);
     if (m['uygulama'] != syncAppName) throw const SyncException('Bu adreste Koçum yok.');
-    if (m['surum'] != syncProtocolVersion) {
-      throw const SyncException('Bilgisayardaki Koçum farklı sürümde; iki tarafı da güncelle.');
-    }
+    final theirs = m['surum'];
+    if (theirs != syncProtocolVersion) throw versionMismatch(theirs);
     final id = _str(m, 'id');
     if (!isValidDeviceId(id)) throw const SyncException('Bozuk mesaj: kimlik.');
     return SyncHello(

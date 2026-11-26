@@ -10,6 +10,7 @@ import '../domain/media_rules.dart';
 import '../domain/network_rules.dart';
 import '../domain/pairing_window.dart';
 import '../domain/pdf_rules.dart';
+import '../domain/sync_cipher.dart';
 import '../domain/sync_crypto.dart';
 import '../domain/sync_protocol.dart';
 import '../domain/sync_session.dart';
@@ -470,7 +471,7 @@ class SyncServer {
     final name = request.headers.value(SyncHeaders.mediaPath) ?? '';
     final sha = shaOfPdfName(name);
     if (sha == null) throw const _Reject(400, 'PDF adı kurallara uymuyor; alınmadı.');
-    final length = request.contentLength;
+    final length = _plainContentLength(ctx);
     if (length < 0) throw const _Reject(411, 'PDF boyutu bildirilmedi.');
     final probe = length == 0;
     _verify(request, signed, probe ? sha256Hex(const <int>[]) : sha, mediaPath: name);
@@ -559,10 +560,11 @@ class SyncServer {
       ..statusCode = 200
       ..headers.contentType = ContentType.binary
       ..headers.set(HttpHeaders.cacheControlHeader, 'no-store')
+      ..headers.set(SyncHeaders.cipher, syncCipherName)
       ..headers.set(SyncHeaders.responseSignature, signature)
-      ..contentLength = stat.size;
+      ..contentLength = sealedLength(stat.size);
     try {
-      await response.addStream(file.openRead(0, stat.size));
+      await response.addStream(sealStream(file.openRead(0, stat.size), _replySeal(signed, ctx.request.uri.path)));
       await response.close();
     } on Exception {
       // Telefon bağlantıyı kapatmış olabilir; yeniden ister.
@@ -607,12 +609,14 @@ class SyncServer {
       ..statusCode = 200
       ..headers.contentType = ContentType.binary
       ..headers.set(HttpHeaders.cacheControlHeader, 'no-store')
+      ..headers.set(SyncHeaders.cipher, syncCipherName)
       ..headers.set(SyncHeaders.responseSignature, signature)
-      ..contentLength = stat.size - req.start;
+      ..contentLength = sealedLength(stat.size - req.start);
     ctx.bodyTaken = true;
     _emit(SyncEventKind.pdf, '${signed.phone.name}: PDF veriliyor (${formatPdfSize(stat.size)}).');
     try {
-      await for (final chunk in target.openRead(req.start, stat.size)) {
+      final sealed = sealStream(target.openRead(req.start, stat.size), _replySeal(signed, ctx.request.uri.path));
+      await for (final chunk in sealed) {
         if (ctx.aborted || ctx.gone) break;
         response.add(chunk);
         await response.flush();
@@ -681,6 +685,13 @@ class SyncServer {
       if (session != null) _sessions.remove(session.id);
       throw const _Reject(401, 'Oturum geçersiz ya da süresi doldu; yeniden bağlan.');
     }
+    // Geçerli oturum şart (yoksa yukarıda 401). Şifresiz (eski sürüm) istek kabul edilmez; sessizce düz konuşmaya düşülmez.
+    if (request.headers.value(SyncHeaders.cipher) != syncCipherName) {
+      throw const _Reject(
+        400,
+        'İstek şifresiz geldi; bu cihaz yalnızca şifreli aktarım kabul eder. Diğer cihazı güncelleyin.',
+      );
+    }
     if (!session.claim(sequence, now)) {
       _sessions.remove(session.id);
       throw const _Reject(401, 'Sıra numarası tutmadı (aynı istek ikinci kez mi geldi?); oturum kapatıldı.');
@@ -691,7 +702,17 @@ class SyncServer {
       throw const _Reject(401, 'Bu cihazın eşleşmesi kaldırılmış.');
     }
     ctx.deviceId = phone.id;
-    return _Signed(session, sequence, phone);
+    ctx.seal = SealContext(
+      pairingKey: phone.key,
+      direction: SealDirection.toReceiver,
+      session: session.id,
+      sequence: sequence,
+      path: request.uri.path,
+      mediaPath: request.headers.value(SyncHeaders.mediaPath) ?? '',
+    );
+    final signed = _Signed(session, sequence, phone);
+    ctx.signed = signed; // imzalı isteğin 200 yanıtı da imzalanır ve şifrelenir
+    return signed;
   }
 
   void _verify(HttpRequest request, _Signed signed, String bodyHash, {String mediaPath = ''}) {
@@ -732,33 +753,58 @@ class SyncServer {
   }
 
   Future<Uint8List> _readBytes(_Ctx ctx, int limit) async {
-    final request = ctx.request;
-    if (request.contentLength > limit) throw const _Reject(413, 'İstek çok büyük.');
+    if (_plainContentLength(ctx) > limit) throw const _Reject(413, 'İstek çok büyük.');
     ctx.bodyTaken = true;
     final out = BytesBuilder(copy: false);
-    await for (final chunk in request) {
-      if (out.length + chunk.length > limit) throw const _Reject(413, 'İstek çok büyük.');
-      out.add(chunk);
+    try {
+      await for (final chunk in _bodyStream(ctx, limit)) {
+        if (out.length + chunk.length > limit) throw const _Reject(413, 'İstek çok büyük.');
+        out.add(chunk);
+      }
+    } on SealException catch (e) {
+      throw _sealFailure(ctx, e);
     }
     return out.takeBytes();
   }
 
+  /// Gövde baytları: imzalı (talep edilmiş) isteklerde şifreli gövde çözülür.
+  Stream<List<int>> _bodyStream(_Ctx ctx, int limit) {
+    final seal = ctx.seal;
+    return seal == null ? ctx.request : openStream(ctx.request, seal, maxPlain: limit);
+  }
+
+  /// Gövdenin DÜZ uzunluğu (bilinmiyorsa -1): Content-Length şifreli uzunluktur.
+  int _plainContentLength(_Ctx ctx) {
+    final wire = ctx.request.contentLength;
+    if (ctx.seal == null || wire <= 0) return wire;
+    return plainLength(wire) ?? (throw const _Reject(400, 'Şifreli gövde uzunluğu geçersiz.'));
+  }
+
+  /// Çözülemeyen şifreli gövde: oturum kapanır (anahtar ya da veri bozuk/değiştirilmiş).
+  _Reject _sealFailure(_Ctx ctx, SealException e) {
+    final seal = ctx.seal;
+    if (seal != null) _sessions.remove(seal.session);
+    _emit(SyncEventKind.rejected, 'Çözülemeyen şifreli bir istek reddedildi.');
+    return _Reject(400, 'Şifreli gövde çözülemedi (${e.message}); oturum kapatıldı.');
+  }
+
   /// Gövdeyi diske akıtır (belleğe almadan), SHA-256 özetini döner.
   Future<String> _readToFile(_Ctx ctx, File target, int limit) async {
-    final request = ctx.request;
-    if (request.contentLength > limit) throw const _Reject(413, 'Dosya çok büyük.');
+    if (_plainContentLength(ctx) > limit) throw const _Reject(413, 'Dosya çok büyük.');
     ctx.bodyTaken = true;
     final hash = StreamingSha256();
     final sink = target.openWrite();
     var total = 0;
     try {
-      await for (final chunk in request) {
+      await for (final chunk in _bodyStream(ctx, limit)) {
         total += chunk.length;
         if (total > limit) throw const _Reject(413, 'Dosya çok büyük.');
         hash.add(chunk);
         sink.add(chunk);
       }
       await sink.flush();
+    } on SealException catch (e) {
+      throw _sealFailure(ctx, e);
     } finally {
       await sink.close();
     }
@@ -805,23 +851,41 @@ class SyncServer {
         }
       }
       final bytes = utf8.encode(jsonEncode(body));
+      // İmzalı isteğin başarılı yanıtı: imza düz gövdenin özetinde, gövde şifreli.
+      // Hata yanıtları kısa iletidir, düz kalır (aynı iletiye ikinci şifreleme olmasın).
+      final wire = sign != null && status == 200 ? sealBytes(bytes, _replySeal(sign, request.uri.path)) : bytes;
       response
         ..statusCode = status
         ..headers.contentType = ContentType.json
         ..headers.set(HttpHeaders.cacheControlHeader, 'no-store')
-        ..contentLength = bytes.length;
+        ..contentLength = wire.length;
       if (sign != null && status == 200) {
-        response.headers.set(
-          SyncHeaders.responseSignature,
-          responseSignature(sign.phone.key, session: sign.session.id, sequence: sign.sequence, bodyHash: sha256Hex(bytes)),
-        );
+        response.headers
+          ..set(SyncHeaders.cipher, syncCipherName)
+          ..set(
+            SyncHeaders.responseSignature,
+            responseSignature(
+              sign.phone.key,
+              session: sign.session.id,
+              sequence: sign.sequence,
+              bodyHash: sha256Hex(bytes),
+            ),
+          );
       }
-      response.add(bytes);
+      response.add(wire);
       await response.close();
     } on Exception {
       // Telefon bağlantıyı kapatmış olabilir.
     }
   }
+
+  static SealContext _replySeal(_Signed sign, String path) => SealContext(
+    pairingKey: sign.phone.key,
+    direction: SealDirection.toSender,
+    session: sign.session.id,
+    sequence: sign.sequence,
+    path: path,
+  );
 
   static Object? _decode(List<int> bytes) {
     try {
@@ -856,6 +920,9 @@ class _Ctx {
 
   /// Gövde okunmadan yanıtlandı: yanıttan sonra bağlantı kapatılır.
   bool closeAfter = false;
+
+  /// İstek gövdesinin şifre bağlamı (imzalı istek kabul edilince kurulur).
+  SealContext? seal;
 
   /// İmzalı istekte cihaz kimliği (cihaz kaldırılınca bu istek iptal edilir).
   String? deviceId;

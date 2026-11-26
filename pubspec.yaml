@@ -1,7 +1,7 @@
 name: kocum
 description: "Koçum: YKS öğrencileri için tamamen çevrimdışı çalışma, süre ve hata analizi takipçisi."
 publish_to: 'none'
-version: 9.23.0+84
+version: 9.23.1+85
 
 environment:
   sdk: ^3.14.0
@@ -58,6 +58,7 @@ dependencies:
   crypto: ^3.0.3
   desktop_drop: ^0.8.4
   perfect_freehand: ^2.5.2+1 # MIT; kalem çizgisi şekli (features/ink)
+  pointycastle: ^4.0.0 # MIT; ChaCha20-Poly1305 (kablosuz aktarım şifrelemesi, saf Dart)
 
 dev_dependencies:
   flutter_test:

@@ -8,6 +8,7 @@ import '../domain/ledger_protocol.dart';
 import '../domain/media_rules.dart';
 import '../domain/network_rules.dart';
 import '../domain/pdf_rules.dart';
+import '../domain/sync_cipher.dart';
 import '../domain/sync_crypto.dart';
 import '../domain/sync_protocol.dart';
 import 'phone_sync_store.dart';
@@ -279,7 +280,7 @@ class SyncClient {
     }
     // Önce tek özetlik soru (gövdesiz PUT, ad = özet): bilgisayarda varsa dosya
     // hiç okunmaz ve özetlenmez, gövde hiç gitmez.
-    final probe = await _signed(connection, 'PUT', SyncPaths.pdf, body: const <int>[], mediaPath: name, verifyResponse: true);
+    final probe = await _signed(connection, 'PUT', SyncPaths.pdf, body: const <int>[], mediaPath: name);
     if (probe is Map && probe['zatenVar'] == true) return const PdfSendResult(alreadyThere: true);
     // Yüklenecek: dosya BİR kez özetlenir; ad ve boyutla uyuşmazsa (bozuk ya da
     // değişmiş dosya) hiçbir şey yollanmaz.
@@ -304,7 +305,6 @@ class SyncClient {
       fileLength: n,
       onBytes: onProgress,
       cancel: cancel,
-      verifyResponse: true,
       timeout: const Duration(minutes: 30),
     );
     return PdfSendResult(alreadyThere: json is Map && json['zatenVar'] == true);
@@ -318,7 +318,8 @@ class SyncClient {
   Future<LedgerResponse> exchangeLedger(SyncConnection connection, LedgerRequest request) async {
     final body = utf8.encode(jsonEncode(request.toJson()));
     return LedgerResponse.fromJson(
-        await _signed(connection, 'POST', SyncPaths.ledger, body: body, verifyResponse: true, timeout: const Duration(minutes: 5)));
+      await _signed(connection, 'POST', SyncPaths.ledger, body: body, timeout: const Duration(minutes: 5)),
+    );
   }
 
   /// Bilgisayarın verdiği bir fotoğrafı [target] yoluna indirir. Önce geçici
@@ -326,44 +327,32 @@ class SyncClient {
   Future<void> fetchPhoto(SyncConnection connection, MediaEntry entry, File target) async {
     if (!isTransferableMediaPath(entry.path)) throw SyncException('Fotoğraf yolu kurallara uymuyor: ${entry.path}');
     final computer = connection.computer;
-    _checkHost(computer.host);
     final body = utf8.encode(jsonEncode(PhotoGetRequest(entry.path).toJson()));
-    final sequence = connection._next();
-    final request =
-        await _http.openUrl('POST', _uri(computer.host, computer.port, SyncPaths.photoGet)).timeout(_requestTimeout);
-    request.headers
-      ..set(SyncHeaders.session, connection.session)
-      ..set(SyncHeaders.sequence, '$sequence')
-      ..set(
-        SyncHeaders.signature,
-        requestSignature(computer.key,
-            method: 'POST',
-            path: SyncPaths.photoGet,
-            session: connection.session,
-            sequence: sequence,
-            mediaPath: '',
-            bodyHash: sha256Hex(body)),
-      );
-    request.contentLength = body.length;
-    request.add(body);
-    final response = await request.close().timeout(_requestTimeout);
+    final (:response, :sequence, :reply) = await _postSealed(connection, SyncPaths.photoGet, body);
     if (response.statusCode != HttpStatus.ok) {
       await _readJson(response); // hata iletisini fırlatır
       throw SyncException('Bilgisayar fotoğrafı vermedi (${response.statusCode}).');
     }
+    _requireSealed(response);
     await target.parent.create(recursive: true);
     final temp = File('${target.path}.part');
     final hash = StreamingSha256();
     final sink = temp.openWrite();
     var total = 0;
     try {
-      await for (final chunk in response.timeout(const Duration(minutes: 2))) {
+      await for (final chunk in openStream(
+        response.timeout(const Duration(minutes: 2)),
+        reply,
+        maxPlain: SyncLimits.photo,
+      )) {
         total += chunk.length;
         if (total > SyncLimits.photo) throw const SyncException('Fotoğraf beklenenden büyük geldi.');
         hash.add(chunk);
         sink.add(chunk);
       }
       await sink.flush();
+    } on SealException catch (e) {
+      throw SyncException('Fotoğraf çözülemedi: ${e.message}');
     } finally {
       await sink.close();
     }
@@ -414,24 +403,7 @@ class SyncClient {
       }
     }
     final body = utf8.encode(jsonEncode(PdfGetRequest(name, start: have).toJson()));
-    final sequence = connection._next();
-    final request = await _http.openUrl('POST', _uri(computer.host, computer.port, SyncPaths.pdfGet)).timeout(_requestTimeout);
-    request.headers
-      ..set(SyncHeaders.session, connection.session)
-      ..set(SyncHeaders.sequence, '$sequence')
-      ..set(
-        SyncHeaders.signature,
-        requestSignature(computer.key,
-            method: 'POST',
-            path: SyncPaths.pdfGet,
-            session: connection.session,
-            sequence: sequence,
-            mediaPath: '',
-            bodyHash: sha256Hex(body)),
-      );
-    request.contentLength = body.length;
-    request.add(body);
-    final response = await request.close().timeout(_requestTimeout);
+    final (:response, :sequence, :reply) = await _postSealed(connection, SyncPaths.pdfGet, body);
     if (response.statusCode != HttpStatus.ok) {
       try {
         await _readJson(response);
@@ -442,7 +414,9 @@ class SyncClient {
       }
       throw SyncException('Bilgisayar PDF\'i vermedi (${response.statusCode}).');
     }
-    final remaining = response.contentLength;
+    _requireSealed(response);
+    // Gövde şifreli: Content-Length şifreli uzunluktur; düz uzunluk ondan çıkar.
+    final remaining = plainLength(response.contentLength) ?? -1;
     if (remaining < 0 || have + remaining > SyncLimits.pdf) {
       throw SyncException('PDF boyutu sınırı aşıyor (en çok ${formatPdfSize(SyncLimits.pdf)}).');
     }
@@ -450,7 +424,11 @@ class SyncClient {
     final sink = temp.openWrite(mode: FileMode.append);
     var got = have;
     try {
-      await for (final chunk in response.timeout(const Duration(minutes: 2))) {
+      await for (final chunk in openStream(
+        response.timeout(const Duration(minutes: 2)),
+        reply,
+        maxPlain: total - have,
+      )) {
         if (cancel?.cancelled == true) throw const SyncCancelledException();
         got += chunk.length;
         if (got > total) throw const SyncException('PDF beklenenden büyük geldi.');
@@ -463,6 +441,9 @@ class SyncClient {
       await sink.close();
       if (await temp.exists()) await temp.delete();
       rethrow;
+    } on SealException catch (e) {
+      // Çözülen parçalar etiketle doğrulanmıştı; yarım dosya kalır, yeniden denenince sürer.
+      throw SyncException('PDF çözülemedi: ${e.message}');
     } finally {
       try {
         await sink.close();
@@ -520,7 +501,6 @@ class SyncClient {
     File? file,
     String mediaPath = '',
     Duration timeout = const Duration(minutes: 2),
-    bool verifyResponse = false,
     String? fileHash,
     int? fileLength,
     void Function(int sent, int total)? onBytes,
@@ -548,8 +528,17 @@ class SyncClient {
       length = b.length;
     }
     final sequence = connection._next();
+    final seal = SealContext(
+      pairingKey: computer.key,
+      direction: SealDirection.toReceiver,
+      session: connection.session,
+      sequence: sequence,
+      path: path,
+      mediaPath: mediaPath,
+    );
     final request = await _http.openUrl(method, _uri(computer.host, computer.port, path)).timeout(_requestTimeout);
     request.headers
+      ..set(SyncHeaders.cipher, syncCipherName)
       ..set(SyncHeaders.session, connection.session)
       ..set(SyncHeaders.sequence, '$sequence')
       ..set(
@@ -565,15 +554,19 @@ class SyncClient {
         ),
       );
     if (mediaPath.isNotEmpty) request.headers.set(SyncHeaders.mediaPath, mediaPath);
-    request.contentLength = length;
-    if (file != null) {
+    // Gövde şifreli akar (imza düz içeriğin özetinde kalır); boş gövde boştur.
+    request.contentLength = sealedLength(length);
+    if (file != null && length > 0) {
       var sent = 0;
-      final stream = file.openRead(0, length).map((chunk) {
-        if (cancel?.cancelled == true) throw const SyncCancelledException();
-        sent += chunk.length;
-        onBytes?.call(sent, length);
-        return chunk;
-      });
+      final stream = sealStream(
+        file.openRead(0, length).map((chunk) {
+          if (cancel?.cancelled == true) throw const SyncCancelledException();
+          sent += chunk.length;
+          onBytes?.call(sent, length);
+          return chunk;
+        }),
+        seal,
+      );
       try {
         await request.addStream(stream);
       } on SyncCancelledException {
@@ -584,27 +577,85 @@ class SyncClient {
         // ya da ret); asıl yanıt aşağıda okunur, okunamazsa hata fırlar.
         if (fileHash == null) rethrow;
       }
-    } else if (body != null) {
-      request.add(body);
+    } else if (body != null && body.isNotEmpty) {
+      request.add(sealBytes(body, seal));
     }
     return _readJson(
       await request.close().timeout(timeout),
-      verify: verifyResponse ? (key: computer.key, session: connection.session, sequence: sequence) : null,
+      verify: (key: computer.key, session: connection.session, sequence: sequence),
+      reply: seal.reply(),
     );
+  }
+
+  /// Gövdeli imzalı POST (fotoğraf/PDF alma): istek gövdesi şifreli gider, yanıt
+  /// akışı çağıranda çözülür. İmza düz gövdenin özetindedir.
+  Future<({HttpClientResponse response, int sequence, SealContext reply})> _postSealed(
+    SyncConnection connection,
+    String path,
+    List<int> body,
+  ) async {
+    final computer = connection.computer;
+    _checkHost(computer.host);
+    final sequence = connection._next();
+    final seal = SealContext(
+      pairingKey: computer.key,
+      direction: SealDirection.toReceiver,
+      session: connection.session,
+      sequence: sequence,
+      path: path,
+    );
+    final wire = sealBytes(body, seal);
+    final request = await _http.openUrl('POST', _uri(computer.host, computer.port, path)).timeout(_requestTimeout);
+    request.headers
+      ..set(SyncHeaders.cipher, syncCipherName)
+      ..set(SyncHeaders.session, connection.session)
+      ..set(SyncHeaders.sequence, '$sequence')
+      ..set(
+        SyncHeaders.signature,
+        requestSignature(
+          computer.key,
+          method: 'POST',
+          path: path,
+          session: connection.session,
+          sequence: sequence,
+          mediaPath: '',
+          bodyHash: sha256Hex(body),
+        ),
+      );
+    request.contentLength = wire.length;
+    request.add(wire);
+    final response = await request.close().timeout(_requestTimeout);
+    return (response: response, sequence: sequence, reply: seal.reply());
+  }
+
+  /// Başarılı yanıt şifreli gelmeli; gelmediyse ŞİFRESİZE düşülmez.
+  static void _requireSealed(HttpClientResponse response) {
+    if (response.headers.value(SyncHeaders.cipher) != syncCipherName) {
+      throw const SyncException('Karşıdaki cihaz yanıtı şifresiz verdi (eski sürüm). Diğer cihazı güncelleyin.');
+    }
   }
 
   Future<Object?> _readJson(
     HttpClientResponse response, {
     ({List<int> key, String session, int sequence})? verify,
+    SealContext? reply,
   }) async {
     final out = BytesBuilder(copy: false);
     await for (final chunk in response) {
-      if (out.length + chunk.length > SyncLimits.jsonBody) {
+      if (out.length + chunk.length > sealedLength(SyncLimits.jsonBody)) {
         throw const SyncException('Bilgisayardan beklenmedik büyüklükte yanıt geldi.');
       }
       out.add(chunk);
     }
-    final raw = out.takeBytes();
+    var raw = out.takeBytes();
+    if (reply != null && response.statusCode == HttpStatus.ok) {
+      _requireSealed(response);
+      try {
+        raw = await openBytes(raw, reply, maxPlain: SyncLimits.jsonBody);
+      } on SealException catch (e) {
+        throw SyncException('Bilgisayarın yanıtı çözülemedi (${e.message}); hiçbir şey uygulanmadı.');
+      }
+    }
     if (verify != null && response.statusCode == HttpStatus.ok) {
       final expected = responseSignature(verify.key,
           session: verify.session, sequence: verify.sequence, bodyHash: sha256Hex(raw));

@@ -158,7 +158,9 @@ flutter build linux --release      # build/linux/x64/release/bundle/kocum
   `test/sync_multi_device_test.dart` (`pdf-al` güvenlik testleri).
 - Anahtarlar veritabanında değil ayrı dosyada (`esitleme.json`): telefonun
   veritabanı kopyası bilgisayara ve yedeklere gider, anahtar gitmemeli.
-- Veri içeriği şifrelenmez (yalnızca imzalı); ortak Wi-Fi için uyarı var.
+- Veri içeriği ŞİFRELİ (protokol sürüm 2, v9.24): ChaCha20-Poly1305 + HKDF, ileti başına anahtar, 64 KiB parçalı akış
+  (`features/sync/domain/sync_cipher.dart`, `pointycastle` MIT); imza ve sıra korunur; eski sürümle şifresize düşülmez ("Diğer
+  cihazı güncelleyin"). Düz kalanlar ve ayrıntı `docs/KABLOSUZ_AKTARIM.md` "Şifreleme (sürüm 2)". Ortak Wi-Fi'da üst veri görünür.
 - Testler `test/sync_*_test.dart`: gerçek sunucu ve istemci 127.0.0.1'de;
   geri döngü yalnızca `allowLoopback: true` ile açılır.
 - Android'de INTERNET izni `tool/network_patch.dart` ile eklenir.

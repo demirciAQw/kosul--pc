@@ -8,6 +8,7 @@ import 'package:kocum/desktop/sync/data/desktop_sync_store.dart';
 import 'package:kocum/desktop/sync/data/sync_server.dart';
 import 'package:kocum/features/sync/data/phone_sync_store.dart';
 import 'package:kocum/features/sync/data/sync_client.dart';
+import 'package:kocum/features/sync/domain/sync_cipher.dart';
 import 'package:kocum/features/sync/domain/sync_crypto.dart';
 import 'package:kocum/features/sync/domain/sync_protocol.dart';
 
@@ -98,8 +99,14 @@ void main() {
       req.contentLength = body.length;
       req.add(body);
       final res = await req.close();
-      final text = await utf8.decodeStream(res);
-      final json = jsonDecode(text);
+      final text = utf8.decode(await res.fold<List<int>>(<int>[], (a, b) => a..addAll(b)), allowMalformed: true);
+      // 200 yanıtları şifreli (düz JSON değil); hata yanıtları düz JSON.
+      Object? json;
+      try {
+        json = jsonDecode(text);
+      } on FormatException {
+        json = null;
+      }
       return (res.statusCode, json is Map ? '${json['hata'] ?? ''}' : '');
     } finally {
       http.close(force: true);
@@ -285,7 +292,16 @@ void main() {
     test('aynı istek ikinci kez gönderilirse reddedilir ve oturum kapanır', () async {
       final conn = await client.connect(computer, phoneId: phoneId);
       final body = utf8.encode(jsonEncode(const PhotoListRequest([]).toJson()));
+      List<int> sealed(int seq) => sealBytes(
+          body,
+          SealContext(
+              pairingKey: computer.key,
+              direction: SealDirection.toReceiver,
+              session: conn.session,
+              sequence: seq,
+              path: SyncPaths.photoList));
       Map<String, String> headers(int seq) => {
+            SyncHeaders.cipher: syncCipherName,
             SyncHeaders.session: conn.session,
             SyncHeaders.sequence: '$seq',
             SyncHeaders.signature: requestSignature(
@@ -298,20 +314,99 @@ void main() {
               bodyHash: sha256Hex(body),
             ),
           };
-      expect((await raw('POST', SyncPaths.photoList, headers: headers(1), body: body)).$1, 200);
-      final replay = await raw('POST', SyncPaths.photoList, headers: headers(1), body: body);
+      expect((await raw('POST', SyncPaths.photoList, headers: headers(1), body: sealed(1))).$1, 200);
+      final replay = await raw('POST', SyncPaths.photoList, headers: headers(1), body: sealed(1));
       expect(replay.$1, 401);
       expect(replay.$2, contains('Sıra numarası'));
       // Oturum kapandı: doğru sıradaki istek de artık geçmez; yeni oturum gerekir.
-      expect((await raw('POST', SyncPaths.photoList, headers: headers(2), body: body)).$1, 401);
+      expect((await raw('POST', SyncPaths.photoList, headers: headers(2), body: sealed(2))).$1, 401);
       final again = await client.connect(computer, phoneId: phoneId);
       expect((await client.missingPhotos(again, const [])).missing, isEmpty);
+    });
+
+    test('şifresiz (cipher başlığı yok) imzalı istek reddedilir; sessizce düz konuşmaya düşülmez', () async {
+      final conn = await client.connect(computer, phoneId: phoneId);
+      final body = utf8.encode(jsonEncode(const PhotoListRequest([]).toJson()));
+      final r = await raw('POST', SyncPaths.photoList, body: body, headers: {
+        SyncHeaders.session: conn.session,
+        SyncHeaders.sequence: '1',
+        SyncHeaders.signature: requestSignature(
+          computer.key,
+          method: 'POST',
+          path: SyncPaths.photoList,
+          session: conn.session,
+          sequence: 1,
+          mediaPath: '',
+          bodyHash: sha256Hex(body),
+        ),
+      });
+      expect(r.$1, 400);
+      expect(r.$2, contains('Diğer cihazı güncelleyin'));
+    });
+
+    test('ağdaki gövde şifreli: yanıt düz JSON değildir, yalnızca doğru anahtarla çözülür; fotoğraf adı gövdede görünmez',
+        () async {
+      final conn = await client.connect(computer, phoneId: phoneId);
+      const name = 'questions/2026/10/gizli-foto-adi.webp';
+      final body = utf8.encode(jsonEncode(const PhotoListRequest([MediaEntry(name, 10)]).toJson()));
+      final seal = SealContext(
+          pairingKey: computer.key,
+          direction: SealDirection.toReceiver,
+          session: conn.session,
+          sequence: 1,
+          path: SyncPaths.photoList);
+      final wireBody = sealBytes(body, seal);
+      expect(utf8.decode(wireBody, allowMalformed: true), isNot(contains('gizli-foto-adi')));
+      final http = HttpClient()..findProxy = ((_) => 'DIRECT');
+      try {
+        final req = await http.postUrl(Uri.parse('http://127.0.0.1:${server.port}${SyncPaths.photoList}'));
+        req.headers
+          ..set(SyncHeaders.cipher, syncCipherName)
+          ..set(SyncHeaders.session, conn.session)
+          ..set(SyncHeaders.sequence, '1')
+          ..set(
+              SyncHeaders.signature,
+              requestSignature(computer.key,
+                  method: 'POST',
+                  path: SyncPaths.photoList,
+                  session: conn.session,
+                  sequence: 1,
+                  mediaPath: '',
+                  bodyHash: sha256Hex(body)));
+        req.contentLength = wireBody.length;
+        req.add(wireBody);
+        final res = await req.close();
+        final wire = await res.fold<List<int>>(<int>[], (a, b) => a..addAll(b));
+        expect(res.statusCode, 200);
+        expect(res.headers.value(SyncHeaders.cipher), syncCipherName);
+        expect(utf8.decode(wire, allowMalformed: true), isNot(contains('eksik')), reason: 'düz JSON değil');
+        await expectLater(
+            openBytes(wire, SealContext(pairingKey: List<int>.filled(32, 1), direction: SealDirection.toSender, session: conn.session, sequence: 1, path: SyncPaths.photoList)),
+            throwsA(isA<SealException>()));
+        final plain = await openBytes(wire, seal.reply());
+        expect(jsonDecode(utf8.decode(plain)), containsPair('eksik', [name]));
+        // Yanıt imzası düz gövdenin özetindedir.
+        expect(
+            res.headers.value(SyncHeaders.responseSignature),
+            responseSignature(computer.key, session: conn.session, sequence: 1, bodyHash: sha256Hex(plain)));
+      } finally {
+        http.close(force: true);
+      }
     });
 
     test('yanlış anahtarla imzalanan istek reddedilir', () async {
       final conn = await client.connect(computer, phoneId: phoneId);
       final body = utf8.encode(jsonEncode(const PhotoListRequest([]).toJson()));
-      final r = await raw('POST', SyncPaths.photoList, body: body, headers: {
+      final sealedBody = sealBytes(
+          body,
+          SealContext(
+              pairingKey: computer.key,
+              direction: SealDirection.toReceiver,
+              session: conn.session,
+              sequence: 1,
+              path: SyncPaths.photoList));
+      final r = await raw('POST', SyncPaths.photoList, body: sealedBody, headers: {
+        SyncHeaders.cipher: syncCipherName,
         SyncHeaders.session: conn.session,
         SyncHeaders.sequence: '1',
         SyncHeaders.signature: requestSignature(

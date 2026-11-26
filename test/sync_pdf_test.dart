@@ -11,6 +11,7 @@ import 'package:kocum/features/sync/data/pdf_sync.dart';
 import 'package:kocum/features/sync/data/phone_sync_store.dart';
 import 'package:kocum/features/sync/data/sync_client.dart';
 import 'package:kocum/features/sync/domain/pdf_rules.dart';
+import 'package:kocum/features/sync/domain/sync_cipher.dart';
 import 'package:kocum/features/sync/domain/sync_crypto.dart';
 import 'package:kocum/features/sync/domain/sync_protocol.dart';
 
@@ -95,6 +96,7 @@ void main() {
       ];
 
   Map<String, String> signedHeaders(String name, String signedHash, int seq, {List<int>? key, String? session}) => {
+        SyncHeaders.cipher: syncCipherName,
         SyncHeaders.session: session ?? conn.session,
         SyncHeaders.sequence: '$seq',
         SyncHeaders.mediaPath: name,
@@ -118,6 +120,21 @@ void main() {
     int? cut,
     String path = SyncPaths.pdf,
   }) async {
+    // Şifreli istek (sürüm 2): gövde sunucunun bildiği anahtarla mühürlenir (imza ayrıca yanlış olabilir).
+    if (headers[SyncHeaders.cipher] != null && body.isNotEmpty) {
+      body = sealBytes(
+        body,
+        SealContext(
+          pairingKey: computer.key,
+          direction: SealDirection.toReceiver,
+          session: headers[SyncHeaders.session]!,
+          sequence: int.parse(headers[SyncHeaders.sequence]!),
+          path: path,
+          mediaPath: headers[SyncHeaders.mediaPath] ?? '',
+        ),
+      );
+    }
+    if (headers[SyncHeaders.cipher] != null) declared = sealedLength(declared);
     final socket = await Socket.connect('127.0.0.1', server.port!);
     final response = BytesBuilder();
     final done = Completer<void>();
@@ -150,9 +167,23 @@ void main() {
     }
     await done.future.timeout(const Duration(seconds: 10));
     socket.destroy();
-    final text = utf8.decode(response.takeBytes(), allowMalformed: true);
+    final bytes = response.takeBytes();
+    final text = utf8.decode(bytes, allowMalformed: true);
     final status = int.parse(text.split(' ')[1]);
-    final json = text.substring(text.indexOf('\r\n\r\n') + 4);
+    var json = text.substring(text.indexOf('\r\n\r\n') + 4);
+    if (RegExp('^${SyncHeaders.cipher}: ', multiLine: true, caseSensitive: false).hasMatch(text.split('\r\n\r\n').first)) {
+      // 200 yanıtı şifreli: istekle aynı oturum ve sıra, ters yön.
+      final wire = bytes.sublist(latin1.decode(bytes).indexOf('\r\n\r\n') + 4);
+      json = utf8.decode(await openBytes(
+          wire,
+          SealContext(
+            pairingKey: computer.key,
+            direction: SealDirection.toSender,
+            session: headers[SyncHeaders.session]!,
+            sequence: int.parse(headers[SyncHeaders.sequence]!),
+            path: path,
+          )));
+    }
     final m = RegExp(r'"hata":"([^"]*)"').firstMatch(json);
     return (status, m?.group(1) ?? json);
   }

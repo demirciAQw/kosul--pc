@@ -105,8 +105,9 @@ class _WirelessSectionState extends ConsumerState<WirelessSection> {
           const SizedBox(height: 12),
           Text(
             'Cihaz bilgisayarı bulamazsa: ikisi aynı ağda mı? Güvenlik duvarı açıksa 47321/TCP ve 47322/UDP '
-            'izinli olmalı. Okul ya da kafe gibi ortak Wi-Fi\'da kullanma: anahtar ağdan hiç geçmez ve kimse senin '
-            'yerine gönderemez, ama fotoğraflar ve veriler şifrelenmeden gider.',
+            'izinli olmalı. Veriler ve fotoğraflar uçtan uca şifreli gider (ChaCha20-Poly1305); anahtar ağdan hiç '
+            'geçmez, kimse okuyamaz ya da senin yerine gönderemez. Yine de okul ya da kafe gibi ortak Wi-Fi\'da '
+            'cihaz adı ve dosya adları (fotoğraf yolu, PDF özeti) görünebilir; evde ya da güvendiğin ağda kullan.',
             style: small,
           ),
         ],

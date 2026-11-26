@@ -104,8 +104,8 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen> {
           const SizedBox(height: 12),
           Text(
             'Öbür cihaz bulamazsa: ikisi aynı ağda mı? Yukarıdaki adresi öbür cihazda "Adresi elle yaz" ile gir. '
-            'Okul ya da kafe gibi ortak Wi-Fi\'da kullanma: anahtar ağdan hiç geçmez ve kimse senin yerine gönderemez, '
-            'ama fotoğraflar ve veriler şifrelenmeden gider. Bu cihaz tam yedek (ZIP) almaz; kayıtlar değişiklik defteri '
+            'Veriler ve fotoğraflar uçtan uca şifreli gider; anahtar ağdan hiç geçmez. Yine de ortak Wi-Fi\'da '
+            '(okul, kafe) cihaz adı ve dosya adları görünebilir. Bu cihaz tam yedek (ZIP) almaz; kayıtlar değişiklik defteri '
             've tam durumla taşınır.',
             style: small,
           ),
