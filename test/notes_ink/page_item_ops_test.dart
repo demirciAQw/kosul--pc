@@ -28,9 +28,12 @@ PageItemRecord _item(String id, BoardRect r, {double rot = 0, PageItemKind kind 
 );
 
 void main() {
-  test('zum sınırı %6000', () {
-    expect(NotePageEditor.maxZoom, 60);
-    expect((NotePageEditor.maxZoom * 100).round(), 6000);
+  test('zum sınırı pratikte sınırsız, gösterge taşmaz', () {
+    expect(NotePageEditor.maxZoom, 1000);
+    expect(NotePageEditor.minZoom, 0.02);
+    expect(NotePageEditor.zoomLabel(1), '%100');
+    expect(NotePageEditor.zoomLabel(60), '%6000');
+    expect(NotePageEditor.zoomLabel(1000), '×1000');
   });
 
   group('isabet', () {

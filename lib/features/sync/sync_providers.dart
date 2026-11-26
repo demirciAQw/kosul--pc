@@ -12,7 +12,11 @@ final phoneSyncStoreProvider = Provider<PhoneSyncStore>((ref) => PhoneSyncStore(
       () async => File(p.join((await getApplicationSupportDirectory()).path, 'esitleme.json')),
     ));
 
-/// Telefonun eşleştiği bilgisayar; yoksa null.
+/// Bu cihazın eşleştiği eşler (bilgisayar, telefon, tablet); en çok 4.
+final pairedPeersProvider =
+    FutureProvider<List<PairedComputer>>((ref) => ref.watch(phoneSyncStoreProvider).computers());
+
+/// İlk eş (eski ad); yoksa null.
 final pairedComputerProvider =
     FutureProvider<PairedComputer?>((ref) => ref.watch(phoneSyncStoreProvider).computer());
 

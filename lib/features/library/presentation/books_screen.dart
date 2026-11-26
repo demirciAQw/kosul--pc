@@ -109,6 +109,7 @@ class _ShelfView extends StatelessWidget {
       items: items,
       onOpen: (book) => context.push(AppRoutes.book(book.id)),
       pdfBookIds: pdfs.keys.toSet(),
+      pdfShaByBook: {for (final e in pdfs.entries) e.key: e.value.sha256},
       onLongPress: (book) {
         final pdf = pdfs[book.id];
         if (pdf != null) _showBookSheet(context, book, pdf);

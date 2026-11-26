@@ -17,3 +17,6 @@ bool get canReceiveWirelessly => !kIsWeb && Platform.isLinux;
 /// Android'e özgü yerel görünümler (kalem denemesi A uygulaması) yalnızca
 /// burada ayrılır.
 bool get isAndroid => !kIsWeb && Platform.isAndroid;
+
+/// Linux bilgisayar (yalnız dosya izni 0600 gibi Linux'a özgü saklama için).
+bool get isLinuxDesktop => !kIsWeb && Platform.isLinux;

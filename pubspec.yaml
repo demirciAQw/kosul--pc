@@ -1,7 +1,7 @@
 name: kocum
 description: "Koçum: YKS öğrencileri için tamamen çevrimdışı çalışma, süre ve hata analizi takipçisi."
 publish_to: 'none'
-version: 9.22.0+83
+version: 9.23.0+84
 
 environment:
   sdk: ^3.14.0

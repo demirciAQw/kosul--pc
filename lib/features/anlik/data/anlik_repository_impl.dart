@@ -25,7 +25,7 @@ class DriftAnlikRepository implements AnlikRepository {
 
   @override
   Stream<List<AnlikNote>> watchNotes() =>
-      _db.customSelect('SELECT 1', readsFrom: _noteTables).watch().asyncMap((_) => allNotes());
+      _db.customSelect("SELECT 'watchAnlikNotes'", readsFrom: _noteTables).watch().asyncMap((_) => allNotes());
 
   @override
   Future<List<AnlikNote>> allNotes() async {

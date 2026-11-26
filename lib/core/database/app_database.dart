@@ -73,7 +73,7 @@ class AppDatabase extends _$AppDatabase {
   /// v17: soru kartında PDF koordinatı (pdf_document_id, pdf_page, pdf_box_*).
   /// v18: çizgi -> soru bağı (ink_strokes.question_id), çözüm katmanları.
   /// v19: kalemli defter (ink_notebooks, ink_note_pages) ve etiket/kişi bağları.
-  /// v20: PDF sayfa katmanları (pdf_page_layers): filigran temizleme/örtü, dosya değişmez.
+  /// v20: PDF sayfa katmanları (pdf_page_layers): çizim katmanları (full/question), dosya değişmez.
   /// v21: el yazısı metni (ink_page_text): sayfa başına türev metin, çizgiler değişmez.
   /// v22: sağlık verisi (saglik_gunluk, saglik_stres, saglik_uyku_oturum); defter dışı.
   /// v23: defter klasörleri, sayfa başlığı/konu/alt sayfa/Pano konumu, sayfa bağlantıları, sayfa öğeleri.

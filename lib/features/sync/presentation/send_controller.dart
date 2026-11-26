@@ -60,13 +60,13 @@ class SendController extends Notifier<SendState> {
     ref.invalidate(pullPdfsProvider);
   }
 
-  /// "Bilgisayardaki her şeyi yeniden al": bir sonraki eşitleme tam durumu ister
+  /// "Eşten her şeyi yeniden al": bu eşin bir sonraki eşitlemesi tam durumu ister
   /// (yalnızca eksik satırlar eklenir; var olana ve sildiklerine dokunulmaz).
-  Future<void> requestFullState() async {
+  Future<void> requestFullState(String peerId) async {
     final ledger = ref.read(ledgerServiceProvider);
-    await ledger.setIntState(LedgerService.keyNeedSnapshot, 1);
-    await ledger.setTextState(LedgerService.keySnapshotCursor, '');
-    await ledger.setIntState(LedgerService.keySnapshotMarker, 0);
+    await ledger.setIntState('${LedgerService.keyNeedSnapshot}:$peerId', 1);
+    await ledger.setTextState('${LedgerService.keySnapshotCursor}:$peerId', '');
+    await ledger.setIntState('${LedgerService.keySnapshotMarker}:$peerId', 0);
   }
 
   // ───────────── Eşleştirme ─────────────
@@ -81,6 +81,7 @@ class SendController extends Notifier<SendState> {
   }
 
   /// Hata olursa [SyncException] (ya da ağ hatası) fırlatır; ekran gösterir.
+  /// Yeni eş eklenir (en çok [SyncLimits.maxPeers]); öbür eşlerin kaydı ve imleçleri değişmez.
   Future<PairedComputer> pair({
     required String host,
     required int port,
@@ -88,8 +89,8 @@ class SendController extends Notifier<SendState> {
     bool isTablet = false,
     String? deviceName,
   }) async {
-    if (await _store.computer() != null) {
-      throw const SyncException('Telefon zaten bir bilgisayarla eşleşmiş. Önce o eşleşmeyi kaldır.');
+    if ((await _store.computers()).length >= SyncLimits.maxPeers) {
+      throw const SyncException('Bu cihaz en çok ${SyncLimits.maxPeers} eşle eşleşebilir. Önce birini kaldır.');
     }
     final client = SyncClient();
     try {
@@ -107,8 +108,10 @@ class SendController extends Notifier<SendState> {
       );
       if (deviceName != null) await _store.setDeviceName(deviceName);
       await _store.saveComputer(computer);
-      // Yeni eşleşen cihaz bilgisayardaki tüm güncel kayıtları alır (eski yedekle gelenler dahil).
-      await requestFullState();
+      // Yeni eş: karşıdaki tüm güncel kayıtları alır (eski yedekle gelenler dahil); Android eşe
+      // ayrıca kendi tam durumunu verir (bilgisayara bunun yerine ilk eşitlemede tam yedek gider).
+      await LedgerSync.markNewPeer(ref.read(ledgerServiceProvider), computer.id, push: computer.isAndroid);
+      ref.invalidate(pairedPeersProvider);
       ref.invalidate(pairedComputerProvider);
       return computer;
     } finally {
@@ -116,8 +119,11 @@ class SendController extends Notifier<SendState> {
     }
   }
 
-  Future<void> unpair() async {
-    await _store.removeComputer();
+  /// Yalnızca bu eş kalkar; öbür eşler ve veri etkilenmez (yalnız bu eşin imleçleri silinir).
+  Future<void> unpair(String peerId) async {
+    await _store.removeComputer(peerId);
+    await LedgerSync.forgetPeer(ref.read(ledgerServiceProvider), peerId);
+    ref.invalidate(pairedPeersProvider);
     ref.invalidate(pairedComputerProvider);
     state = const SendState();
   }
@@ -128,21 +134,56 @@ class SendController extends Notifier<SendState> {
     if (ref.mounted) state = SendState(stage: stage, message: message, done: done, total: total);
   }
 
-  Future<void> send() async {
+  /// Eşitler: [peerId] verilirse yalnızca o eş, verilmezse bütün eşler sırayla. Bir eşin
+  /// hatası öbürlerini durdurmaz; özette her eş ayrı yazılır.
+  Future<void> send({String? peerId}) async {
     if (state.busy) return;
     // Hemen "meşgul": art arda iki dokunuş iki gönderim başlatmasın.
     _set(SendStage.connecting, 'Veriler hazırlanıyor…');
     final client = SyncClient();
+    try {
+      final all = await _store.computers();
+      final peers = peerId == null ? all : all.where((c) => c.id == peerId).toList();
+      if (peers.isEmpty) throw const SyncException('Önce bir cihazla eşleş.');
+      final lines = <String>[];
+      var failures = 0;
+      for (final peer in peers) {
+        try {
+          final summary = await _syncPeer(client, peer);
+          lines.add(peers.length > 1 ? '${peer.name}: $summary' : summary);
+        } on Object catch (e) {
+          failures++;
+          lines.add('${peer.name}: ${describeSyncError(e)}');
+        }
+      }
+      ref.invalidate(pairedPeersProvider);
+      ref.invalidate(pairedComputerProvider);
+      _set(failures == peers.length ? SendStage.failed : SendStage.done, lines.join('\n'));
+    } on Object catch (e) {
+      _set(SendStage.failed, describeSyncError(e));
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Tek eşle tam eşitleme; özet metnini döner, hata fırlatır.
+  Future<String> _syncPeer(SyncClient client, PairedComputer saved) async {
     File? zipFile;
     try {
-      final saved = await _store.computer();
-      if (saved == null) throw const SyncException('Önce bir bilgisayarla eşleş.');
       final ledger = ref.read(ledgerServiceProvider);
       final db = ref.read(appDatabaseProvider);
       final media = ref.read(mediaStorageProvider);
-      // İlk gönderim tam yedekle birleştirilir (bugünkü yol); defter ondan
-      // sonrasını izler. Sonraki gönderimler yalnızca değişiklikleri taşır.
-      final firstTime = await ledger.intState(LedgerService.keyStarted) != 1;
+      var computer = saved;
+      // v9.22'den göçen eş: genel imleçler bir kez bu eşe kopyalanır.
+      if (computer.legacyCursors) {
+        await LedgerSync.migrateLegacyCursors(ledger, computer.id);
+        computer = computer.copyWith(legacyCursors: false);
+        await _store.saveComputer(computer);
+      }
+      final startedKey = '${LedgerService.keyStarted}:${computer.id}';
+      // Yalnızca Linux bilgisayara: ilk gönderim tam yedekle birleştirilir (bugünkü yol); defter
+      // ondan sonrasını izler. Android alıcı yedek almaz (404): onunla tam durum alınıp verilir.
+      final firstTime = !computer.isAndroid && await ledger.intState(startedKey) != 1;
 
       var offered = <MediaEntry>[];
       var notOnPhone = 0, skipped = 0;
@@ -183,7 +224,6 @@ class SendController extends Notifier<SendState> {
         await zipFile.writeAsBytes(zip.bytes, flush: true);
       }
 
-      var computer = saved;
       var sent = 0;
       var backupSummary = '';
       var firstDone = !firstTime;
@@ -203,10 +243,10 @@ class SendController extends Notifier<SendState> {
               await client.sendPhoto(connection, toSend[i], media.resolve(toSend[i].path));
               sent++;
             }
-            _set(SendStage.uploading, 'Veriler gönderildi; bilgisayar içe aktarıyor…');
+            _set(SendStage.uploading, 'Veriler gönderildi; ${computer.name} içe aktarıyor…');
             backupSummary = (await client.sendBackup(connection, zipFile!)).summary;
-            await ledger.setIntState(LedgerService.keySentSeq, snapSeq);
-            await ledger.setIntState(LedgerService.keyStarted, 1);
+            await ledger.setIntState('${LedgerService.keySentSeq}:${computer.id}', snapSeq);
+            await ledger.setIntState(startedKey, 1);
             firstDone = true;
           }
           _set(SendStage.uploading, 'Değişiklikler eşitleniyor…');
@@ -216,6 +256,7 @@ class SendController extends Notifier<SendState> {
             schemaVersion: db.schemaVersion,
             mediaFile: media.resolve,
             onProgress: (m) => _set(SendStage.uploading, m),
+            scope: computer.id,
           ).run(connection);
           break;
         } on Object catch (e) {
@@ -239,22 +280,18 @@ class SendController extends Notifier<SendState> {
         pullSummary = 'PDF dosyaları alınamadı: ${describeSyncError(e)} Satırlar eşitlendi; PDF için yeniden eşitle.';
       }
       await _store.saveComputer(computer.copyWith(lastSentAt: DateTime.now()));
-      ref.invalidate(pairedComputerProvider);
-      _set(SendStage.done, [
+      return [
         if (backupSummary.isNotEmpty) ...[
           sent == 0 ? 'Yeni fotoğraf yoktu.' : '$sent fotoğraf gönderildi.',
-          'Bilgisayar: $backupSummary',
+          'Alıcı: $backupSummary',
         ],
         'Eşitleme: ${synced.summary}.',
         if (pdfSummary.isNotEmpty) pdfSummary.endsWith('.') ? pdfSummary : '$pdfSummary.',
         if (pullSummary.isNotEmpty) pullSummary.endsWith('.') ? pullSummary : '$pullSummary.',
-        if (notOnPhone > 0) '$notOnPhone fotoğraf telefonda bulunamadı.',
+        if (notOnPhone > 0) '$notOnPhone fotoğraf bu cihazda bulunamadı.',
         if (skipped > 0) '$skipped fotoğrafın adı kurallara uymadığı için gönderilmedi.',
-      ].join(' '));
-    } on Object catch (e) {
-      _set(SendStage.failed, describeSyncError(e));
+      ].join(' ');
     } finally {
-      client.close();
       if (zipFile != null && await zipFile.exists()) await zipFile.delete();
     }
   }

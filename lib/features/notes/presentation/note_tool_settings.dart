@@ -37,6 +37,10 @@ DockPosition nearestDockPosition(Offset p, Size area) {
 /// Defter araç durumu (kalem türü, renk, kalınlık, sertlik, silgi). Sayfa değişince
 /// kaybolmaması için ekran tutar; her sayfa oturumuna [apply] ile uygulanır.
 class NoteToolSettings extends ChangeNotifier {
+  /// Yeni oturumların başlangıç çubuğu (varsayılan: sol çubuk). Testte eski yuva için false.
+  @visibleForTesting
+  static bool defaultRail = true;
+
   PenKind _kind = PenKind.ballpoint;
 
   /// Son seçilen kalem (fosforlu hariç): yuvadaki "Kalem" düğmesi buna döner.
@@ -55,12 +59,18 @@ class NoteToolSettings extends ChangeNotifier {
   /// Serbest yuvanın yönü (kenardan serbeste geçerken önceki yön korunur).
   bool _dockFreeVertical = false;
   ItemTool _itemTool = ItemTool.none;
+
+  /// Sol dikey araç çubuğu (Google PDF Okuyucu tarzı); kapalıysa eski taşınabilir yuva.
+  bool _rail = defaultRail;
   bool _eraser = false;
   bool _lasso = false;
   bool _shapeSnap = true;
 
   /// Kement kopyası (sayfalar arası yapıştırma için ekran tutar).
   List<InkObject> clipboard = const [];
+
+  /// Yapıştırma hedefi sayfa numarası (oturum içi sayfa dizini): tek sayfada 0, akışta görünen sayfa.
+  int pastePage = 0;
 
   /// Varsayılan: kısmi silgi (kalınlık); çizginin tamamını silmek ayrı moddur.
   EraseMode _eraseMode = EraseMode.area;
@@ -92,6 +102,14 @@ class NoteToolSettings extends ChangeNotifier {
   double get dockFy => _dockFy;
   bool get dockFreeVertical => _dockFreeVertical;
   ItemTool get itemTool => _itemTool;
+
+  /// Yeni sol çubuk açık mı (varsayılan evet); false: eski yuva ([dockPosition] geçerli).
+  bool get rail => _rail;
+  void setRail(bool v) {
+    if (_rail == v) return;
+    _rail = v;
+    notifyListeners();
+  }
 
   /// Yuvanın şu anki yönü: serbestte kendi yönü, kenarda kenara göre.
   Axis get dockAxis => _dockFree
@@ -208,6 +226,7 @@ class NoteToolSettings extends ChangeNotifier {
     'dock.x': _dockFx,
     'dock.y': _dockFy,
     'dock.vertical': _dockFreeVertical,
+    'rail': _rail,
   };
 
   /// [toPrefs]/[toSizes] çıktısını geri yükler (bilinmeyen/bozuk değerler yok sayılır).
@@ -233,6 +252,7 @@ class NoteToolSettings extends ChangeNotifier {
     final fx = m['dock.x'], fy = m['dock.y'];
     if (fx is num && fx.isFinite) _dockFx = fx.toDouble().clamp(0.0, 1.0).toDouble();
     if (fy is num && fy.isFinite) _dockFy = fy.toDouble().clamp(0.0, 1.0).toDouble();
+    if (m['rail'] is bool) _rail = m['rail'] as bool;
     if (m['dock.vertical'] is bool) _dockFreeVertical = m['dock.vertical'] as bool;
     final em = m['erase.mode'];
     if (em is String) {

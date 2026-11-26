@@ -3,9 +3,11 @@ import 'package:flutter/material.dart';
 import '../../../app/platform.dart';
 import '../data/ink_a_controller.dart';
 import '../data/ink_b_controller.dart';
+import '../data/ink_overlay_host.dart';
 import '../data/ink_surface_a.dart';
 import '../data/ink_surface_b.dart';
 import '../domain/ink_models.dart';
+import 'ink_overlay_lab.dart';
 import 'ink_viewport.dart';
 
 /// Kalem denemesi: A (Android yerel) ile B (saf Flutter) arasında geçiş.
@@ -35,6 +37,8 @@ class _InkLabPageState extends State<InkLabPage> {
   final _b = InkBController();
   final _a = InkAController();
   bool _useA = false;
+  bool _useOverlay = false;
+  late final bool _hasOverlay = InkOverlayHost.instance.supported;
   bool _stylusOnly = true;
   InkBrush _brush = const InkBrush();
 
@@ -90,15 +94,23 @@ class _InkLabPageState extends State<InkLabPage> {
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 if (_hasA)
-                  SegmentedButton<bool>(
+                  SegmentedButton<int>(
                     key: const Key('ink-impl'),
-                    segments: const [
-                      ButtonSegment(value: true, label: Text('A (yerel)')),
-                      ButtonSegment(value: false, label: Text('B (Flutter)')),
+                    segments: [
+                      const ButtonSegment(value: 0, label: Text('A (yerel)')),
+                      const ButtonSegment(value: 1, label: Text('B (Flutter)')),
+                      if (_hasOverlay)
+                        const ButtonSegment(
+                          value: 2,
+                          label: Text('Ink katmanı'),
+                        ),
                     ],
-                    selected: {_useA},
+                    selected: {_useOverlay ? 2 : (_useA ? 0 : 1)},
                     onSelectionChanged: (s) {
-                      setState(() => _useA = s.first);
+                      setState(() {
+                        _useA = s.first == 0;
+                        _useOverlay = s.first == 2;
+                      });
                       // A'da silgi yok: seçiliyse kaleme dön.
                       if (_useA && _brush.tool == InkTool.eraser) {
                         _setBrush(_brush.copyWith(tool: InkTool.pen, width: 3));
@@ -178,7 +190,10 @@ class _InkLabPageState extends State<InkLabPage> {
           Expanded(
             child: ColoredBox(
               color: Colors.white,
-              child: _useA
+              child: _useOverlay
+                  // Ink katmanı: yerel ıslak çizgi + B yüzeyinde kuru çizim (yakınlaştırma yok).
+                  ? InkOverlayLabSurface(controller: _b, brush: _brush)
+                  : _useA
                   // A: yerel görünüm sabit kalır; parmak kaydırma/yakınlaştırmayı Flutter
                   // yapar, matrisi yerele iletir (çizgiler dünya koordinatında, vektör kalır).
                   ? InkViewport(

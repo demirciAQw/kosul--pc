@@ -39,7 +39,14 @@ class LedgerExchange {
         status: 409,
       );
     }
-    final result = await ledger.applyRemote(req.changes);
+    // Karşıdan gelen tam durum itmesi (yalnız eksik satır eklenir; deftere işlenmez).
+    var pushed = const ApplyResult();
+    if (req.pushSnapshot.isNotEmpty) pushed = await ledger.applySnapshot(req.pushSnapshot);
+    // Bu isteğin uyguladığı satırlar (m0, m1] aralığına düşer: aynı istekte karşıya
+    // geri yankılanmaz (kendi kimliği zaten süzülür; aracı olunan üçüncü cihaz satırları da).
+    final ranged = await ledger.applyRemoteRanged(req.changes);
+    final m0 = ranged.from, m1 = ranged.to;
+    final result = ranged.result + pushed;
 
     final snapCursor = req.snapshotCursor;
     if (snapCursor != null)
@@ -49,6 +56,8 @@ class LedgerExchange {
       req.received,
       limit: ledgerBatch,
       relayExcept: req.device,
+      skipAfter: m0,
+      skipUpTo: m1,
     );
     // Yanıt gövde sınırını aşmasın.
     var bytes = 0;
@@ -59,12 +68,17 @@ class LedgerExchange {
       keep.add(c);
     }
     out = keep;
-    final lastOut = out.isEmpty ? req.received : out.last.seq;
+    var lastOut = out.isEmpty ? req.received : out.last.seq;
     final more = (await ledger.pendingFor(
       lastOut,
       limit: 1,
       relayExcept: req.device,
+      skipAfter: m0,
+      skipUpTo: m1,
     )).isNotEmpty;
+    // Verilecek başka satır kalmadıysa imleç uygulanan aralığın ötesine geçer: o satırlar
+    // zaten istemcidendir, sonraki turda yeniden görünüp yankılanmaz.
+    if (!more && m1 > m0 && lastOut < m1) lastOut = m1;
 
     final photos = <MediaEntry>[];
     for (final path in mediaPathsOfChanges(out)) {
@@ -81,6 +95,7 @@ class LedgerExchange {
       more: more,
       photos: photos,
       summary: _summary(result),
+      device: await ledger.deviceId(),
     );
   }
 
@@ -120,6 +135,7 @@ class LedgerExchange {
       snapshot: page.rows,
       snapshotNext: page.next,
       snapshotMarker: marker,
+      device: await ledger.deviceId(),
     );
   }
 

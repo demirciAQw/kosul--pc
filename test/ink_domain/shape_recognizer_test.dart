@@ -140,4 +140,21 @@ void main() {
     expect(recognizeShape(const [InkPoint(x: 1, y: 1)]), isNull);
     expect(recognizeShape([for (var i = 0; i < 10; i++) const InkPoint(x: 5, y: 5)]), isNull);
   });
+
+  test('densifyPolyline köşeleri korur, kenarları sıklaştırır', () {
+    const a = InkPoint(x: 0, y: 0), b = InkPoint(x: 100, y: 0), c = InkPoint(x: 50, y: 80);
+    final d = densifyPolyline(const [a, b, c, a]);
+    expect(d.length, greaterThan(40));
+    expect((d.first.x, d.first.y), (0.0, 0.0));
+    expect((d.last.x, d.last.y), (0.0, 0.0));
+    for (final k in const [b, c]) {
+      expect(d.any((p) => p.x == k.x && p.y == k.y), isTrue);
+    }
+    // Ardışık noktalar arası uzaklık sınırlı.
+    for (var i = 1; i < d.length; i++) {
+      final dx = d[i].x - d[i - 1].x, dy = d[i].y - d[i - 1].y;
+      expect(math.sqrt(dx * dx + dy * dy), lessThan(8));
+    }
+    expect(densifyPolyline(const [a]), hasLength(1));
+  });
 }

@@ -43,6 +43,7 @@ QuestionCard _card(String id, QuestionStatus st, String node, int no, {int? page
 /// Gerçek PdfViewer + PDFium. Kitap: Test 1 (kitap sayfası 1-1 → pdf 0, ofset 0),
 /// Test 2 (kitap sayfası 3 → pdf 2). Sayfa 1 (pdf 1) kutulu bir yanlış taşır.
 void main() {
+  setUpAll(() => NoteToolSettings.defaultRail = false); // eski yuva davranışı
   late Directory tmp;
   late AppDatabase db;
 
@@ -92,7 +93,7 @@ void main() {
       await cards.insert(_card('k2', QuestionStatus.blank, 't1', 5, page: 1, box: const PdfBox(50, 50, 300, 300)));
       await cards.insert(_card('k3', QuestionStatus.wrong, 't2', 2));
       await cards.insert(_card('k4', QuestionStatus.correct, 't2', 4));
-      if (dock != null) await NoteToolPrefsStore(db, key: isDesktop ? NoteToolPrefsStore.desktopKey : NoteToolPrefsStore.phoneKey).save({'dock.pos': dock.name});
+      if (dock != null) await NoteToolPrefsStore(db, key: isDesktop ? NoteToolPrefsStore.desktopKey : NoteToolPrefsStore.phoneKey).save({'dock.pos': dock.name, 'rail': false});
     });
     addTearDown(() async {
       await t.pumpWidget(const SizedBox());

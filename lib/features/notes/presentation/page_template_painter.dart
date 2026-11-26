@@ -44,7 +44,7 @@ class PageTemplatePainter extends CustomPainter {
     canvas.drawRect(Offset.zero & size, Paint()..color = Color(background));
     final step = defaultTemplateSpacing(pageWidth) * spacingFactor;
     final sx = size.width / pageWidth, sy = size.height / pageHeight;
-    final TemplateLines lines;
+    TemplateLines lines;
     if (infinite) {
       var from = 0.0, to = pageHeight;
       final m = viewTransform?.value, vs = viewSize;
@@ -70,6 +70,12 @@ class PageTemplatePainter extends CustomPainter {
       lines = _visibleOnly(all, step, sx, sy);
     }
     if (lines.isEmpty) return;
+    // Ekranda 3 px'ten sık çizgi/nokta çizilmez (seyrekleştir): uzaklaşınca çizim sayısı sınırlı.
+    final zv = viewTransform?.value.getMaxScaleOnAxis() ?? 1.0;
+    lines = TemplateLines(
+      horizontal: _thin(lines.horizontal, step * sy * zv),
+      vertical: _thin(lines.vertical, step * sx * zv),
+    );
     final paint = Paint()
       ..color = const Color(0xFF90A4AE).withValues(alpha: 0.55)
       ..strokeWidth = (sx * 1.2).clamp(0.5, 3.0);
@@ -93,6 +99,14 @@ class PageTemplatePainter extends CustomPainter {
     for (final x in lines.vertical) {
       canvas.drawLine(Offset(x * sx, 0), Offset(x * sx, size.height), paint);
     }
+  }
+
+  static List<double> _thin(List<double> l, double pxStep) {
+    if (pxStep <= 0 || pxStep >= 3 || l.length < 2) return l;
+    final k = (3 / pxStep).ceil();
+    return [
+      for (var i = 0; i < l.length; i += k) l[i],
+    ];
   }
 
   /// Yüksek zumda yalnız görünen çizgiler (bir aralık paylı) çizilir: %6000'de bile

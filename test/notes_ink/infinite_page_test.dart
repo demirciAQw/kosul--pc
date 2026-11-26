@@ -53,6 +53,7 @@ Future<void> _mount(WidgetTester t, AppDatabase db, String nb) async {
 }
 
 void main() {
+  setUpAll(() => NoteToolSettings.defaultRail = false); // eski yuva davranışı
   group('sonsuz sayfa (saf)', () {
     test('eşik: ekrana-tam en çok 4212; eski 14040 sonsuz sayılır', () {
       expect(isInfinitePage(1984), isFalse);

@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:kocum/features/notes/presentation/note_tool_settings.dart';
 import 'package:kocum/app/routes.dart';
 import 'package:kocum/app/tablet.dart' show debugAndroidOverride;
 import 'package:kocum/core/database/app_database.dart';
@@ -61,6 +62,7 @@ QuestionCard _card(String id, {String? image, bool pdf = false}) => QuestionCard
 );
 
 void main() {
+  setUpAll(() => NoteToolSettings.defaultRail = false); // eski yuva davranışı
   late AppDatabase db;
   late Directory tmp;
   late ProviderContainer container;

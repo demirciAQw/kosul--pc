@@ -32,6 +32,7 @@ class InkStrokeRepository {
     int color = 0xFF000000,
     double width = 1.0,
     int? durationMs,
+    String? tag,
   }) async {
     final id = _ids.next();
     final now = _clock();
@@ -42,7 +43,7 @@ class InkStrokeRepository {
             id: id,
             pdfDocumentId: Value(owner is PdfPageOwner ? owner.documentId : null),
             pdfPage: Value(owner is PdfPageOwner ? owner.page : null),
-            noteId: Value(owner is NotePageOwner ? owner.noteId : null),
+            noteId: Value(owner is NotePageOwner ? owner.noteId : tag),
             notePage: Value(owner is NotePageOwner ? owner.page : null),
             layer: Value(layer),
             attemptNo: Value(attemptNo),
@@ -78,6 +79,7 @@ class InkStrokeRepository {
       points: a.points,
       startedAtMs: a.startedAtMs,
       layer: a.layer,
+      tag: a.tag,
       attemptNo: a.attemptNo,
       questionId: a.questionId,
       tool: a.tool,
@@ -133,6 +135,7 @@ class InkStrokeRepository {
     int? layer,
     String? questionId,
     bool noQuestion = false,
+    String? tag,
   }) {
     return _db.select(_db.inkStrokes)
       ..where((s) {
@@ -140,7 +143,11 @@ class InkStrokeRepository {
         w =
             w &
             switch (owner) {
-              PdfPageOwner o => s.pdfDocumentId.equals(o.documentId) & s.pdfPage.equals(o.page),
+              PdfPageOwner o =>
+                s.pdfDocumentId.equals(o.documentId) &
+                    s.pdfPage.equals(o.page) &
+                    // `tag` (noteId sütunu): katman penceresi çizgileri ana okuyucuda görünmez.
+                    (tag == null ? s.noteId.isNull() : s.noteId.equals(tag)),
               NotePageOwner o => s.noteId.equals(o.noteId) & s.notePage.equals(o.page),
               QuestionImageOwner o =>
                 s.questionId.equals(o.questionId) & s.pdfDocumentId.isNull() & s.noteId.isNull(),
@@ -164,8 +171,9 @@ class InkStrokeRepository {
     int? layer,
     String? questionId,
     bool noQuestion = false,
+    String? tag,
   }) async => _decodeAll(
-    await _query(owner, attemptNo: attemptNo, layer: layer, questionId: questionId, noQuestion: noQuestion).get(),
+    await _query(owner, attemptNo: attemptNo, layer: layer, questionId: questionId, noQuestion: noQuestion, tag: tag).get(),
   );
 
   Stream<List<InkStroke>> watchPage(
@@ -174,8 +182,10 @@ class InkStrokeRepository {
     int? layer,
     String? questionId,
     bool noQuestion = false,
+    String? tag,
   }) => _query(
     owner,
+    tag: tag,
     attemptNo: attemptNo,
     layer: layer,
     questionId: questionId,
@@ -288,7 +298,11 @@ class NewStroke {
     this.tool = 'pen',
     this.color = 0xFF000000,
     this.width = 1.0,
+    this.tag,
   });
+
+  /// PDF çizgisi için `noteId` sütununa yazılan ayırt edici (katman penceresi).
+  final String? tag;
   final StrokeOwner owner;
   final List<StrokePoint> points;
   final int startedAtMs;

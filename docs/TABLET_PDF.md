@@ -71,7 +71,7 @@ Her aşama ayrı sürüm, ayrı testler; telefon akışı her aşamada çalış�
 - Sayfa küçük resimleri, akıcı kaydırma ve yakınlaştırma, son kalınan sayfa.
 - Kabul: 300 sayfalık PDF'te sayfa açılışı < 300 ms (orta seviye tablet).
 
-### C. Saydam kalem katmanı ("filigran")
+### C. Saydam kalem katmanı (katman)
 - Kalem çizer, parmak kaydırır (`PointerDeviceKind.stylus`); ayarda "parmakla da
   çiz". Avuç içi temasları yok sayılır.
 - Araçlar: kalem, fosforlu kalem, silgi (çizgi silme), geri al / yinele, renk.

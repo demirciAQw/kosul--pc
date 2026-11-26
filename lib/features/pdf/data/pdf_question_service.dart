@@ -13,12 +13,9 @@ import '../../ocr/domain/question_text.dart';
 import '../../question_bank/domain/question_bank.dart';
 import '../../question_bank/domain/question_card.dart';
 import '../../question_bank/domain/srs.dart';
-import '../domain/layer_pixels.dart';
-import '../domain/page_layer.dart';
 import '../domain/pdf_document_record.dart';
 import '../domain/pdf_engine.dart';
 import '../domain/question_box.dart';
-import 'pdf_layers_repository.dart';
 import 'pdf_preview_encoder.dart';
 
 /// Bir soru kutusunun incelemesi: metin, kaynağı ve öneriler.
@@ -47,7 +44,6 @@ class PdfQuestionService {
     required this.lexicon,
     this.ocr,
     this.ocrRepository,
-    this.layers,
     this.ocrEngineVersion = 'kocum-okuyucu-2.2',
   });
 
@@ -65,23 +61,6 @@ class PdfQuestionService {
   /// Varsa metin okuma kaydı da yazılır: otomatik etiketler fotoğraf akışıyla aynı çalışır.
   final OcrRepository? ocrRepository;
   final String ocrEngineVersion;
-
-  /// Katman deposu. Kalıcı önizleme VARSAYILAN olarak katmansız, özgün sayfadan alınır
-  /// (içeriği yanlışlıkla silen bir katman karta işlenmesin); yalnız kullanıcı
-  /// `save(applyLayersToPreview: true)` derse görünür filigran/örtü katmanları uygulanır.
-  /// OCR ve otomatik etiket HER ZAMAN katmansız özgün görüntüden okur (metin okuma için doğru).
-  final PdfLayersRepository? layers;
-
-  /// Sayfada uygulanacak görünür katman var mı ("katmanları önizlemeye uygula" anahtarı için).
-  Future<bool> hasVisibleLayers(String documentId, int page) async {
-    final r = layers;
-    if (r == null) return false;
-    try {
-      return visibleLayersFor(await r.forPage(documentId, page), page).isNotEmpty;
-    } catch (_) {
-      return false;
-    }
-  }
 
   static const previewWidth = 480;
   static const ocrWidth = 1400;
@@ -157,9 +136,8 @@ class PdfQuestionService {
     PdfEngineDocument doc,
     int page,
     PdfBox box,
-    int targetWidth, {
-    String? documentId,
-  }) async {
+    int targetWidth,
+  ) async {
     final size = await doc.pageSize(page);
     final plan = planBoxRender(size, box, targetWidth);
     final img = await doc.renderPage(
@@ -181,24 +159,6 @@ class PdfQuestionService {
         i += 4;
       }
     }
-    // [documentId] verilirse görünür katmanlar (filigran temizleme / örtü) kırpmaya uygulanır.
-    final visible = (layers == null || documentId == null)
-        ? const <PdfPageLayer>[]
-        : visibleLayersFor(await layers!.forPage(documentId, page), page);
-    if (visible.isNotEmpty) {
-      final sx = img.width / size.width, sy = img.height / size.height;
-      final cleaned = await applyLayersInIsolate(
-        out,
-        plan.cropWidth,
-        plan.cropHeight,
-        sx,
-        sy,
-        visible,
-        originX: plan.cropX / sx,
-        originY: plan.cropY / sy,
-      );
-      return (rgba: cleaned, width: plan.cropWidth, height: plan.cropHeight);
-    }
     return (rgba: out, width: plan.cropWidth, height: plan.cropHeight);
   }
 
@@ -215,7 +175,6 @@ class PdfQuestionService {
     Book? book,
     String? topicText,
     String? mebNodeId,
-    bool applyLayersToPreview = false,
   }) async {
     final context = book == null
         ? null
@@ -226,8 +185,7 @@ class PdfQuestionService {
       final doc = await engine.openFile(pdfPath);
       final EncodedPreview preview;
       try {
-        final crop = await _crop(doc, page, box, previewWidth,
-            documentId: applyLayersToPreview ? document.id : null);
+        final crop = await _crop(doc, page, box, previewWidth);
         preview = await encodePreview(crop.rgba, crop.width, crop.height);
       } finally {
         await doc.close();

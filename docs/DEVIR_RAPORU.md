@@ -71,7 +71,7 @@ Doğrulama düzeyi: **T** = otomatik test var · **C** = gerçek cihazda (tablet
 | Çoklu cihaz eşitleme (hub), PDF aktarımı | tam | ✓ | **—** | yalnız 127.0.0.1 testleri; gerçek Wi-Fi yok |
 | Kitaplar raf görünümü, PDF'ten kitap ekleme | tam | ✓ | kısmen | otomatik doldurma sentetik denendi |
 | Soru defteri eylem çubuğu (Düzenle/PDF'te aç/Çiz) | tam | ✓ | — | |
-| Filigran temizleme + katmanlar (şema 20) | tam* | ✓ | **—** | *gerçek filigranlı PDF'te kalite hiç görülmedi |
+| PDF çizim katmanları (şema 20, yeniden yazıldı) | yazıldı, derlenmedi | ✓ | **—** | test edilmedi |
 | Kitap analiz modu PDF'te | tam | ✓ | — | |
 | El yazısı → metin (ML Kit, şema 21) | tam* | ✓ | **—** | *doğruluk/çevrimdışılık/indirme hiç denenmedi |
 | Sağlık verisi (Health Connect, Huawei ZIP; şema 22) | **kısmen** | ✓ | **—** | Huawei kaynağı/ZIP şeması **doğrulanmadı** |
@@ -111,7 +111,7 @@ Doğrulama düzeyi: **T** = otomatik test var · **C** = gerçek cihazda (tablet
 | 17 | `question_cards` + `pdf_document_id,pdf_page,pdf_box_*` | soru = PDF koordinatı (+ ~480 px önizleme `questionImage`) |
 | 18 | `ink_strokes.question_id` | çözüm denemeleri |
 | 19 | `ink_notebooks`, `ink_note_pages`, `ink_notebook_tags/people`, `ink_page_tags/people` | defter → sayfa |
-| 20 | `pdf_page_layers` | yıkıcı olmayan filigran/örtü katmanları |
+| 20 | `pdf_page_layers` | PDF çizim katmanları (full/question) |
 | 21 | `ink_page_text` | el yazısı → metin (**türev** veri; çizgiye dokunulmaz) |
 | 22 | `saglik_gunluk`, `saglik_stres`, `saglik_uyku_oturum` | sağlık (defter dışı, hassas) |
 | 23 | `ink_folders`, `ink_page_links`, `ink_page_items`; `ink_notebooks.folderId`; sayfada `title,konuId,parentPageId,boardX|Y|W|H` | klasör, pano, metin/görsel öğeleri |
@@ -142,7 +142,7 @@ düzeltilir → commit → `docs/TABLET_RAPORU.md`'ye not. (Ayrıntılı günlü
   silgi, PDF'te aynı araçlar, tam sol menü ("Daha fazla" kaldırıldı), kitap rafı. **Kök neden bulgusu**: avuç süzgeci
   `radiusMajor >= 24` her **parmağı** (gerçek 75–143) avuç sayıp yutuyordu → parmakla zum hiç çalışmıyordu; eşik 260.
 - **v9.15–9.19**: çoklu cihaz+tam durum+`pdf-al`; açılış hızı (ertelenen başlatmalar, `KocumStart` izi, profile `.gece`);
-  PDF içe aktarma penceresi + kitap formu otomatik doldurma; soru defteri eylemleri; **filigran katmanları**; **kitap
+  PDF içe aktarma penceresi + kitap formu otomatik doldurma; soru defteri eylemleri; **PDF katmanları**; **kitap
   analiz modu PDF'te**; **el yazısı → metin** (ML Kit); arm64-only boyut yaması.
 - **v9.20 sağlık**: Health Connect (Kotlin kanalı, `health` paketi *kullanılmadı*), Huawei ZIP içe aktarma, elle stres.
 - **v9.21**: yerel kalem iyileştirmeleri; kalem/avuç dayanıklılığı; defter veri katmanı (şema 23).

@@ -107,8 +107,13 @@ flutter build linux --release      # build/linux/x64/release/bundle/kocum
 - Eşleştirme: bilgisayar ekranında 6 haneli tek seferlik kod (5 dk, 5 hak).
   Anahtar Diffie-Hellman (RFC 7919 ffdhe2048) + kodla iki tarafta ayrı
   hesaplanır, ağdan geçmez. Her istek HMAC imzalı ve sıra numaralı.
-- Kısıtlar: bir bilgisayara en çok 4 telefon/tablet (`SyncLimits.maxDevices`); yalnızca Android telefon/tablet
-  eşleşir, yalnızca Linux bilgisayar alır; yalnızca yerel ağ adresleri
+- Kısıtlar: bir alıcıya en çok 4 cihaz (`SyncLimits.maxDevices`), bir istemci en çok 4 eşle (`SyncLimits.maxPeers`);
+  yalnızca Android telefon/tablet İSTEMCİ olarak eşleşir; ALICI Linux bilgisayar ya da (v9.23) EKRANI AÇIKKEN
+  Android telefon/tablet olabilir (`acceptedComputerPlatforms = {linux, android}`; Windows yok). Gerekçe: her cihaz
+  ayrı ayrı eşleşebilsin (telefon↔tablet, tablet↔bilgisayar, telefon↔bilgisayar); güvenlik kuralları aynı kalır
+  (aynı `SyncServer`, aynı kod/imza/Host/yerel ağ denetimleri). Android alıcının ek sınırları: arka plan servisi YOK
+  (`ReceiveController` ön plandayken dinler, `paused/hidden`da durur, eşleşmeler kalır), tam yedek ZIP'i almaz (404,
+  `importBackup == null`); yalnızca yerel ağ adresleri
   (100.64/10 ve 127.0.0.1 hayır); tarayıcı başlıkları ve alan adıyla Host
   reddedilir; yalnızca `questions|solutions|notes/yyyy/mm/ad.uzantı`
   fotoğrafları yazılır. Genel okuma/listeleme isteği yoktur; yalnızca üç dar istisna
@@ -118,8 +123,20 @@ flutter build linux --release      # build/linux/x64/release/bundle/kocum
   satırında geçen özet; 300 MB; symlink reddi). Gerekçe: üçü de istemcinin ZATEN bildiği
   tek bir kimliği ister (yol/özet), liste vermez, kimlik bilgisayarın kendi kaydında
   geçmiyorsa 404 (varlık sızmaz); `pdf-al` ayrıca adın SHA-256'sı ile istemcide doğrulanır.
-- Merkez: bilgisayar telefon ve tablet arasında aracıdır (doğrudan telefon↔tablet
-  eşleşme YOK). Çok cihaz (v9.15): en çok 4 cihaz AYNI ANDA eşleşik; her birinin kendi
+- Çok eş (v9.23): bilgisayar tek merkez olmak zorunda değil. Her cihaz hem istemci hem alıcı olabilir
+  ve en çok 4 eşe bağlanır (`PhoneSyncStore.computers()`, `esitleme.json` `esler:`; eski `bilgisayar:` kaydı
+  göçer, `eskiImlec` bayrağı). Sunucu `features/sync/data/sync_server.dart` + `server_sync_store.dart` (ortak;
+  `desktop/sync/data/*` yalnız `export`); Android alıcı deposu `alici.json` (istemci `esitleme.json`'dan ayrı,
+  ikisi de veritabanı DIŞI). İmleçler EŞ BAŞINA (`gonderilen_sira:<eşKimliği>`, `alinan_sira:…`, tam durum
+  anahtarları, `es_defter_kimligi:…`); istemci de ARACI olur (`LedgerSync(scope: eşKimliği)`: eşin kendi satırları
+  hariç hepsi aktarılır, `relayExcept`). Yankı/döngü: kimlikten tekilleştirme (`degisiklikler.id`) + eşin kendi
+  satırı süzgeci + uygulanan aralık `(from,to]` o eşe geri verilmez (`applyRemoteRanged`, aynı işlemde okunur;
+  `pendingFor(skipAfter/skipUpTo)`); üçüncü yoldan gelen kopya yalnız bir kez "zaten vardı" olur. Android alıcıya
+  tam durum iki yönlüdür (çek: `anlik`; ver: `anlikGonder` → `applySnapshot`, yalnız eksik satır, deftere işlenmez);
+  tam durumla gelen satırlar deftere girmediği için başka eşe aktarılmaz. Yeni eş: `LedgerSync.markNewPeer`.
+  Testler `test/sync_p2p_test.dart`, `test/sync_receive_controller_test.dart`.
+- Merkez (v9.15 hâli, hâlâ geçerli kullanım): bilgisayar telefon ve tablet arasında aracı olabilir
+  (doğrudan telefon↔tablet eşleşmesi v9.23'ten beri de mümkün, zorunlu değil). Çok cihaz (v9.15): en çok 4 cihaz AYNI ANDA eşleşik; her birinin kendi
   anahtarı, kimliği, oturumu (cihaz başına tek) ve sıra sayacı var (`SyncServer._sessions`,
   `DesktopSyncStore.devices()`); cihaz kaldırmak öbürlerini etkilemez, yeni cihaz eklemek
   kopartmaz. Eşzamanlı istekler sunucuda yalnızca veritabanı bölümünde sıraya girer
@@ -166,6 +183,26 @@ flutter build linux --release      # build/linux/x64/release/bundle/kocum
   `core/export/zip_reader.dart` (yeni paket yok); şifreli ZIP desteklenmez.
 - Elle uyku ile saat uyku çakışırsa kullanıcıya sorulur (`saglik.uyku_tercih.<gün>`); hiçbir kayıt
   otomatik silinmez/üzerine yazılmaz.
+
+## Claude entegrasyonu (v9.23)
+
+İki ayrı yol; ikisinde de anahtar/veri sızmaz. Ayrıntı: `docs/CLAUDE_CODE.md`.
+
+- **A. Bilgisayardaki Claude Code -> veri (yerel MCP):** `bin/kocum_mcp.dart` + `lib/mcp/` (saf Dart, yeni
+  paket yok). STDIO, ağ yok, anahtar yok. Varsayılan SALT OKUMA (`query_only`); yazma araçları yalnız
+  `--yaz` ile listelenir ve `LedgerService.withSource('claude')` içinden geçer (geri alınır). Ham SQL aracı
+  YOK; sağlık tabloları hiçbir araçta okunmaz. Yeni araç eklerken: sabit parametreli sorgu, `saglik_*` yok.
+- **B. Uygulama -> Claude API:** `features/claude_api/` (ham `dart:io` HTTP, SDK yok). İstek biçimi
+  `domain/claude_request.dart` (thinking/temperature/top_p/top_k GÖNDERİLMEZ; reddetme yedeği varsayılan açık).
+  SSE ayrıştırıcı saf (`domain/sse.dart`); `thinking` blokları yok sayılır; `refusal`/`max_tokens` kullanıcıya
+  bildirilir. Rapor "Claude'a gönder": önce gönderilecek metnin AYNISI + açık onay.
+- **Anahtar kuralları (ihlal etme):** anahtar YALNIZ `ApiKeyStore` ile saklanır (Android: Keystore AES/GCM +
+  `noBackupFilesDir`, Kotlin kanalı `kocum/secure`, `tool/secure_store_patch.dart`; Linux: `~/.config/kocum/claude_anahtar`
+  0600, geniş izinliyse okuma reddedilir). VERİTABANINDA, `app_meta`'da, yedek ZIP'te, kablosuz eşitlemede,
+  Ayarlar durumunda YOK. Anahtar `ApiKey` sarmalayıcısındadır (`toString` = `ApiKey(***)`); ekranda yalnız
+  `sk-ant-…` + son 4 hane. Hata/günlük satırına anahtar, istek gövdesi, yanıt metni YAZILMAZ (yalnız durum kodu +
+  `request-id`); HTTP hata gövdesi hiç okunmaz; `print/debugPrint` yasak (`test/claude_api/claude_hygiene_test.dart`).
+  Testte gerçek API'ye istek atılmaz (`ClaudeTransport` sahtesi).
 
 ## Kurallar
 
@@ -221,3 +258,20 @@ defteri (galeri/gruplu, akıllı arama, geçmiş); tekrar (aralıklı, benzer ha
 fotoğraf bölgeleri); otomatik konu ve soru türü etiketi; soru kökü analizi;
 derin analiz; Claude raporu ve paketleri; dışa aktarma (PDF, xlsx, ZIP, yedek);
 notlar; hatırlatıcılar; hızlı kamera; Gemini Nano köprüsü (cihaz desteklerse).
+
+## PDF katmanları
+
+Katman = PDF sayfalarının üstünde kalemin yazdığı şeffaf çizim katmanı (PDF dosyası değişmez).
+`pdf_page_layers.kind`: `full` (tüm sayfalar, `page=-1`) | `question` (sayfa + kutu); eski
+`watermark`/`cover` satırları yok sayılır (silinmez). İKİ kimlik: GÖRÜNTÜ numarası (`number`,
+silinmeyenler arasında `order` (params, yoksa z) sırasıyla 1..n; gezinme/numaralama) ve KALICI
+anahtar (`key` = `z+1`; çizgiler `ink_strokes.layer` = key, 0 = ana çizim). Silme/sıra değişimi
+anahtarı değiştirmez (`layerKeyForNumber`, `moveLayerOrders`). Silme YUMUŞAKTIR (`deleted`; çizgiler
+silinmez, gizlenir; SnackBar "Geri al"). Tek durum: `PdfLayerState` (`pdfLayerStateProvider`).
+YALNIZ AKTİF katmanın çizgileri görünür/silinir/seçilir (`PagePen._onlyLayer`, önbellekten süzülür;
+ana çizim aktifken yalnız 0). UI: sol üst gezinme hapı `[◀][N][▶/+]` (`LayerNavPill`, N'ye uzun
+basış: sil/öne/arkaya), yüzen yuvarlak bölge düğmesi (`RegionPickButton`; dokun = bölge seç, uzun bas
+= taşı/sil; konum+gizli `app_meta` `pdf.bolge_dugmesi`, tüm PDF'lerde ortak; geri getirme Ayarlar'da),
+soru katmanı küçük düğmesi (uzun bas = taşı/sil). Soru katmanı "ayrı pencere" çizgileri
+`noteId='katman-pencere:<id>'` taşır; ana okuyucu bunları görmez (`InkStrokeRepository` `tag` süzgeci).
+Kullanıcıya görünen metinde "filigran" geçmez, hep "katman".

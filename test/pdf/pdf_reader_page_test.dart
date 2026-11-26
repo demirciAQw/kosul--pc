@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:kocum/features/notes/presentation/note_tool_settings.dart';
 import 'package:kocum/core/database/app_database.dart';
 import 'package:kocum/core/di/core_providers.dart';
 import 'package:kocum/features/ink/domain/ink_stroke_record.dart';
@@ -25,6 +26,7 @@ final _id = 'c' * 64;
 /// Gerçek PdfViewer + gerçek PDFium (Linux'ta çalışır). Çizim ve dosya
 /// işleri gerçek zaman ister: `runAsync` + kısa beklemeler.
 void main() {
+  setUpAll(() => NoteToolSettings.defaultRail = false); // eski yuva davranışı
   late Directory tmp;
   late AppDatabase db;
   late String path;

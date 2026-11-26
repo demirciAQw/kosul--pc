@@ -28,6 +28,9 @@ abstract final class AppRoutes {
   static String pdfReaderAt(String id, int page, double l, double t, double r, double b, {String? questionId}) =>
       '/pdf/$id?page=$page&box=$l,$t,$r,$b${questionId == null ? '' : '&q=${Uri.encodeQueryComponent(questionId)}'}';
 
+  /// Soru katmanının ayrı penceresi (beyaz sayfa üzerinde çizim).
+  static String pdfLayerWindow(String id, String layerId) => '/pdf/$id/katman/${Uri.encodeComponent(layerId)}';
+
   /// Çözüm ekranı, soru kartından (fotoğraflı ya da PDF'li; arka planı karttan türer).
   static String questionSolve(String questionId) => '/soru/${Uri.encodeComponent(questionId)}/coz';
 

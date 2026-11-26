@@ -12,6 +12,7 @@ import '../features/settings/domain/settings.dart';
 import '../features/settings/settings_providers.dart';
 import '../features/study_session/domain/study_session.dart';
 import '../features/study_session/study_session_providers.dart';
+import '../features/sync/presentation/receive_controller.dart';
 import '../features/welcome/welcome_screen.dart';
 import '../core/startup_trace.dart';
 import 'router.dart';
@@ -93,6 +94,9 @@ class _KocumAppState extends ConsumerState<KocumApp> {
   void _startBackgroundWork() {
     if (!mounted) return;
     StartupTrace.instance.mark('arka-plan-isleri');
+    // Alıcı (v9.23): kullanıcı "bu cihazda alıcıyı aç" dediyse uygulama açılınca dinlemeye
+    // başlar (ekran açıkken). Dinleyici sağlayıcıyı canlı tutar; kapalıysa hiçbir şey yapmaz.
+    ref.listenManual(receiveControllerProvider, (previous, next) {}, fireImmediately: true);
     // Fotoğraflardaki metin: sorular, notlar ya da kayıtlar değişince eksikler
     // arka plan kuyruğuna alınır (yeni soru eklenince kendiliğinden başlar).
     void syncOcr() {

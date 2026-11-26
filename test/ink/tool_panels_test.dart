@@ -77,15 +77,19 @@ void main() {
       final l = buildShape(ShapeTool.line, a, b);
       expect(l.map((p) => (p.x, p.y)), [(10.0, 20.0), (110.0, 80.0)]);
       final ar = buildShape(ShapeTool.arrow, a, b);
-      expect(ar, hasLength(5));
-      expect((ar[1].x, ar[1].y), (110.0, 80.0));
+      expect(ar.length, greaterThan(5)); // kenarlar sıklaştırıldı
+      expect((ar.first.x, ar.first.y), (10.0, 20.0));
+      expect(ar.any((p) => p.x == 110.0 && p.y == 80.0), isTrue); // uç noktası aynen
       // Ok başı uçtan geriye doğru: kanatlar başlangıca daha yakın.
-      expect(ar[2].x, lessThan(110));
-      expect(ar[4].x, lessThan(110));
+      expect(ar.last.x, lessThan(110));
     });
     test('dikdörtgen kapalı, ters sürüklemede de aynı kutu', () {
       final r = buildShape(ShapeTool.rectangle, b, a);
-      expect(r, hasLength(5));
+      expect(r.length, greaterThan(5));
+      // 4 köşe aynen duruyor.
+      for (final c in [(10.0, 20.0), (110.0, 20.0), (110.0, 80.0), (10.0, 80.0)]) {
+        expect(r.any((p) => p.x == c.$1 && p.y == c.$2), isTrue, reason: '$c');
+      }
       expect((r.first.x, r.first.y), (r.last.x, r.last.y));
       expect(r.map((p) => p.x).reduce((x, y) => x < y ? x : y), 10);
       expect(r.map((p) => p.y).reduce((x, y) => x > y ? x : y), 80);
@@ -110,10 +114,11 @@ void main() {
     });
     test('üçgen: tepe üst ortada, taban altta', () {
       final tr = buildShape(ShapeTool.triangle, a, b);
-      expect(tr, hasLength(4));
+      expect(tr.length, greaterThan(4));
+      for (final c in [(60.0, 20.0), (110.0, 80.0), (10.0, 80.0)]) {
+        expect(tr.any((p) => p.x == c.$1 && p.y == c.$2), isTrue, reason: '$c');
+      }
       expect((tr[0].x, tr[0].y), (60.0, 20.0));
-      expect(tr[1].y, 80);
-      expect(tr[2].y, 80);
     });
     test('aynı nokta ve sonsuz değer boş döner', () {
       for (final tool in ShapeTool.values) {

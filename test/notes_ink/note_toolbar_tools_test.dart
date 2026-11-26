@@ -57,6 +57,7 @@ Future<NoteToolSettings> _open(WidgetTester t, Size size, {_Style? style, bool s
 String _name(WidgetTester t) => t.widget<Text>(find.byKey(const Key('note-tool-name'))).data!;
 
 void main() {
+  setUpAll(() => NoteToolSettings.defaultRail = false); // eski yuva davranışı
   const narrow = Size(800, 1280);
 
   testWidgets('dokunuş aracı seçer; seçili araca ikinci dokunuş ayar penceresi açar', (t) async {

@@ -156,7 +156,7 @@ class InkNotebookRepository {
   Stream<List<InkNotebookRecord>> watchNotebooks({
     bool includeDeleted = false,
   }) => _db
-      .customSelect('SELECT 1', readsFrom: {_db.inkNotebooks, _db.inkNotePages})
+      .customSelect("SELECT 'watchNotebooks'", readsFrom: {_db.inkNotebooks, _db.inkNotePages})
       .watch()
       .asyncMap((_) => notebooks(includeDeleted: includeDeleted));
 
@@ -174,7 +174,7 @@ class InkNotebookRepository {
   ];
 
   Stream<List<InkNotePageRecord>> watchPages(String notebookId) => _db
-      .customSelect('SELECT 1', readsFrom: {_db.inkNotePages})
+      .customSelect("SELECT 'watchPages' AS k, ? AS n", variables: [Variable<String>(notebookId)], readsFrom: {_db.inkNotePages})
       .watch()
       .asyncMap((_) => pages(notebookId));
 

@@ -5,6 +5,9 @@ import 'sync_protocol.dart';
 /// Tek istekte taşınan en çok değişiklik. Daha fazlası birkaç turda gider.
 const ledgerBatch = 300;
 
+/// Tek istekte itilen en çok tam durum satırı (`LedgerService.snapshotPage` en çok 400 verir).
+const ledgerSnapshotPush = 400;
+
 /// Alışveriş toplamı bu bayttan büyük olamaz (gövde sınırının altında kalsın).
 const ledgerBatchBytes = 5 * 1024 * 1024;
 
@@ -33,7 +36,14 @@ class LedgerRequest {
     required this.changes,
     required this.lastSeq,
     this.snapshotCursor,
+    this.pushSnapshot = const [],
   });
+
+  /// Tam durum İTMESİ (v9.23, yalnız Android alıcıya): istemcinin kendi güncel
+  /// satırları `ekle` biçiminde. Alıcı YALNIZCA eksik satırı ekler (`applySnapshot`:
+  /// var olana dokunmaz, silineni geri getirmez, deftere işlemez). Bilgisayar alıcı
+  /// bunun yerine ilk eşitlemede tam yedek alır.
+  final List<LedgerChange> pushSnapshot;
 
   /// Tam durum isteği (v9.15): null = istenmiyor; boş metin = baştan; dolu = kaldığı yer.
   /// İstenirse bilgisayar defter değişikliği DÖNMEZ; yalnızca anlık görüntü satırları
@@ -59,6 +69,7 @@ class LedgerRequest {
         'satirlar': [for (final c in changes) c.toJson()],
         'son': lastSeq,
         if (snapshotCursor != null) 'anlik': snapshotCursor,
+        if (pushSnapshot.isNotEmpty) 'anlikGonder': [for (final c in pushSnapshot) c.toJson()],
       };
 
   factory LedgerRequest.fromJson(Object? json) {
@@ -78,13 +89,24 @@ class LedgerRequest {
     }
     final snapshot = json['anlik'];
     if (snapshot != null && (snapshot is! String || snapshot.length > 512)) throw const SyncException('Bozuk mesaj: tam durum imleci.');
+    final push = <LedgerChange>[];
+    final rawPush = json['anlikGonder'];
+    if (rawPush != null) {
+      if (rawPush is! List || rawPush.length > ledgerSnapshotPush) throw const SyncException('Bozuk mesaj: tam durum satırları.');
+      for (final r in rawPush) {
+        final c = LedgerChange.tryParse(r);
+        if (c == null) throw const SyncException('Bozuk mesaj: tam durum satırı.');
+        push.add(c);
+      }
+    }
     return LedgerRequest(
         schema: schema,
         device: device,
         received: received,
         changes: changes,
         lastSeq: last,
-        snapshotCursor: snapshot as String?);
+        snapshotCursor: snapshot as String?,
+        pushSnapshot: push);
   }
 }
 
@@ -101,7 +123,12 @@ class LedgerResponse {
     this.snapshot = const [],
     this.snapshotNext,
     this.snapshotMarker = 0,
+    this.device,
   });
+
+  /// Alıcının DEFTER cihaz kimliği (v9.23): istemci, alıcıdan gelen satırları ona
+  /// geri yollamasın diye (yankı). Eski sürüm göndermez: null.
+  final String? device;
 
   /// Tam durum sayfası (yalnızca istenirse): güncel satırlar `ekle` biçiminde.
   final List<LedgerChange> snapshot;
@@ -138,6 +165,7 @@ class LedgerResponse {
           for (final p in photos) {'yol': p.path, 'boyut': p.size},
         ],
         'ozet': summary,
+        if (device != null) 'cihaz': device,
         if (snapshot.isNotEmpty || snapshotNext != null || snapshotMarker > 0) ...{
           'anlik': [for (final c in snapshot) c.toJson()],
           'anlikSonra': snapshotNext,
@@ -183,6 +211,7 @@ class LedgerResponse {
       more: json['daha'] == true,
       photos: photos,
       summary: json['ozet'] is String ? json['ozet'] as String : '',
+      device: json['cihaz'] is String && isValidDeviceId(json['cihaz'] as String) ? json['cihaz'] as String : null,
     );
   }
 }

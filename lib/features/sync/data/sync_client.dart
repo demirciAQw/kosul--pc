@@ -14,10 +14,19 @@ import 'phone_sync_store.dart';
 
 /// Yerel ağda bulunan bilgisayar.
 class DiscoveredComputer {
-  const DiscoveredComputer({required this.id, required this.name, required this.host, required this.port});
+  const DiscoveredComputer({
+    required this.id,
+    required this.name,
+    required this.host,
+    required this.port,
+    this.platform = 'linux',
+  });
 
   final String id;
   final String name;
+
+  /// `linux` (bilgisayar) ya da `android` (ekranı açık telefon/tablet).
+  final String platform;
   final String host;
   final int port;
 
@@ -87,7 +96,7 @@ class SyncClient {
   // ───────────── Bulma ─────────────
 
   /// Yerel ağa bulma isteği yollar, [wait] boyunca gelen yanıtları toplar.
-  /// Yalnızca Linux'taki Koçum'lar listelenir.
+  /// Yalnızca Linux'taki ve (ekranı açık) Android'deki Koçum'lar listelenir.
   Future<List<DiscoveredComputer>> discover({
     Duration wait = const Duration(seconds: 2),
     int port = syncDiscoveryPort,
@@ -102,7 +111,8 @@ class SyncClient {
         if (!isAcceptedPeer(d.address.rawAddress, allowLoopback: allowLoopback)) continue;
         final reply = DiscoveryReply.tryParse(d.data);
         if (reply == null || !acceptedComputerPlatforms.contains(reply.platform)) continue;
-        found[reply.id] = DiscoveredComputer(id: reply.id, name: reply.name, host: d.address.address, port: reply.port);
+        found[reply.id] = DiscoveredComputer(
+            id: reply.id, name: reply.name, host: d.address.address, port: reply.port, platform: reply.platform);
       }
     });
     try {
@@ -148,8 +158,8 @@ class SyncClient {
     final request = await _http.getUrl(_uri(host, port, SyncPaths.hello)).timeout(_requestTimeout);
     final hello = SyncHello.fromJson(await _readJson(await request.close().timeout(_requestTimeout)));
     if (!acceptedComputerPlatforms.contains(hello.platform)) {
-      throw SyncException('Bu bilgisayar "${cleanDeviceName(hello.platform)}". Koçum yalnızca Linux bilgisayara '
-          'gönderir; Windows kabul edilmez.');
+      throw SyncException('Bu cihaz "${cleanDeviceName(hello.platform)}". Koçum yalnızca Linux bilgisayara ve '
+          'Android cihaza gönderir; Windows kabul edilmez.');
     }
     return hello;
   }
@@ -202,7 +212,16 @@ class SyncClient {
         !safeEquals(response.proof, proofOf(key, ProofLabels.computerPair, [hello.challenge, phoneId]))) {
       throw const SyncException('Bilgisayar kimliğini kanıtlayamadı; eşleşme kaydedilmedi.');
     }
-    return PairedComputer(id: hello.id, name: hello.name, host: host, port: port, key: key, pairedAt: DateTime.now());
+    return PairedComputer(
+      id: hello.id,
+      name: hello.name,
+      host: host,
+      port: port,
+      key: key,
+      pairedAt: DateTime.now(),
+      platform: hello.platform,
+      kind: cleanPeerKind(hello.kind, platform: hello.platform),
+    );
   }
 
   /// Oturum açar. Bilgisayar anahtarı bildiğini kanıtlamazsa (ör. ağda

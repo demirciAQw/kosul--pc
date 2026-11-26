@@ -27,7 +27,7 @@ class SessionSetupScreen extends ConsumerStatefulWidget {
 }
 
 class _SessionSetupScreenState extends ConsumerState<SessionSetupScreen> {
-  _Mode _mode = _Mode.book;
+  _Mode _mode = _Mode.free;
   bool _starting = false;
 
   @override
@@ -57,6 +57,7 @@ class _SessionSetupScreenState extends ConsumerState<SessionSetupScreen> {
                     actionLabel: 'BAŞLA',
                     actionIcon: Icons.play_arrow_rounded,
                     busy: _starting,
+                    allowEmpty: true,
                     onSubmit: _start,
                   )
                 : _FreeSessionForm(busy: _starting, onStart: _start),
@@ -91,7 +92,7 @@ class _SessionSetupScreenState extends ConsumerState<SessionSetupScreen> {
   }
 }
 
-/// Kitap olmadan: ders (zorunlu), konu ve ne yapılacağı (isteğe bağlı).
+/// Kitap olmadan: ders (birden çok olabilir), konu ve ne yapılacağı; hiçbiri zorunlu değil.
 /// Video, konu anlatımı, PDF test, okul ödevi… süre yine analize sayılır.
 class _FreeSessionForm extends ConsumerStatefulWidget {
   const _FreeSessionForm({required this.busy, required this.onStart});
@@ -105,7 +106,7 @@ class _FreeSessionForm extends ConsumerStatefulWidget {
 
 class _FreeSessionFormState extends ConsumerState<_FreeSessionForm> {
   final _note = TextEditingController();
-  String? _subject;
+  final Set<String> _subjects = {};
   String? _topicId;
   StudyActivity _activity = StudyActivity.lecture;
 
@@ -124,9 +125,11 @@ class _FreeSessionFormState extends ConsumerState<_FreeSessionForm> {
       for (final n in curriculum) n.subjectLabel,
       for (final b in books) subjectKey(b.examType, b.subject),
     ]);
-    final topics = _subject == null
+    // Konu yalnız tek ders seçiliyken sorulur.
+    final single = _subjects.length == 1 ? _subjects.first : null;
+    final topics = single == null
         ? const <CurriculumNode>[]
-        : depthFirst(curriculum.where((n) => n.subjectLabel == _subject));
+        : depthFirst(curriculum.where((n) => n.subjectLabel == single));
 
     return Column(
       children: [
@@ -135,27 +138,32 @@ class _FreeSessionFormState extends ConsumerState<_FreeSessionForm> {
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
             children: [
               Text(
-                'Video, konu anlatımı, PDF test ya da okul ödevi: kitap seçmeden sayacı başlat. '
-                'Süre yine derse göre analize sayılır.',
+                'Video, konu anlatımı, PDF test ya da okul ödevi: hiçbir şey seçmeden de sayacı başlatabilirsin. '
+                'Ders seçersen (birden çok olabilir) süre derse göre analize sayılır.',
                 style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
               ),
               const SizedBox(height: 20),
-              DropdownMenu<String>(
-                key: ValueKey('free-subject-$_subject'),
-                initialSelection: _subject,
-                expandedInsets: EdgeInsets.zero,
-                menuHeight: 360,
-                label: const Text('Ders'),
-                dropdownMenuEntries: [for (final s in subjects) DropdownMenuEntry(value: s, label: s)],
-                onSelected: (s) => setState(() {
-                  if (s != _subject) _topicId = null;
-                  _subject = s;
-                }),
+              Text('Ders (isteğe bağlı, birden çok seçebilirsin)', style: theme.textTheme.titleSmall),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: [
+                  for (final sub in subjects)
+                    FilterChip(
+                      label: Text(sub),
+                      selected: _subjects.contains(sub),
+                      onSelected: (on) => setState(() {
+                        on ? _subjects.add(sub) : _subjects.remove(sub);
+                        _topicId = null;
+                      }),
+                    ),
+                ],
               ),
               const SizedBox(height: 12),
               if (topics.isNotEmpty)
                 DropdownMenu<String>(
-                  key: ValueKey('free-topic-$_subject'),
+                  key: ValueKey('free-topic-$single'),
                   initialSelection: _topicId,
                   expandedInsets: EdgeInsets.zero,
                   menuHeight: 360,
@@ -224,12 +232,12 @@ class _FreeSessionFormState extends ConsumerState<_FreeSessionForm> {
                 children: [
                   Expanded(
                     child: Text(
-                      _subject == null ? 'Önce dersi seç' : _activity.label,
+                      _subjects.isEmpty ? _activity.label : '${_activity.label} · ${_subjects.length} ders',
                       style: theme.textTheme.titleSmall,
                     ),
                   ),
                   FilledButton.icon(
-                    onPressed: widget.busy || _subject == null ? null : () => _start(curriculum),
+                    onPressed: widget.busy ? null : () => _start(curriculum),
                     icon: widget.busy
                         ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2))
                         : const Icon(Icons.play_arrow_rounded),
@@ -245,20 +253,25 @@ class _FreeSessionFormState extends ConsumerState<_FreeSessionForm> {
   }
 
   void _start(List<CurriculumNode> curriculum) {
-    final subject = _subject;
-    if (subject == null) return;
-    final topic = curriculum.where((n) => n.id == _topicId).firstOrNull;
     final note = _note.text.trim();
-    final what = [subject, if (topic != null) topic.title].join(' › ');
-    final label = note.isEmpty ? '${_activity.label}: $what' : '$note ($what)';
+    final subjects = _subjects.toList();
+    final topic = subjects.length == 1 ? curriculum.where((n) => n.id == _topicId).firstOrNull : null;
+    String labelFor(String? subject) {
+      final what = [if (subject != null) subject, if (topic != null) topic.title].join(' › ');
+      if (note.isEmpty) return what.isEmpty ? _activity.label : '${_activity.label}: $what';
+      return what.isEmpty ? note : '$note ($what)';
+    }
+
+    // Ders seçilmediyse tek, dersiz blok; seçildiyse her ders için bir blok.
     widget.onStart([
-      SessionItemDraft(
-        label: label,
-        pages: const [],
-        subject: subject,
-        mebNodeId: topic?.id,
-        activity: _activity,
-      ),
+      for (final sub in subjects.isEmpty ? <String?>[null] : subjects)
+        SessionItemDraft(
+          label: labelFor(sub),
+          pages: const [],
+          subject: sub,
+          mebNodeId: topic?.id,
+          activity: _activity,
+        ),
     ]);
   }
 }

@@ -7,6 +7,7 @@ import '../../../app/platform.dart';
 import '../../../app/routes.dart';
 import '../../../app/widgets/tone_icon.dart';
 import '../../handwriting/presentation/handwriting_settings_card.dart';
+import '../../claude_api/presentation/claude_api_card.dart';
 import '../../health/presentation/health_settings_card.dart';
 import '../../ocr/data/genai_describer.dart';
 import '../../ocr/ocr_providers.dart';
@@ -91,6 +92,8 @@ class _SettingsBody extends ConsumerWidget {
           ),
         // El yazısı tanıma (ML Kit modeli indirme/silme) yalnızca Android'de.
         if (isAndroid) const HandwritingSettingsCard(),
+        // Claude API (anahtar yalnız Android Keystore / Linux 0600 dosyası).
+        if (isAndroid || isLinuxDesktop) const ClaudeApiCard(),
         // Sağlık verisi (Health Connect, Huawei ZIP) yalnızca Android'de.
         if (isAndroid) const HealthSettingsCard(),
         // PDF kitaplığı ve okuyucu yalnızca Android'de (tablet için).

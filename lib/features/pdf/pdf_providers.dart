@@ -16,13 +16,13 @@ import '../question_bank/domain/question_card.dart';
 import '../question_bank/question_bank_providers.dart';
 import 'data/pdf_document_repository.dart';
 import 'data/pdf_import_service.dart';
+import 'data/pdf_last_page_store.dart';
 import 'data/pdf_question_service.dart';
 import 'data/pdfrx_engine.dart';
 import 'domain/book_analysis.dart';
 import 'domain/pdf_document_record.dart';
 import 'domain/pdf_engine.dart';
 import 'domain/solve.dart';
-import 'pdf_layers_providers.dart';
 
 final pdfEngineProvider = Provider<PdfEngine>((ref) => const PdfrxEngine());
 
@@ -51,19 +51,28 @@ final inkStrokeRepositoryProvider =
 
 /// Okuyucunun açacağı belge: kayıt ve (bu cihazda varsa) dosya yolu.
 class PdfOpenInfo {
-  const PdfOpenInfo(this.record, this.path);
+  const PdfOpenInfo(this.record, this.path, {this.lastPage});
   final PdfDocumentRecord record;
+
+  /// En son bırakılan sayfa (0'dan); kayıt yoksa null.
+  final int? lastPage;
 
   /// Dosya bu cihazda yoksa null (satır başka cihazdan gelmiştir).
   final String? path;
 }
 
+final pdfLastPageStoreProvider = Provider((ref) => PdfLastPageStore(ref.watch(appDatabaseProvider)));
+
 final pdfOpenInfoProvider = FutureProvider.family<PdfOpenInfo?, String>((ref, id) async {
-  final record = await ref.watch(pdfDocumentRepositoryProvider).findBySha(id);
+  // Üç bağımsız iş art arda değil birlikte beklenir (açılış gecikmesi).
+  final recordF = ref.watch(pdfDocumentRepositoryProvider).findBySha(id);
+  final lastF = ref.watch(pdfLastPageStoreProvider).load(id);
+  final svcF = ref.watch(pdfImportServiceProvider.future);
+  final record = await recordF;
   if (record == null) return null;
-  final svc = await ref.watch(pdfImportServiceProvider.future);
+  final svc = await svcF;
   final f = svc.fileOf(record);
-  return PdfOpenInfo(record, f.existsSync() ? f.path : null);
+  return PdfOpenInfo(record, f.existsSync() ? f.path : null, lastPage: await lastF);
 });
 
 final pdfDocumentsProvider =
@@ -90,7 +99,6 @@ final pdfQuestionServiceProvider = FutureProvider<PdfQuestionService>((ref) asyn
     ocr: isAndroid ? ref.watch(ocrEngineProvider) : null,
     ocrRepository: ref.watch(ocrRepositoryProvider),
     ocrEngineVersion: OcrQueue.engineVersion,
-    layers: ref.watch(pdfLayersRepositoryProvider),
   );
 });
 

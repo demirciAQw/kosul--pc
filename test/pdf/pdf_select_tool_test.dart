@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:kocum/features/notes/presentation/note_tool_settings.dart';
 import 'package:kocum/app/routes.dart';
 import 'package:kocum/core/database/app_database.dart';
 import 'package:kocum/core/di/core_providers.dart';
@@ -61,6 +62,7 @@ class _DirMedia implements MediaStorage {
 }
 
 void main() {
+  setUpAll(() => NoteToolSettings.defaultRail = false); // eski yuva davranışı
   late Directory tmp;
   late AppDatabase db;
   late String path;

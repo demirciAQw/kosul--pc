@@ -16,6 +16,7 @@ import 'core/notifications/session_chronometer.dart';
 import 'core/startup_trace.dart';
 import 'desktop/desktop_main.dart';
 import 'features/curriculum/data/curriculum_data.dart';
+import 'features/ink/data/ink_overlay_host.dart';
 import 'features/settings/settings_providers.dart';
 
 /// Kompozisyon kökü: asenkron altyapı burada kurulur ve DI'a verilir.
@@ -42,6 +43,7 @@ Future<void> main() async {
   final media = await LocalMediaStorage.open();
   await dbReady;
   unawaited(loadPenDiag(database)); // kalem giriş tanısı (kapalı varsayılan)
+  unawaited(loadInkNative(database)); // yerel Ink kalemi (açık varsayılan)
   final chronometer = SessionChronometer();
   final reminders = ReminderService();
 

@@ -12,10 +12,13 @@ import '../../handwriting/presentation/notebook_text_screen.dart';
 import '../../handwriting/presentation/page_text_sheet.dart';
 import '../data/ink_notebook_repository.dart';
 import '../data/note_tool_prefs_store.dart';
+import '../data/note_view_mode_store.dart';
 import '../domain/ink_notebook.dart';
 import '../domain/page_size.dart';
 import '../notes_providers.dart';
 import 'ink_tags_panel.dart';
+import '../../pdf/presentation/pdf_ink_session.dart' show PdfInkSession;
+import 'note_flow_view.dart';
 import 'note_page_editor.dart';
 import 'note_tool_dock.dart';
 import 'note_tool_settings.dart';
@@ -47,6 +50,12 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
   final _tools = NoteToolSettings();
   // Sayfa değişince yeni anahtar: her sayfa kendi oturumuyla (yeni State) açılır.
   var _editorKey = GlobalKey<NotePageEditorState>();
+  final _flowKey = GlobalKey<NoteFlowViewState>();
+
+  /// Görünüm: sürekli akış (varsayılan) ya da tek sayfa; kalıcı (`defter.gorunum`).
+  /// Yüklenene kadar null (ilk kare boş kalır, yanlış görünüm açılıp kapanmaz).
+  NoteViewMode? _mode;
+  bool get _flow => _mode == NoteViewMode.flow;
   String? _keyFor;
   String? _pageId;
 
@@ -57,15 +66,21 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
   /// Alt sayfaya girerken geçilen sayfalar (geri düğmesi/sistem geri tuşu ebeveyne döner).
   final List<String> _trail = [];
 
-  void _openChild(String childId, String fromId) => setState(() {
-    _trail.add(fromId);
-    _pageId = childId;
-  });
+  void _openChild(String childId, String fromId) {
+    setState(() {
+      _trail.add(fromId);
+      _pageId = childId;
+    });
+    if (_flow) _flowKey.currentState?.scrollToPage(childId);
+  }
 
-  void _goParent(String parentId) => setState(() {
-    if (_trail.isNotEmpty && _trail.last == parentId) _trail.removeLast();
-    _pageId = parentId;
-  });
+  void _goParent(String parentId) {
+    setState(() {
+      if (_trail.isNotEmpty && _trail.last == parentId) _trail.removeLast();
+      _pageId = parentId;
+    });
+    if (_flow) _flowKey.currentState?.scrollToPage(parentId);
+  }
   bool _ensuring = false;
 
   /// Şeritte iyimser yerel sıra (kayıt sürerken); akış aynı sırayı getirince ya da hata olunca düşer.
@@ -89,7 +104,35 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
     _prefsStore = ref.read(noteToolPrefsStoreProvider);
     _tools.addListener(_prefsChanged);
     _loadPrefs();
+    _loadMode();
     _open();
+  }
+
+  Future<void> _loadMode() async {
+    final m = await ref.read(noteViewModeStoreProvider).load();
+    if (mounted) setState(() => _mode = m);
+  }
+
+  Future<void> _setMode(NoteViewMode m) async {
+    if (m == _mode) return;
+    await _flush(); // geçişte bekleyen çizgi/öğe kayıtları bitsin
+    if (!mounted) return;
+    setState(() => _mode = m);
+    unawaited(ref.read(noteViewModeStoreProvider).save(m).catchError((_) {}));
+  }
+
+  /// Etkin görünümün bekleyen kayıtlarını bitirir.
+  Future<void> _flush() async {
+    await _flush();
+    await _flowKey.currentState?.flush();
+  }
+
+  PdfInkSession? get _session => _flowKey.currentState?.session ?? _editorKey.currentState?.session;
+
+  /// Sayfayı seçer; akışta oraya da kayar.
+  void _select(String id) {
+    setState(() => _pageId = id);
+    if (_flow) _flowKey.currentState?.scrollToPage(id);
   }
 
   /// Kayıtlı kalem/silgi boyutları ve yuva konumu açılışta geri gelir.
@@ -196,7 +239,7 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
     final cur = _pageId;
     if (cur == null) return;
     // Çoğaltma çizgileri veritabanından kopyalar: bekleyen kayıtlar önce bitmeli.
-    await _editorKey.currentState?.flush();
+    await _flush();
     final id = await _repo.duplicatePage(cur);
     if (mounted) setState(() => _pendingId = id);
   });
@@ -231,21 +274,18 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
     if (ok != true || !mounted) return;
     final i = pages.indexWhere((p) => p.id == cur);
     await _guard(() async {
-      await _editorKey.currentState?.flush();
+      await _flush();
       await _repo.deletePage(cur);
       if (!mounted) return;
       final rest = [
         for (final p in pages)
           if (p.id != cur) p,
       ];
-      setState(
-        () => _pageId =
-            rest[(i < rest.length ? i : rest.length - 1).clamp(
-                  0,
-                  rest.length - 1,
-                )]
-                .id,
-      );
+      final next = rest[(i < rest.length ? i : rest.length - 1).clamp(0, rest.length - 1)].id;
+      setState(() => _pageId = next);
+      if (_flow) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => _flowKey.currentState?.scrollToPage(next));
+      }
       final messenger = ScaffoldMessenger.of(context);
       messenger
         ..hideCurrentSnackBar()
@@ -314,8 +354,11 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
     final pages = pagesAsync.value ?? const <InkNotePageRecord>[];
     // Açık sayfa listeden düştüyse (başka cihazda silindi) en yakın sayfaya geç.
     if (_pendingId != null && pages.any((p) => p.id == _pendingId)) {
-      _pageId = _pendingId;
+      final pid = _pendingId!;
+      _pageId = pid;
       _pendingId = null;
+      // Akışta yeni/geri gelen sayfaya kayılır (liste yerleşince).
+      if (_flow) WidgetsBinding.instance.addPostFrameCallback((_) => _flowKey.currentState?.scrollToPage(pid));
     }
     InkNotePageRecord? current;
     if (_pageId != null && pages.isNotEmpty) {
@@ -356,7 +399,7 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
     return PopScope(
       canPop: _trail.isEmpty,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop && _trail.isNotEmpty) setState(() => _pageId = _trail.removeLast());
+        if (!didPop && _trail.isNotEmpty) _select(_trail.removeLast());
       },
       child: Scaffold(
       appBar: AppBar(
@@ -384,16 +427,22 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
           _PagePill(
             index: i,
             count: pages.length,
-            onPrev: i > 0 ? () => setState(() => _pageId = pages[i - 1].id) : null,
+            onPrev: i > 0 ? () => _select(pages[i - 1].id) : null,
             // Son sayfada ileri oku yeni sayfa ekler.
             onNext: i < 0
                 ? null
                 : i < pages.length - 1
-                ? () => setState(() => _pageId = pages[i + 1].id)
+                ? () => _select(pages[i + 1].id)
                 : () => _add(pages, afterCurrent: false),
             isLast: i == pages.length - 1,
             infinite: current != null && isInfinitePage(current.height),
             onAdd: current == null ? null : () => _add(pages, afterCurrent: true),
+          ),
+          IconButton(
+            key: const Key('note-view-toggle'),
+            tooltip: _flow ? 'Tek sayfa görünümüne geç' : 'Akış görünümüne geç',
+            icon: Icon(_flow ? Icons.crop_portrait : Icons.view_agenda_outlined),
+            onPressed: _mode == null ? null : () => _setMode(_flow ? NoteViewMode.single : NoteViewMode.flow),
           ),
           const FocusModeButton(),
           IconButton(
@@ -471,7 +520,7 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
                 ),
               ),
               if (ref.read(handwritingAvailableProvider) &&
-                  (_editorKey.currentState?.session.hasSelection ?? false))
+                  (_session?.hasSelection ?? false))
                 const PopupMenuItem(
                   value: 'seltext',
                   key: Key('note-sel-totext'),
@@ -523,7 +572,7 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
           ),
         ],
       ),
-      body: current == null
+      body: current == null || _mode == null
           ? const Center(child: CircularProgressIndicator())
           : ValueListenableBuilder<bool>(
               valueListenable:
@@ -538,13 +587,37 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
                         pages: shown,
                         withText: ref.watch(pageTextsProvider).value?.keys.toSet() ?? const {},
                         currentId: current!.id,
-                        onTap: (p) => setState(() => _pageId = p.id),
+                        onTap: (p) => _select(p.id),
                         onAdd: () => _add(pages, afterCurrent: false),
                         onReorder: (from, to) => _reorderStrip(shown, from, to),
                       ),
                     if (showStrip) const VerticalDivider(width: 1),
                     Expanded(
-                      child: NotePageEditor(
+                      child: _flow
+                          ? NoteFlowView(
+                              key: _flowKey,
+                              notebookId: widget.notebookId,
+                              pages: shown,
+                              tools: _tools,
+                              initialPageId: current!.id,
+                              stylusOnlyOverride: widget.stylusOnlyOverride,
+                              spacing: _spacing,
+                              onSpacing: (f) => setState(() => _spacing = f),
+                              onVisiblePage: (id) {
+                                if (mounted && _pageId != id) setState(() => _pageId = id);
+                              },
+                              onAddPage: () => _add(pages, afterCurrent: false),
+                              onGrow: (id, h) {
+                                final p = pages.where((x) => x.id == id).firstOrNull;
+                                return p == null ? Future.value() : _repo.setPageSize(id, p.width, h);
+                              },
+                              onTranscribe: () => _pageToText(current!),
+                              onOpenPage: (id) => _openChild(id, current!.id),
+                              onBackground: (id, c) => _guard(() => _repo.setPageBackground(id, c)),
+                              onTemplate: (id, t) => _guard(() => _repo.setPageTemplate(id, t)),
+                              onTemplateAll: (t) => _guard(() => _repo.setNotebookPagesTemplate(widget.notebookId, t)),
+                            )
+                          : NotePageEditor(
                         key: _editorKey,
                         page: current!,
                         tools: _tools,
@@ -576,26 +649,26 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
 
   /// Sayfayı metne çevir (kayıtlı metin varsa önce onu gösterir).
   Future<void> _pageToText(InkNotePageRecord p) async {
-    await _editorKey.currentState?.flush(); // bekleyen çizgiler kayda geçsin
+    await _flush(); // bekleyen çizgiler kayda geçsin
     if (!mounted) return;
     await showPageTextSheet(context, page: p);
   }
 
   /// Kement seçimini metne çevir (kaydedilmez; kopyalanır).
   Future<void> _selectionToText(InkNotePageRecord p) async {
-    final session = _editorKey.currentState?.session;
+    final session = _session;
     if (session == null || !session.hasSelection) {
       _msg('Önce kement ile çizgi seç.');
       return;
     }
     final ids = {for (final o in session.selectionOriginals) o.id};
-    await _editorKey.currentState?.flush();
+    await _flush();
     if (!mounted) return;
     await showPageTextSheet(context, page: p, selectedIds: ids);
   }
 
   Future<void> _notebookText() async {
-    await _editorKey.currentState?.flush();
+    await _flush();
     if (!mounted) return;
     await Navigator.of(context).push<void>(
       MaterialPageRoute(builder: (_) => NotebookTextScreen(notebookId: widget.notebookId)),
@@ -645,7 +718,7 @@ class _InkNotebookScreenState extends ConsumerState<InkNotebookScreen> {
       aspect: screenAspect(media.width, media.height),
     );
     await _guard(() async {
-      await _editorKey.currentState?.flush();
+      await _flush();
       // Sonsuza çevirirken mevcut yükseklik küçültülmez (çizgi kaybı yok).
       final h = kind == PageSizeKind.infinite && p.height > d.height
           ? p.height

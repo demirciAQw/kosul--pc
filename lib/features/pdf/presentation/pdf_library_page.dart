@@ -9,6 +9,7 @@ import '../../library/presentation/widgets/book_shelf_view.dart';
 import '../data/pdf_import_service.dart';
 import '../domain/pdf_document_record.dart';
 import '../domain/pdf_engine.dart';
+import '../pdf_cover_providers.dart';
 import '../pdf_providers.dart';
 import 'pdf_book_flow.dart';
 import 'pdf_import_dialog.dart';
@@ -165,6 +166,7 @@ class _PdfLibraryPageState extends ConsumerState<PdfLibraryPage> {
       footer: '${d.pageCount} sayfa',
       semanticsLabel: '${d.title}, ${d.pageCount} sayfa${book != null ? ', kitap: ${book.title}' : ''}',
       badge: 'PDF',
+      image: ref.watch(pdfCoverFileProvider(d.sha256)).value,
       onTap: () => _open(d),
       bottomRight: PopupMenuButton<String>(
         key: Key('pdf-menu-${d.id}'),

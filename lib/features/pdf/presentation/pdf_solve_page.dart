@@ -12,10 +12,6 @@ import '../../notes/presentation/note_tool_settings.dart';
 import '../../question_bank/question_bank_providers.dart';
 import '../domain/pdf_engine.dart';
 import '../domain/solve.dart';
-import '../domain/layer_pixels.dart';
-import '../domain/page_layer.dart';
-import '../domain/watermark.dart' show PixelOrder;
-import '../pdf_layers_providers.dart';
 import '../pdf_providers.dart';
 import 'pdf_ink_input.dart';
 import 'pdf_ink_session.dart';
@@ -153,23 +149,9 @@ Future<SolveBackground> loadPdfBackground(
     final w = math.max<int>(1, (size.width * scale).round());
     final h = math.max<int>(1, (size.height * scale).round());
     final img = await doc.renderPage(pageNo, width: w, height: h);
-    // Filigran/örtü katmanları (görüntüleme; PDF dosyası değişmez).
-    final layers = visibleLayersFor(
-      await ref.read(pdfLayersRepositoryProvider).forPage(info.record.id, pageNo),
-      pageNo,
-    );
-    final pixels = await applyLayersInIsolate(
-      img.bytes,
-      img.width,
-      img.height,
-      img.width / size.width,
-      img.height / size.height,
-      layers,
-      order: img.format == PdfPixelFormat.bgra ? PixelOrder.bgra : PixelOrder.rgba,
-    );
     final c = Completer<ui.Image>();
     ui.decodeImageFromPixels(
-      pixels,
+      img.bytes,
       img.width,
       img.height,
       img.format == PdfPixelFormat.bgra
@@ -606,7 +588,9 @@ class _SolveViewState extends ConsumerState<SolveView> {
           valueListenable: editSession.viewerLocked,
           builder: (context, locked, _) => InteractiveViewer(
             minScale: 1,
-            maxScale: 5,
+            maxScale: 200,
+            onInteractionStart: (_) => editSession.zoomInteraction.begin(),
+            onInteractionEnd: (_) => editSession.zoomInteraction.end(),
             panEnabled: !locked,
             scaleEnabled: !locked,
             child: Center(

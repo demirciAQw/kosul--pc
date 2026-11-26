@@ -371,7 +371,7 @@ ShapeResult? _polygon(List<_P> rs, double total, double pressure) {
     }
   }
   final keys = [for (final p in corners) _ip(p.x, p.y, pressure)];
-  return ShapeResult(type, keys, conf, [...keys, keys.first]);
+  return ShapeResult(type, keys, conf, densifyPolyline([...keys, keys.first]));
 }
 
 /// Doğrudan çizilen şekil araçları (sürükle, bırakınca mükemmel şekil).
@@ -399,7 +399,7 @@ List<InkPoint> buildShape(ShapeTool type, InkPoint p0, InkPoint p1) {
       final ang = math.atan2(dy, dx);
       const wing = 0.45; // ~26 derece
       InkPoint w(double a) => ip(p1.x - head * math.cos(ang + a), p1.y - head * math.sin(ang + a));
-      return [ip(p0.x, p0.y), ip(p1.x, p1.y), w(wing), ip(p1.x, p1.y), w(-wing)];
+      return densifyPolyline([ip(p0.x, p0.y), ip(p1.x, p1.y), w(wing), ip(p1.x, p1.y), w(-wing)]);
     case ShapeTool.circle:
     case ShapeTool.ellipse:
       final a = type == ShapeTool.circle ? math.min(r - l, b - t) / 2 : (r - l) / 2;
@@ -411,10 +411,10 @@ List<InkPoint> buildShape(ShapeTool type, InkPoint p0, InkPoint p1) {
       ];
     case ShapeTool.rectangle:
       if (r - l < 1e-6 || b - t < 1e-6) return const [];
-      return [ip(l, t), ip(r, t), ip(r, b), ip(l, b), ip(l, t)];
+      return densifyPolyline([ip(l, t), ip(r, t), ip(r, b), ip(l, b), ip(l, t)]);
     case ShapeTool.triangle:
       if (r - l < 1e-6 || b - t < 1e-6) return const [];
-      return [ip(cx, t), ip(r, b), ip(l, b), ip(cx, t)];
+      return densifyPolyline([ip(cx, t), ip(r, b), ip(l, b), ip(cx, t)]);
   }
 }
 
@@ -426,3 +426,51 @@ String shapeToolLabel(ShapeTool t) => switch (t) {
   ShapeTool.rectangle => 'Dikdörtgen',
   ShapeTool.triangle => 'Üçgen',
 };
+
+/// Kenarlar boyunca eşit aralıklı ara noktalar ekler (köşeler aynen kalır).
+///
+/// Çokgen yalnız köşe noktalarıyla saklanırsa kalem çizgisi yumuşatması (perfect_freehand
+/// `smoothing/streamline`) uzun kenarlarda köşeleri yuvarlar ve şekil bozulur. Yoğun
+/// noktada yumuşatma yalnız köşenin hemen yanında etkili olur; köşe dik kalır.
+/// Aralık: toplam uzunluğun ~1/80'i (her kenarda en az 1 parça).
+List<InkPoint> densifyPolyline(List<InkPoint> pts, {int targetPoints = 80}) {
+  if (pts.length < 2 || targetPoints < 2) return pts;
+  var total = 0.0;
+  for (var i = 1; i < pts.length; i++) {
+    total += math.sqrt(math.pow(pts[i].x - pts[i - 1].x, 2) + math.pow(pts[i].y - pts[i - 1].y, 2));
+  }
+  if (!total.isFinite || total <= 0) return pts;
+  final step = total / targetPoints;
+  final out = <InkPoint>[pts.first];
+  for (var i = 1; i < pts.length; i++) {
+    final a = pts[i - 1], b = pts[i];
+    final len = math.sqrt((b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y));
+    final parts = math.max(1, (len / step).ceil());
+    for (var k = 1; k < parts; k++) {
+      final t = k / parts;
+      out.add(InkPoint(
+        x: a.x + (b.x - a.x) * t,
+        y: a.y + (b.y - a.y) * t,
+        pressure: a.pressure + (b.pressure - a.pressure) * t,
+      ));
+    }
+    out.add(b);
+  }
+  return out;
+}
+
+/// Çizgi sonunda kalem [holdMs] boyunca [tolerance] içinde durduysa duruşun başladığı
+/// noktanın indisini verir (o noktaya kadar şekil tanınır); durmadıysa null.
+int? heldStrokeEnd(List<InkPoint> pts, {required int holdMs, required double tolerance}) {
+  if (pts.length < 2) return null;
+  final last = pts.last;
+  var i = pts.length - 1;
+  while (i > 0) {
+    final p = pts[i - 1];
+    final dx = p.x - last.x, dy = p.y - last.y;
+    if (dx * dx + dy * dy > tolerance * tolerance) break;
+    i--;
+  }
+  if (last.tMs - pts[i].tMs < holdMs) return null;
+  return i;
+}

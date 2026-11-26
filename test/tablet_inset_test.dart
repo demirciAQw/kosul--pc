@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:kocum/app/app_shell.dart';
 import 'package:kocum/app/tablet.dart';
 import 'package:kocum/features/question_bank/question_bank_providers.dart';
 

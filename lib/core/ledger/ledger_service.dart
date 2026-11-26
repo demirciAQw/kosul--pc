@@ -267,21 +267,33 @@ class LedgerService {
   /// Kimlikler değişmediği için alan cihaz çift kayıt yapmaz. Yalnızca
   /// bilgisayarda UYGULANAN satırlar aktarılır: çakışmayı kaybeden ya da
   /// uygulanamayan satır `kaynak = 'senkron'` ile işlenir (bkz. `_logRemote`) ve öbür cihaza gitmez (orada ayrı çakışma/ayrışma çıkmasın).
-  Future<List<LedgerChange>> pendingFor(int afterSeq, {int limit = 300, String? relayExcept}) async => [
-        for (final r in await _db.customSelect(
-          relayExcept == null
-              ? "SELECT * FROM degisiklikler WHERE yerel_sira > ? AND uzak = 0 AND kaynak <> 'senkron' "
-                  'ORDER BY yerel_sira LIMIT ?'
-              : "SELECT * FROM degisiklikler WHERE yerel_sira > ? AND kaynak <> 'senkron' AND cihaz_id <> ? "
-                  'ORDER BY yerel_sira LIMIT ?',
-          variables: [
-            Variable<int>(afterSeq),
-            if (relayExcept != null) Variable<String>(relayExcept),
-            Variable<int>(limit),
-          ],
-        ).get())
-          _fromRow(r),
-      ];
+  ///
+  /// [skipAfter]/[skipUpTo] (v9.23): bu sıra aralığındaki (skipAfter, skipUpTo] satırlar
+  /// verilmez. Karşıdan az önce uygulanan satırlar ona geri yankılanmasın diye.
+  Future<List<LedgerChange>> pendingFor(
+    int afterSeq, {
+    int limit = 300,
+    String? relayExcept,
+    int? skipAfter,
+    int? skipUpTo,
+  }) async {
+    final skip = skipAfter != null && skipUpTo != null;
+    final where = relayExcept == null
+        ? "yerel_sira > ? AND uzak = 0 AND kaynak <> 'senkron' "
+        : "yerel_sira > ? AND kaynak <> 'senkron' AND cihaz_id <> ? ";
+    final rows = await _db.customSelect(
+      'SELECT * FROM degisiklikler WHERE $where'
+      '${skip ? 'AND NOT (yerel_sira > ? AND yerel_sira <= ?) ' : ''}'
+      'ORDER BY yerel_sira LIMIT ?',
+      variables: [
+        Variable<int>(afterSeq),
+        if (relayExcept != null) Variable<String>(relayExcept),
+        if (skip) ...[Variable<int>(skipAfter), Variable<int>(skipUpTo)],
+        Variable<int>(limit),
+      ],
+    ).get();
+    return [for (final r in rows) _fromRow(r)];
+  }
 
   /// Bu fotoğraf yolu, bu cihazın kendi değişikliklerinden birinde geçiyor mu?
   /// (Karşıya yalnızca bu cihazın eklediği fotoğraflar verilir.)
@@ -318,6 +330,8 @@ class LedgerService {
     final r = await _db.customSelect('SELECT value FROM esitleme_durum WHERE key = ?', variables: [Variable<String>(key)]).get();
     return r.isEmpty ? null : r.first.read<String>('value');
   }
+
+  Future<void> deleteState(String key) => _db.customStatement('DELETE FROM esitleme_durum WHERE key = ?', [key]);
 
   Future<void> setTextState(String key, String value) => _db.customStatement(
       'INSERT INTO esitleme_durum (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
@@ -603,9 +617,17 @@ class LedgerService {
   /// atlanır (bağlantı yarıda kopup yeniden gönderilirse çift kayıt olmaz).
   /// Aynı satır iki tarafta da değiştiyse HLC'si yeni olan kazanır; kaybeden
   /// sürüm Çakışmalar'a düşer. Tek işlemdir.
-  Future<ApplyResult> applyRemote(List<LedgerChange> changes) async {
+  Future<ApplyResult> applyRemote(List<LedgerChange> changes) async => (await applyRemoteRanged(changes)).result;
+
+  /// [applyRemote] + bu işlemin deftere yazdığı yerel sıra aralığı `(from, to]`.
+  /// Aralık AYNI işlem içinde okunur: yerel (arayüz) yazımları işlem bitene dek
+  /// bekler, yani aralıkta yalnızca karşıdan gelen satırlar vardır. Eş, aralıktaki
+  /// satırları kendisinden aldığı için ona geri yollanmaz (yankı).
+  Future<({ApplyResult result, int from, int to})> applyRemoteRanged(List<LedgerChange> changes) async {
     var result = const ApplyResult();
+    var from = 0, to = 0;
     await _db.transaction(() async {
+      from = await maxSeq();
       await _db.customStatement('UPDATE _baglam SET bastir = 1 WHERE id = 1');
       try {
         for (final c in changes) {
@@ -614,9 +636,10 @@ class LedgerService {
       } finally {
         await _db.customStatement('UPDATE _baglam SET bastir = 0 WHERE id = 1');
       }
+      to = await maxSeq();
     });
     _flushTouched();
-    return result;
+    return (result: result, from: from, to: to);
   }
 
   Future<ApplyResult> _applyOne(LedgerChange c) async {

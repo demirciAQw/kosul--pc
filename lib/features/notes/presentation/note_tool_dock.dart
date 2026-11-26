@@ -15,14 +15,14 @@ import 'page_template_painter.dart';
 /// Yuvadaki araçlar (ayar penceresi olanlar).
 enum DockTool { pen, highlighter, eraser, shape }
 
-const _kindInfo = {
+const dockKindInfo = {
   PenKind.ballpoint: (Icons.edit_outlined, 'Tükenmez'),
   PenKind.fountain: (Icons.brush_outlined, 'Dolma'),
   PenKind.pencil: (Icons.create_outlined, 'Kurşun'),
   PenKind.highlighter: (Icons.border_color_outlined, 'Fosforlu'),
 };
 
-const _shapeIcons = {
+const dockShapeIcons = {
   ShapeTool.line: Icons.horizontal_rule,
   ShapeTool.arrow: Icons.arrow_right_alt,
   ShapeTool.circle: Icons.circle_outlined,
@@ -165,7 +165,7 @@ class NoteToolDock extends StatelessWidget {
         final pos = t.dockPosition;
         final vertical = (axis ?? t.dockAxis) == Axis.vertical;
         final actions = t.lasso && session != null
-            ? _LassoActions(
+            ? DockLassoActions(
                 tools: t,
                 session: session!,
                 size: size,
@@ -285,7 +285,7 @@ class _DockBar extends StatelessWidget {
       IconData icon,
       bool Function(PdfInkSession) enabled,
       void Function(PdfInkSession) run,
-    ) => _HistoryButton(
+    ) => DockHistoryButton(
       key: key,
       icon: icon,
       tooltip: tip,
@@ -320,19 +320,19 @@ class _DockBar extends StatelessWidget {
           (s) => s.redo(),
         ),
       if (vertical) divider() else gap,
-      _DockButton(
+      DockButton(
         key: const Key('note-pen'),
-        icon: _kindInfo[kind]!.$1,
-        tooltip: _kindInfo[kind]!.$2,
+        icon: dockKindInfo[kind]!.$1,
+        tooltip: dockKindInfo[kind]!.$2,
         selected: penActive,
         dot: Color(t.colorFor(kind)),
         size: size,
         onTap: (r) =>
             penActive ? pop(DockTool.pen, r) : pick(() => t.setKind(kind)),
       ),
-      _DockButton(
+      DockButton(
         key: const Key('note-pen-highlighter'),
-        icon: _kindInfo[PenKind.highlighter]!.$1,
+        icon: dockKindInfo[PenKind.highlighter]!.$1,
         tooltip: 'Fosforlu',
         selected: hlActive,
         dot: Color(t.colorFor(PenKind.highlighter)),
@@ -341,7 +341,7 @@ class _DockBar extends StatelessWidget {
             ? pop(DockTool.highlighter, r)
             : pick(() => t.setKind(PenKind.highlighter)),
       ),
-      _DockButton(
+      DockButton(
         key: const Key('note-eraser'),
         icon: Icons.auto_fix_normal_outlined,
         tooltip: 'Silgi',
@@ -351,7 +351,7 @@ class _DockBar extends StatelessWidget {
             ? pop(DockTool.eraser, r)
             : pick(() => t.setEraser(true)),
       ),
-      _DockButton(
+      DockButton(
         key: const Key('note-lasso'),
         icon: Icons.gesture,
         tooltip: 'Kement (seç, taşı, boyutlandır)',
@@ -362,11 +362,11 @@ class _DockBar extends StatelessWidget {
             ? t.setKind(kind)
             : pick(() => t.setLasso(true)),
       ),
-      _DockButton(
+      DockButton(
         key: const Key('note-shape'),
         icon: t.shapeTool == null
             ? Icons.category_outlined
-            : _shapeIcons[t.shapeTool]!,
+            : dockShapeIcons[t.shapeTool]!,
         tooltip: 'Şekil: çiz ve düzelt',
         selected: !selecting && t.shapeTool != null,
         size: size,
@@ -376,7 +376,7 @@ class _DockBar extends StatelessWidget {
         },
       ),
       if (onSelect != null)
-        _DockButton(
+        DockButton(
           key: const Key('pdf-tool-select'),
           icon: Icons.crop_free,
           tooltip: 'Soru seç',
@@ -385,7 +385,7 @@ class _DockBar extends StatelessWidget {
           onTap: (_) => onSelect!(),
         ),
       if (itemTools) ...[
-        _DockButton(
+        DockButton(
           key: const Key('note-tool-text'),
           icon: Icons.text_fields,
           tooltip: 'Metin kutusu (sayfaya dokun, yaz)',
@@ -395,14 +395,14 @@ class _DockBar extends StatelessWidget {
               ? t.setKind(kind)
               : pick(() => t.setItemTool(ItemTool.text)),
         ),
-        _DockButton(
+        DockButton(
           key: const Key('note-tool-photo'),
           icon: Icons.add_photo_alternate_outlined,
           tooltip: 'Fotoğraf ekle',
           size: size,
           onTap: onPhoto == null ? null : (_) => pick(onPhoto!),
         ),
-        _DockButton(
+        DockButton(
           key: const Key('note-tool-child'),
           icon: Icons.subdirectory_arrow_right,
           tooltip: 'Alt sayfa (sayfada istediğin yere)',
@@ -424,7 +424,7 @@ class _DockBar extends StatelessWidget {
         ),
       divider(),
       if (page != null)
-        _DockButton(
+        DockButton(
           key: const Key('note-template'),
           icon: templateIcon(page!.template),
           tooltip: 'Sayfa: şablon, arka plan, çizgi aralığı',
@@ -505,8 +505,8 @@ class _DockBar extends StatelessWidget {
 }
 
 /// Geri al / yinele: büyük, devre dışıyken soluk; basılı tutunca hızla yineler.
-class _HistoryButton extends StatefulWidget {
-  const _HistoryButton({
+class DockHistoryButton extends StatefulWidget {
+  const DockHistoryButton({
     super.key,
     required this.icon,
     required this.tooltip,
@@ -523,10 +523,10 @@ class _HistoryButton extends StatefulWidget {
   final void Function(PdfInkSession) run;
 
   @override
-  State<_HistoryButton> createState() => _HistoryButtonState();
+  State<DockHistoryButton> createState() => DockHistoryButtonState();
 }
 
-class _HistoryButtonState extends State<_HistoryButton> {
+class DockHistoryButtonState extends State<DockHistoryButton> {
   Timer? _delay;
   Timer? _repeat;
 
@@ -629,7 +629,7 @@ class _PositionButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final h = dockDrag;
-    return _DockButton(
+    return DockButton(
       key: const Key('note-dock-move'),
       icon: Icons.open_with,
       tooltip: 'Yuva konumu (dokun: seç, basılı tut ve sürükle: taşı)',
@@ -647,14 +647,14 @@ class _PositionButton extends StatelessWidget {
         context,
         r,
         side: vertical,
-        builder: (_) => _PositionPanel(tools: tools, free: h != null),
+        builder: (_) => DockPositionPanel(tools: tools, free: h != null),
       ),
     );
   }
 }
 
-class _PositionPanel extends StatelessWidget {
-  const _PositionPanel({required this.tools, this.free = false});
+class DockPositionPanel extends StatelessWidget {
+  const DockPositionPanel({super.key, required this.tools, this.free = false});
   final NoteToolSettings tools;
 
   /// Serbest konum bu ekranda desteklenir (defter).
@@ -673,6 +673,15 @@ class _PositionPanel extends StatelessWidget {
           spacing: 8,
           runSpacing: 8,
           children: [
+            ActionChip(
+              key: const Key('note-dock-rail-on'),
+              avatar: const Icon(Icons.view_sidebar_outlined, size: 18),
+              label: const Text('Sol çubuk'),
+              onPressed: () {
+                tools.setRail(true);
+                Navigator.pop(context);
+              },
+            ),
             for (final p in DockPosition.values)
               ChoiceChip(
                 key: Key('note-dock-pos-${p.name}'),
@@ -751,8 +760,8 @@ class _PositionPanel extends StatelessWidget {
 }
 
 /// Dock düğmesi: [size] kare, seçiliyken dolgu; isteğe bağlı renk noktası ve yazı.
-class _DockButton extends StatelessWidget {
-  const _DockButton({
+class DockButton extends StatelessWidget {
+  const DockButton({
     super.key,
     required this.icon,
     required this.tooltip,
@@ -863,8 +872,9 @@ class _DockButton extends StatelessWidget {
 }
 
 /// Kement seçimi eylemleri (sil, kopyala, yapıştır); yuvanın yanında küçük çubuk.
-class _LassoActions extends StatelessWidget {
-  const _LassoActions({
+class DockLassoActions extends StatelessWidget {
+  const DockLassoActions({
+    super.key,
     required this.tools,
     required this.session,
     required this.size,
@@ -907,7 +917,7 @@ class _LassoActions extends StatelessWidget {
               key: const Key('note-sel-paste'),
               tooltip: 'Yapıştır',
               icon: const Icon(Icons.paste_outlined),
-              onPressed: () => session.pasteObjects(0, tools.clipboard),
+              onPressed: () => session.pasteObjects(tools.pastePage, tools.clipboard),
             ),
           ];
           return vertical
@@ -1018,7 +1028,7 @@ class NoteToolPanel extends StatelessWidget {
 
   String _name(NoteToolSettings t) => switch (tool) {
     DockTool.pen =>
-      _kindInfo[t.kind == PenKind.highlighter ? t.lastPenKind : t.kind]!.$2,
+      dockKindInfo[t.kind == PenKind.highlighter ? t.lastPenKind : t.kind]!.$2,
     DockTool.highlighter => 'Fosforlu',
     DockTool.eraser => 'Silgi',
     DockTool.shape =>
@@ -1051,8 +1061,8 @@ class NoteToolPanel extends StatelessWidget {
                 ])
                   ChoiceChip(
                     key: Key('note-pen-kind-${k.name}'),
-                    avatar: Icon(_kindInfo[k]!.$1, size: 18),
-                    label: Text(_kindInfo[k]!.$2),
+                    avatar: Icon(dockKindInfo[k]!.$1, size: 18),
+                    label: Text(dockKindInfo[k]!.$2),
                     selected: t.kind == k,
                     onSelected: (_) => t.setKind(k),
                   ),
@@ -1078,7 +1088,7 @@ class NoteToolPanel extends StatelessWidget {
                 for (final s in ShapeTool.values)
                   ChoiceChip(
                     key: Key('note-shape-${s.name}'),
-                    avatar: Icon(_shapeIcons[s], size: 18),
+                    avatar: Icon(dockShapeIcons[s], size: 18),
                     label: Text(shapeToolLabel(s)),
                     selected: t.shapeTool == s,
                     onSelected: (_) {
@@ -1223,6 +1233,16 @@ class _EraseModeCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Boyut önizleme + sürgü + çipler (ortak): PDF katman düğmesi ayarı da bunu kullanır.
+class NoteToolSizeSection extends StatelessWidget {
+  const NoteToolSizeSection({super.key, required this.tools});
+  final NoteToolSettings tools;
+
+  @override
+  Widget build(BuildContext context) =>
+      ListenableBuilder(listenable: tools, builder: (_, _) => _SizeSection(tools: tools));
 }
 
 class _SizeSection extends StatelessWidget {

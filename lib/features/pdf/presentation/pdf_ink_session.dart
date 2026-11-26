@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 
 import '../../ink/data/ink_outline.dart';
+import '../../ink/data/ink_overlay_host.dart';
 import '../../ink/data/ink_stroke_repository.dart';
 import '../../ink/domain/eraser.dart';
 import '../../ink/domain/ink_geometry.dart';
@@ -16,22 +17,29 @@ import '../../ink/domain/shape_recognizer.dart' show ShapeTool;
 import '../../ink/domain/pen_profiles.dart';
 import '../../ink/domain/ink_stroke_record.dart';
 import '../../ink/domain/stroke_codec.dart';
+import '../../ink/domain/stroke_lod.dart';
+import '../../ink/presentation/zoom_interaction.dart';
 import '../../../core/pen_diag.dart';
 import '../domain/ink_history.dart';
 import '../domain/palm_rejector.dart';
 import '../domain/page_coords.dart';
+import 'pdf_ink_overlay.dart';
 import 'pdf_page_ink_layer.dart';
 
 /// Sayfada duran bir çizgi. Noktalar ve kalınlık SAYFA biriminde; [id] kayıt
 /// bitene kadar null (iyimser ekleme).
 class PenStroke {
-  PenStroke(this.brush, this.points, {this.id});
+  PenStroke(this.brush, this.points, {this.id, this.layer = 0});
   String? id;
+
+  /// Çizginin katman anahtarı (kalıcı, bkz. PdfPageLayer.key) (`ink_strokes.layer`); 0 = ana çizim.
+  int layer;
   final InkBrush brush;
   List<InkPoint> points;
   ui.Picture? _picture;
   List<InkPoint>? _boundsOf;
   ui.Rect? _bounds;
+  ui.Picture? _light;
 
   /// Noktaların kaba sınır kutusu (kalınlık hariç); alan silgisi ön elemesi için önbellekli.
   ui.Rect get bounds {
@@ -52,6 +60,8 @@ class PenStroke {
     points = p;
     _picture?.dispose();
     _picture = null;
+    _light?.dispose();
+    _light = null;
   }
 
   /// Kayıt başlangıcı (epoch ms); kayıt yeniden denenirken aynı kalır.
@@ -70,11 +80,40 @@ class PenStroke {
     return rec.endRecording();
   }();
 
+  /// Hafif çizim (zum/kaydırma sırasında): seyreltilmiş noktalardan ince çoklu çizgi,
+  /// düz alfa (multiply/saveLayer yok). Çizgi başına bir kez kaydedilir, zumdan bağımsız.
+  ui.Picture get lightPicture => _light ??= () {
+    final rec = ui.PictureRecorder();
+    final c = ui.Canvas(rec);
+    final paint = inkPaintFor(brush)
+      ..blendMode = ui.BlendMode.srcOver
+      ..style = ui.PaintingStyle.stroke
+      ..strokeWidth = brush.width
+      ..strokeCap = ui.StrokeCap.round
+      ..strokeJoin = ui.StrokeJoin.round;
+    final pts = simplifyPoints<InkPoint>(points, math.max(0.25, brush.width * 0.1), (p) => p.x, (p) => p.y);
+    if (pts.length == 1) {
+      c.drawPoints(ui.PointMode.points, [ui.Offset(pts.first.x, pts.first.y)], paint);
+    } else if (pts.length > 1) {
+      final path = ui.Path()..moveTo(pts.first.x, pts.first.y);
+      for (var i = 1; i < pts.length; i++) {
+        path.lineTo(pts[i].x, pts[i].y);
+      }
+      c.drawPath(path, paint);
+    }
+    return rec.endRecording();
+  }();
+
   void dispose() {
     _picture?.dispose();
     _picture = null;
+    _light?.dispose();
+    _light = null;
   }
 }
+
+/// Etkileşim sırasında kare başına en çok bu kadar nokta çizilir (aşılırsa en eski çizgiler atlanır).
+const lightPointBudget = 20000;
 
 /// Bir sayfanın çizgileri (bellekte önbellek). Çizim sırasında kayıttan yeniden
 /// çözme yok: yalnızca açılışta ve geri al/yinele geri getirmesinde okunur.
@@ -83,6 +122,18 @@ class PagePen extends ChangeNotifier {
   final int page;
   final List<PenStroke> _strokes = [];
   bool _disposed = false;
+
+  /// null: hepsi görünür; verilirse YALNIZ bu katmanın çizgileri çizilir/silinir/seçilir
+  /// (önbellekten süzülür, yeniden yükleme yok).
+  int? _onlyLayer;
+
+  Iterable<PenStroke> get _shown => _onlyLayer == null ? _strokes : _strokes.where((s) => s.layer == _onlyLayer);
+
+  void _setOnlyLayer(int? v) {
+    if (_onlyLayer == v) return;
+    _onlyLayer = v;
+    _ping();
+  }
 
   List<PenStroke> get strokes => List.unmodifiable(_strokes);
 
@@ -131,12 +182,52 @@ class PagePen extends ChangeNotifier {
   }
 
   /// [canvas]'ı sayfa birimli çizer; [scaleX]/[scaleY] görünüm piksel / sayfa birimi.
-  void paint(ui.Canvas canvas, double scaleX, double scaleY, {double originX = 0, double originY = 0}) {
+  /// [light]: zum/kaydırma sürüyor: yalnız [viewport] (katman yerel pikseli) içindeki,
+  /// ekranda ~0.5 px'ten büyük çizgiler, [lightPointBudget] içinde, hafif çizimle çizilir.
+  /// [zoom]: yerel piksel -> ekran pikseli.
+  void paint(
+    ui.Canvas canvas,
+    double scaleX,
+    double scaleY, {
+    double originX = 0,
+    double originY = 0,
+    bool light = false,
+    ui.Rect? viewport,
+    double zoom = 1,
+  }) {
     canvas.save();
     canvas.scale(scaleX, scaleY);
     canvas.translate(-originX, -originY);
-    for (final s in _strokes) {
-      canvas.drawPicture(s.picture);
+    if (!light) {
+      for (final s in _shown) {
+        canvas.drawPicture(s.picture);
+      }
+    } else {
+      final vis = viewport == null
+          ? null
+          : LodRect(
+              viewport.left / scaleX + originX,
+              viewport.top / scaleY + originY,
+              viewport.right / scaleX + originX,
+              viewport.bottom / scaleY + originY,
+            );
+      final margin = vis == null ? 0.0 : math.max(vis.width, vis.height) * 0.1;
+      final screen = math.max(scaleX, scaleY) * zoom;
+      final cand = <PenStroke>[];
+      for (final s in _shown) {
+        if (s.points.isEmpty) continue;
+        final b = s.bounds, w = s.brush.width;
+        if (vis != null && !LodRect(b.left - w, b.top - w, b.right + w, b.bottom + w).overlaps(vis.inflate(margin))) {
+          continue;
+        }
+        // Ekranda 0.5 px'ten küçük ayrıntı (kalınlık dahil) atlanır.
+        if (math.max(b.width, b.height) * screen < 0.5 && w * screen < 0.5) continue;
+        cand.add(s);
+      }
+      final keep = pointBudget([for (final s in cand) s.points.length], lightPointBudget);
+      for (var i = 0; i < cand.length; i++) {
+        if (keep[i]) canvas.drawPicture(cand[i].lightPicture);
+      }
     }
     canvas.restore();
   }
@@ -183,14 +274,18 @@ class PdfInkSession extends ChangeNotifier {
     DateTime Function()? clock,
     this.attemptNo = 1,
     this.questionId,
-    this.layer = 0,
+    int layer = 0,
+    this.allLayers = false,
+    this.strokeTag,
+    this.strokeFilter,
     this.retryDelays = const [Duration(milliseconds: 300), Duration(seconds: 1), Duration(seconds: 3)],
     this.hoverHold = const Duration(milliseconds: 500),
     this.ownerOf,
     this.penKinds = false,
     this.holdMs = shapeHoldMs,
     this.holdTolerancePx = shapeHoldTolerancePx,
-  }) : _clock = clock ?? DateTime.now;
+  }) : _clock = clock ?? DateTime.now,
+       _layer = layer;
 
   final String documentId;
 
@@ -207,7 +302,30 @@ class PdfInkSession extends ChangeNotifier {
   /// Verilirse oturum yalnızca o sorunun çözüm çizgilerini okur/yazar (çözüm
   /// ekranı); null ise yalnızca soruya bağlı OLMAYAN çizgileri (okuyucu).
   final String? questionId;
-  final int layer;
+
+  /// Yeni çizgilerin katman anahtarı (AKTİF katman, `ink_strokes.layer`); okuyucuda değişir.
+  int _layer;
+  int get layer => _layer;
+
+  /// [allLayers] iken yalnız bu katmanın çizgileri görünür: değişince sayfalar önbellekten süzülür.
+  set layer(int v) {
+    if (_layer == v) return;
+    _layer = v;
+    if (!allLayers) return;
+    for (final pen in _pens.values) {
+      pen._setOnlyLayer(v);
+    }
+  }
+
+  /// true: sayfadaki TÜM katmanların çizgileri belleğe okunur (okuyucu); YALNIZ [layer] görünür/silinir/seçilir, yazma da ona.
+  final bool allLayers;
+
+  /// `noteId` sütunundaki ayırt edici: katman penceresi 'katman-pencere:<id>' yazar/okur;
+  /// null ise yalnız ayırıcısız çizgiler (ana okuyucu).
+  final String? strokeTag;
+
+  /// Çizgi kabul süzgeci: (sayfa, katman, sayfa-birimi ilk nokta) -> kabul. Soru katmanı bölge dışını reddeder.
+  final bool Function(int page, int layer, ui.Offset pagePoint)? strokeFilter;
 
   /// Kayıt hatasında bekleme süreleri (sınırlı yeniden deneme; sonra kullanıcıya ikaz).
   final List<Duration> retryDelays;
@@ -219,6 +337,9 @@ class PdfInkSession extends ChangeNotifier {
   /// görünüm pikseli içinde) çizgi tanınan şekle dönüşür. Ayarlanabilir; testte kısaltılır.
   final int holdMs;
   final double holdTolerancePx;
+
+  /// Zum/kaydırma sırasında hafif çizim bayrağı (boyayıcılar dinler).
+  final zoomInteraction = ZoomInteraction();
 
   final Map<int, PagePen> _pens = {};
   final Set<String> _pendingErase = {};
@@ -349,7 +470,7 @@ class PdfInkSession extends ChangeNotifier {
     final pen = _pens[sel.page];
     if (pen == null) return const [];
     return [
-      for (final s in pen._strokes)
+      for (final s in pen._shown)
         if (s.id != null && sel.baseline.containsKey(s.id)) s,
     ];
   }
@@ -400,7 +521,7 @@ class PdfInkSession extends ChangeNotifier {
       return 0;
     }
     final objs = [
-      for (final s in pen._strokes)
+      for (final s in pen._shown)
         if (s.id != null && !s.erased) InkObject(id: s.id!, points: s.points, brush: s.brush),
     ];
     final hit = selectByLasso(objs, lasso);
@@ -530,7 +651,7 @@ class PdfInkSession extends ChangeNotifier {
       for (final o in objects)
         PenStroke(o.brush, [
           for (final p in o.points) InkPoint(x: p.x + dx, y: p.y + dy, pressure: p.pressure, tilt: p.tilt, tMs: p.tMs),
-        ])..startedAtMs = now,
+        ], layer: layer)..startedAtMs = now,
     ];
     clearSelection();
     for (final n in news) {
@@ -710,14 +831,28 @@ class PdfInkSession extends ChangeNotifier {
 
   // --- sayfa katmanları (kalem olaylarını yönlendirmek için) ---
   final List<PdfPageInkLayerState> _layers = [];
+
+  /// Kayıtlı sayfa katmanları (Ink katmanı bölgeleri için; salt okunur görünüm).
+  List<PdfPageInkLayerState> get layerStates => List.unmodifiable(_layers);
+
+  /// Yerel Ink katmanı köprüsü (yalnız Android'de; masaüstü/testte null).
+  PdfInkOverlay? _overlay;
+  bool _overlayTried = false;
+  PdfInkOverlay? _makeOverlay() {
+    _overlayTried = true;
+    return InkOverlayHost.instance.supported ? PdfInkOverlay(this) : null;
+  }
   void registerLayer(PdfPageInkLayerState l) {
     if (!_layers.contains(l)) _layers.add(l);
+    _overlay ??= _overlayTried ? null : _makeOverlay();
+    _overlay?.layersChanged();
   }
 
   /// [page]: katmanın bıraktığı sayfa (katman sayfa değiştirirken eskisi).
   /// Sayfanın başka katmanı ve kaydı bitmemiş çizgisi yoksa bellekten atılır.
   void unregisterLayer(PdfPageInkLayerState l, {required int page}) {
     _layers.remove(l);
+    _overlay?.layersChanged();
     final pen = _pens[page];
     if (pen == null || _layers.any((x) => x.page == page)) return;
     if (pen._strokes.any((s) => s.id == null)) return;
@@ -734,7 +869,16 @@ class PdfInkSession extends ChangeNotifier {
   /// Kalem girişi kapalı (defterde Metin/Alt sayfa araçları): hiçbir katman kalem
   /// olayı almaz; kalem de parmak gibi görünümü kaydırır. Çizgiler olduğu gibi durur.
   bool _inkInputOff = false;
-  bool get inkInputOff => _inkInputOff;
+  bool get inkInputOff => _inkInputOff || _inkHidden;
+
+  /// Çizimler gizli (göz düğmesi): çizgiler boyanmaz ve kalem yazmaz; veri olduğu gibi durur.
+  bool _inkHidden = false;
+  bool get inkHidden => _inkHidden;
+  void setInkHidden(bool v) {
+    if (_inkHidden == v) return;
+    _inkHidden = v;
+    _ping();
+  }
   void setInkInputOff(bool v) {
     if (_inkInputOff == v) return;
     _inkInputOff = v;
@@ -743,7 +887,7 @@ class PdfInkSession extends ChangeNotifier {
 
   /// [global] noktasındaki sayfa katmanı (yoksa null; giriş kapalıysa hep null).
   PdfPageInkLayerState? layerAt(ui.Offset global) {
-    if (_inkInputOff) return null;
+    if (inkInputOff) return null;
     for (final l in _layers.reversed) {
       if (l.containsGlobal(global)) return l;
     }
@@ -754,7 +898,7 @@ class PdfInkSession extends ChangeNotifier {
   PagePen penFor(int page) {
     final existing = _pens[page];
     if (existing != null) return existing;
-    final pen = _pens[page] = PagePen(page);
+    final pen = _pens[page] = PagePen(page).._onlyLayer = allLayers ? _layer : null;
     unawaited(
       _enqueue(() async {
         if (!await _try(() => _load(pen))) {
@@ -772,9 +916,10 @@ class PdfInkSession extends ChangeNotifier {
     final rows = await repository.forPage(
       _owner(pen.page),
       attemptNo: attemptNo,
-      layer: layer,
+      layer: allLayers ? null : layer,
       questionId: questionId,
       noQuestion: questionId == null,
+      tag: strokeTag,
     );
     if (_disposed || pen._disposed) return;
     pen._replaceLoaded([
@@ -786,7 +931,7 @@ class PdfInkSession extends ChangeNotifier {
 
   PenStroke _fromRecord(InkStroke r) => PenStroke(_brushOf(r), [
     for (final p in r.points) InkPoint(x: p.x, y: p.y, pressure: p.pressure, tilt: p.tilt, tMs: p.t.toDouble()),
-  ], id: r.id);
+  ], id: r.id, layer: r.layer);
 
   InkBrush _brushOf(InkStroke r) {
     final t = parseToolColumn(r.tool);
@@ -816,6 +961,7 @@ class PdfInkSession extends ChangeNotifier {
     final firstP = viewPoints.first.pressure;
     final varies = viewPoints.any((p) => p.pressure != firstP);
     final h = (profile?.pressureSensitive ?? false) && varies ? double.parse(_hardness.toStringAsFixed(2)) : null;
+    final filter = strokeFilter;
     final pts = <InkPoint>[
       for (final p in viewPoints)
         () {
@@ -829,7 +975,8 @@ class PdfInkSession extends ChangeNotifier {
           );
         }(),
     ];
-    final stroke = PenStroke(viewBrush.copyWith(width: viewBrush.width * coords.pageUnitsPerViewPx, hardness: h), pts)
+    if (filter != null && !filter(page, layer, ui.Offset(pts.first.x, pts.first.y))) return;
+    final stroke = PenStroke(viewBrush.copyWith(width: viewBrush.width * coords.pageUnitsPerViewPx, hardness: h), pts, layer: layer)
       ..startedAtMs = _clock().millisecondsSinceEpoch - pts.last.tMs.round(); // saat çizgi SONUNDA okunur
     penFor(page)._add(stroke);
     unawaited(_enqueue(() => _save(page, stroke)));
@@ -852,7 +999,8 @@ class PdfInkSession extends ChangeNotifier {
             StrokePoint(p.x, p.y, pressure: p.pressure, tilt: p.tilt, t: math.max<int>(0, p.tMs.round())),
         ],
         startedAtMs: stroke.startedAtMs,
-        layer: layer,
+        layer: stroke.layer,
+        tag: strokeTag,
         attemptNo: attemptNo,
         questionId: questionId,
         tool: toolColumnOf(stroke.brush),
@@ -900,7 +1048,7 @@ class PdfInkSession extends ChangeNotifier {
     if (_eraseMode == EraseMode.area) return _eraseArea(page, x, y, radius, prevX, prevY);
     final pen = penFor(page);
     final hit = [
-      for (final s in pen._strokes)
+      for (final s in pen._shown)
         if (strokeHitsPoint(s.points, x, y, radius, halfWidth: brushHalfWidth(s.brush))) s,
     ];
     if (hit.isNotEmpty) {
@@ -937,12 +1085,12 @@ class PdfInkSession extends ChangeNotifier {
       path.map((p) => p.x).reduce(math.max) + radius,
       path.map((p) => p.y).reduce(math.max) + radius,
     );
-    for (final s in List.of(pen._strokes)) {
+    for (final s in List.of(pen._shown)) {
       if (!_boxesTouch(pathBox, s.bounds, brushHalfWidth(s.brush))) continue;
       final obj = InkObject(id: 'x', points: s.points, brush: s.brush);
       final res = eraseArea(obj, path, radius, idFor: (b, i) => '$b/$i');
       if (!res.changed) continue;
-      final news = [for (final p in res.pieces) PenStroke(p.brush, p.points)..startedAtMs = s.startedAtMs];
+      final news = [for (final p in res.pieces) PenStroke(p.brush, p.points, layer: s.layer)..startedAtMs = s.startedAtMs];
       if (move.pieces.remove(s)) {
         // Hareketin kendi parçası: yalnız bellekte, kaydı yok.
       } else {
@@ -961,7 +1109,8 @@ class PdfInkSession extends ChangeNotifier {
     owner: _owner(page),
     points: _toRecord(p.points),
     startedAtMs: p.startedAtMs,
-    layer: layer,
+    layer: p.layer,
+    tag: strokeTag,
     attemptNo: attemptNo,
     questionId: questionId,
     tool: toolColumnOf(p.brush),
@@ -1194,8 +1343,10 @@ class PdfInkSession extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _nearTimer?.cancel();
+    _overlay?.dispose();
     viewerLocked.dispose();
     selectionTick.dispose();
+    zoomInteraction.dispose();
     _errors.close();
     for (final p in _pens.values) {
       p.dispose();

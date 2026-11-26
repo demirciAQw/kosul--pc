@@ -1,5 +1,7 @@
 import '../../../core/pen_diag.dart';
 import '../../../core/pen_diag_store.dart';
+import '../../../app/platform.dart';
+import '../../ink/data/ink_overlay_host.dart';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -372,6 +374,10 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen> {
                   () => context.push(AppRoutes.settings),
                 ),
               ),
+              if (isAndroid) ...[
+                const _Section('Kalem'),
+                const Card(child: _InkNativeTile()),
+              ],
               const _Section('Tanı'),
               const Card(child: _PenDiagTile()),
               if (log.isNotEmpty) ...[
@@ -436,5 +442,25 @@ class _PenDiagTileState extends ConsumerState<_PenDiagTile> {
           await savePenDiag(ref.read(appDatabaseProvider), v);
           if (mounted) setState(() {});
         },
+      );
+}
+
+
+/// "Yerel Ink kalemi": Android'de kalem çizgisini Google Ink (yerel ıslak çizim) çizer.
+/// Varsayılan AÇIK; sorun olursa kapatılınca Flutter çizim yolu kullanılır.
+class _InkNativeTile extends ConsumerWidget {
+  const _InkNativeTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) => ValueListenableBuilder<bool>(
+        valueListenable: InkOverlayHost.nativeEnabled,
+        builder: (context, on, _) => SwitchListTile(
+          key: const Key('ink-native-switch'),
+          secondary: const Icon(Icons.draw_outlined),
+          title: const Text('Yerel Ink kalemi'),
+          subtitle: const Text('Kalem çizgisini Google Ink çizer (daha düşük gecikme). Kalem takılır ya da yanlış çizerse kapat.'),
+          value: on,
+          onChanged: (v) => saveInkNative(ref.read(appDatabaseProvider), v),
+        ),
       );
 }

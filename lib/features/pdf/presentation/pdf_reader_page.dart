@@ -15,6 +15,9 @@ import '../domain/pdf_engine.dart' show PdfBox, PdfPageSize;
 import '../domain/question_box.dart';
 import '../domain/book_analysis.dart';
 import 'analysis_overlay.dart';
+import '../../ink/presentation/ink_mask.dart';
+import '../../notes/presentation/tool_rail.dart';
+import '../data/pdf_last_page_store.dart';
 import 'pdf_analysis_panel.dart';
 import 'pdf_box_overlay.dart';
 import 'pdf_question_panel.dart';
@@ -23,10 +26,11 @@ import '../pdf_providers.dart';
 import 'pdf_ink_input.dart';
 import 'pdf_ink_session.dart';
 import 'pdf_page_ink_layer.dart';
-import '../data/layer_renderer.dart';
 import '../pdf_layers_providers.dart';
-import 'layer_overlay.dart';
-import 'pdf_layers_controller.dart';
+import 'layer_buttons.dart';
+import 'layer_page_overlay.dart';
+import 'layer_settings_sheet.dart';
+import 'pdf_layer_state.dart';
 
 /// PDF okuyucu: dikey kaydırma, parmakla yakınlaştırma, küçük resim şeridi,
 /// sayfa göstergesi ve her sayfanın üstünde kalem katmanı.
@@ -84,12 +88,14 @@ class PdfReaderPage extends ConsumerWidget {
           );
         }
         // Bağlantıdan gelen sayfa belgede yoksa başa açılır, kutu yok sayılır.
-        final page = validReaderPage(initialPage, i.record.pageCount);
+        final linked = validReaderPage(initialPage, i.record.pageCount);
+        // Bağlantı yoksa kapatıldığı son sayfadan açılır.
+        final page = startPage(linked: linked, saved: i.lastPage, pageCount: i.record.pageCount);
         return PdfReaderView(
           info: i,
           initialPage: page,
-          highlight: page == null ? null : highlight,
-          questionId: page == null ? null : questionId,
+          highlight: linked == null ? null : highlight,
+          questionId: linked == null ? null : questionId,
           analysis: analysis,
         );
       },
@@ -119,9 +125,13 @@ class PdfReaderView extends ConsumerStatefulWidget {
 class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
   late final PdfInkSession _session;
   final _viewer = r.PdfViewerController();
-  late final PdfLayersHub _layersHub; // filigran/örtü katmanları (görüntüleme)
-  late final PdfLayersController _layers;
+  late final PdfLayerState _layerState; // katmanlar: tek durum kaynağı
   final _page = ValueNotifier<int>(1);
+
+  /// Son sayfa kaydı: sayfa değişince 500 ms bekleyip yazar (kaydırırken her kareye yazılmaz).
+  late final PdfLastPageStore _lastPageStore;
+  Timer? _lastPageTimer;
+  late int _lastPageSaved; // 1'den
   late final r.PdfDocumentRef _docRef;
   late final AppLifecycleListener _lifecycle;
   StreamSubscription<String>? _errorSub;
@@ -143,11 +153,15 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
   @override
   void initState() {
     super.initState();
+    _layerState = ref.read(pdfLayerStateProvider(widget.info.record.id));
     _session = PdfInkSession(
       documentId: widget.info.record.id,
       repository: ref.read(inkStrokeRepositoryProvider),
       clock: ref.read(clockProvider),
       penKinds: true,
+      allLayers: true, // tüm katmanlar yüklenir; yalnız AKTİF katman görünür ve yazar
+      layer: _layerState.activeKey,
+      strokeFilter: _layerState.accepts, // soru katmanında bölge dışı çizilmez
     );
     // Geriye dönük avuç reddi: avuç kalemden önce değip sayfayı oynattıysa geri al.
     _session.readViewMatrix = () => _viewer.isReady ? _viewer.value.clone() : null;
@@ -156,28 +170,18 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
     };
     _tools.apply(_session);
     _tools.addListener(_applyTools);
+    // Zum/kaydırma sırasında çizgiler hafif çizilir (tekerlek/eylemsizlik dahil).
+    _viewer.addListener(_session.zoomInteraction.pulse);
     // Kalem boyutu ve yuva konumu defterle AYNI kalıcı ayardır.
     _prefs = NoteToolPrefsBinding(ref.read(noteToolPrefsStoreProvider), _tools);
     _session.onSelectBox = _onBox;
-    _layersHub = PdfLayersHub(
-      documentId: widget.info.record.id,
-      repository: ref.read(pdfLayersRepositoryProvider),
-      renderer: PdfLayerRenderer(
-        documentId: widget.info.record.id,
-        open: () => ref.read(pdfEngineProvider).openFile(widget.info.path!),
-      ),
-    )..start();
-    _layers = PdfLayersController(
-      hub: _layersHub,
-      session: _session,
-      contextOf: () => context,
-      currentPage: () => _page.value - 1,
-      zoom: _viewer,
-      zoomOf: () => _viewer.isReady ? _viewer.currentZoom : 1,
-    );
+    _layerState.addListener(_onLayerState);
+    unawaited(_layerState.load());
     _analysisOn = widget.analysis && widget.info.record.bookId != null;
     _panelOpen = _analysisOn;
     _page.value = (widget.initialPage ?? 0) + 1;
+    _lastPageStore = ref.read(pdfLastPageStoreProvider);
+    _lastPageSaved = _page.value;
     final hl = widget.highlight, hp = widget.initialPage;
     if (hl != null && hp != null)
       _marks.value = [PdfBoxMark(hp, hl, _highlightColor)];
@@ -185,7 +189,7 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
     // PDFium belgesi bir kez açılır).
     _docRef = r.PdfDocumentRefFile(
       widget.info.path!,
-      useProgressiveLoading: false,
+      // Sayfa boyutları tek tek, açılış sayfası öncelikli yüklenir: büyük PDF hemen açılır.
     );
     _errorSub = _session.errors.listen((m) {
       if (!mounted) return;
@@ -201,10 +205,30 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
     );
   }
 
-  void _flush() => unawaited(_session.flush());
+  void _flush() {
+    _saveLastPageNow();
+    unawaited(_session.flush());
+  }
+
+  void _onPageChanged(int n) {
+    _page.value = n;
+    _lastPageTimer?.cancel();
+    if (n == _lastPageSaved) return;
+    _lastPageTimer = Timer(const Duration(milliseconds: 500), _saveLastPageNow);
+  }
+
+  void _saveLastPageNow() {
+    _lastPageTimer?.cancel();
+    final n = _page.value;
+    if (n == _lastPageSaved) return;
+    _lastPageSaved = n;
+    unawaited(_lastPageStore.save(widget.info.record.id, n - 1));
+  }
 
   @override
   void dispose() {
+    _saveLastPageNow();
+    _viewer.removeListener(_session.zoomInteraction.pulse);
     _tools.removeListener(_applyTools);
     _prefs.dispose();
     _tools.dispose();
@@ -213,8 +237,10 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
     _page.dispose();
     _marks.dispose();
     _analysisData.dispose();
-    _layers.dispose();
-    unawaited(_layersHub.dispose());
+    _layerState.removeListener(_onLayerState);
+    _layerState.setSelecting(false);
+    _bannerMessenger?.hideCurrentMaterialBanner();
+    unawaited(_layerState.flushNotes());
     // Kuyruk bitmeden oturum kapanmasın: kayıtlar tamamlanınca kapat.
     unawaited(_session.flush().whenComplete(_session.dispose));
     super.dispose();
@@ -230,8 +256,47 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
       _selecting = v;
       if (!v) _clearPending();
     });
+    if (v) _layerState.setSelecting(false);
     _session.setSelecting(v);
   }
+
+  bool _pickShown = false;
+  ScaffoldMessengerState? _bannerMessenger;
+
+  /// Katman durumu değişti: aktif katmanı oturuma ver; bölge seçim modunu aç/kapat.
+  void _onLayerState() {
+    if (!mounted) return;
+    _session.layer = _layerState.activeKey;
+    final sel = _layerState.selecting;
+    if (sel == _pickShown) return;
+    _pickShown = sel;
+    final m = _bannerMessenger = ScaffoldMessenger.of(context);
+    if (sel) {
+      if (_selecting) setState(() => _selecting = false);
+      _clearPending();
+      _session.setSelecting(true);
+      m
+        ..hideCurrentMaterialBanner()
+        ..showMaterialBanner(
+          MaterialBanner(
+            key: const Key('layers-pick-banner'),
+            content: const Text('Soru katmanı için bölgeyi sürükleyerek seç.'),
+            actions: [
+              TextButton(
+                key: const Key('layers-pick-cancel'),
+                onPressed: () => _layerState.setSelecting(false),
+                child: const Text('Vazgeç'),
+              ),
+            ],
+          ),
+        );
+    } else {
+      if (!_selecting) _session.setSelecting(false);
+      m.hideCurrentMaterialBanner();
+    }
+  }
+
+  void _openLayerSettings() => showPdfLayerSettings(context, _layerState, _tools);
 
   void _clearPending() {
     _pending = null;
@@ -252,8 +317,19 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
     double ph,
   ) {
     if (!mounted) return;
-    if (_layers.consumeBox(page, x1, y1, x2, y2, pw, ph)) return; // filigran bölgesi seçiliyor
     final box = normalizeQuestionBox(x1, y1, x2, y2, PdfPageSize(pw, ph));
+    if (_layerState.selecting) {
+      // Soru katmanı bölgesi seçiliyor (soru kaydı değil).
+      if (box == null) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(const SnackBar(content: Text('Bölge çok küçük. Daha büyük bir dikdörtgen çiz.')));
+        return;
+      }
+      _layerState.setSelecting(false);
+      unawaited(_layerState.addQuestion(page, box));
+      return;
+    }
     if (box == null) {
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
@@ -287,7 +363,6 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
   }
 
   List<Widget> _overlays(BuildContext context, Rect rect, r.PdfPage page) => [
-    _layers.overlay(page.pageNumber - 1, page.width, page.height),
     PdfPageBoxOverlay(
       key: ValueKey('box-${page.pageNumber}'),
       page: page.pageNumber - 1,
@@ -295,23 +370,20 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
       pageHeight: page.height,
       marks: _marks,
     ),
-    // Çizgiler katmanların (filigran/örtü) ÜSTÜNDE; "Çizimler" anahtarı yalnız gizler.
-    ValueListenableBuilder<bool>(
-      valueListenable: _layersHub.inkVisible,
-      builder: (_, v, child) => Visibility(
-        visible: v,
-        maintainState: true,
-        maintainAnimation: true,
-        maintainSize: true,
-        child: child!,
-      ),
-      child: PdfPageInkLayer(
-        key: ValueKey('ink-${page.pageNumber}'),
-        session: _session,
-        page: page.pageNumber - 1,
-        pageWidth: page.width,
-        pageHeight: page.height,
-      ),
+    PdfPageInkLayer(
+      key: ValueKey('ink-${page.pageNumber}'),
+      session: _session,
+      page: page.pageNumber - 1,
+      pageWidth: page.width,
+      pageHeight: page.height,
+    ),
+    PdfPageLayerOverlay(
+      key: ValueKey('layers-${page.pageNumber}'),
+      state: _layerState,
+      page: page.pageNumber - 1,
+      pageWidth: page.width,
+      pageHeight: page.height,
+      onOpenWindow: (l) => context.push(AppRoutes.pdfLayerWindow(widget.info.record.id, l.id)),
     ),
     AnalysisPageOverlay(
       key: ValueKey('analysis-${page.pageNumber}'),
@@ -346,7 +418,8 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
         Positioned(
           top: 8,
           left: 8,
-          child: Material(
+          child: InkMask(
+           child: Material(
             key: const Key('analysis-bar'),
             elevation: 3,
             borderRadius: BorderRadius.circular(20),
@@ -375,6 +448,7 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
                 ),
               ],
             ),
+          ),
           ),
         ),
         if (_panelOpen)
@@ -423,7 +497,11 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
                 if (!_analysisOn) _analysisData.value = null;
               }),
             ),
-          ..._layers.actions(),
+          PdfLayerBarButtons(
+            state: _layerState,
+            onAddFull: () => _layerState.addByPreference(),
+            onSettings: _openLayerSettings,
+          ),
           const FocusModeButton(),
           IconButton(
             key: const Key('pdf-thumbs-toggle'),
@@ -463,6 +541,15 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
                             controller: _viewer,
                             initialPageNumber: (widget.initialPage ?? 0) + 1,
                             params: r.PdfViewerParams(
+                              // Pratikte sınırsız zum; bellek: döşeme önbelleği 64 MB,
+                              // tek geçiş çözünürlüğü 150 dpi (üstü kademeli çizilir).
+                              sizeDelegateProvider: const r.PdfViewerSizeDelegateProviderLegacy(
+                                maxScale: 1000,
+                                onePassRenderingScaleThreshold: 150 / 72,
+                              ),
+                              maxImageBytesCachedOnMemory: 64 * 1024 * 1024,
+                              onInteractionStart: (_) => _session.zoomInteraction.begin(),
+                              onInteractionEnd: (_) => _session.zoomInteraction.end(),
                               panEnabled: !locked,
                               scaleEnabled: !locked,
                               backgroundColor: Theme.of(context)
@@ -470,11 +557,7 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
                                   .surfaceContainerHighest,
                               pageOverlaysBuilder: _overlays,
                               onPageChanged: (n) {
-                                if (n != null) {
-                                  _page.value = n;
-                                  // eşitlemeyle gelen katman değişimleri sayfa çevirince görünür
-                                  _layers.hub.refreshIfStale();
-                                }
+                                if (n != null) _onPageChanged(n);
                               },
                             ),
                           ),
@@ -504,14 +587,16 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
                                         constraints: const BoxConstraints(
                                           maxWidth: 560,
                                         ),
-                                        child: PdfQuestionPanel(
-                                          key: ValueKey(_pending),
-                                          info: widget.info,
-                                          page: _pending!.page,
-                                          box: _pending!.box,
-                                          onSaved: _onSaved,
-                                          onCancel: () =>
-                                              setState(_clearPending),
+                                        child: InkMask(
+                                          child: PdfQuestionPanel(
+                                            key: ValueKey(_pending),
+                                            info: widget.info,
+                                            page: _pending!.page,
+                                            box: _pending!.box,
+                                            onSaved: _onSaved,
+                                            onCancel: () =>
+                                                setState(_clearPending),
+                                          ),
                                         ),
                                       ),
                                     ),
@@ -521,17 +606,19 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
                                   Positioned(
                                     right: 16 + liftRight,
                                     bottom: 56 + lift,
-                                    child: FloatingActionButton.extended(
-                                      key: const Key('pdf-solve-button'),
-                                      heroTag: null,
-                                      onPressed: () => context.push(
-                                        AppRoutes.pdfSolve(
-                                          widget.info.record.id,
-                                          widget.questionId!,
+                                    child: InkMask(
+                                      child: FloatingActionButton.extended(
+                                        key: const Key('pdf-solve-button'),
+                                        heroTag: null,
+                                        onPressed: () => context.push(
+                                          AppRoutes.pdfSolve(
+                                            widget.info.record.id,
+                                            widget.questionId!,
+                                          ),
                                         ),
+                                        icon: const Icon(Icons.draw_outlined),
+                                        label: const Text('Çöz'),
                                       ),
-                                      icon: const Icon(Icons.draw_outlined),
-                                      label: const Text('Çöz'),
                                     ),
                                   ),
                                 Positioned(
@@ -587,16 +674,28 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
                           ),
                           child: Stack(
                             children: [
-                              FloatingToolDock(
-                                tools: _tools,
-                                session: _session,
-                                selecting: _selecting,
-                                onSelect: () => _setSelecting(!_selecting),
-                              ),
+                              if (_tools.rail)
+                                ToolRail(
+                                  tools: _tools,
+                                  session: _session,
+                                  selecting: _selecting,
+                                  onSelect: () => _setSelecting(!_selecting),
+                                  small: TabletFocus.maybeOf(context)?.value ?? false,
+                                )
+                              else
+                                FloatingToolDock(
+                                  tools: _tools,
+                                  session: _session,
+                                  selecting: _selecting,
+                                  onSelect: () => _setSelecting(!_selecting),
+                                ),
                             ],
                           ),
                         ),
                       ),
+                      // Sol üst: katman gezinme hapı; altında yüzen yuvarlak bölge düğmesi.
+                      Positioned(top: 8, left: 8, child: InkMask(child: LayerNavPill(state: _layerState))),
+                      Positioned.fill(child: RegionPickButton(state: _layerState)),
                     ],
                   ),
                 ),

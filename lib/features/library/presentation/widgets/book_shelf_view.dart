@@ -1,5 +1,9 @@
-import 'package:flutter/material.dart';
+import 'dart:io';
 
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../pdf/pdf_cover_providers.dart';
 import '../../domain/library.dart';
 import '../../domain/progress.dart';
 
@@ -52,6 +56,7 @@ class BookCover extends StatelessWidget {
     required this.onTap,
     this.hasPdf = false,
     this.onLongPress,
+    this.coverImage,
   });
 
   final BookProgress progress;
@@ -60,6 +65,9 @@ class BookCover extends StatelessWidget {
   /// Kitaba bağlı PDF var: kapakta küçük "PDF" rozeti.
   final bool hasPdf;
   final VoidCallback? onLongPress;
+
+  /// PDF'in 1. sayfa kapağı (varsa kapak yazılarının yerine geçer).
+  final File? coverImage;
 
   @override
   Widget build(BuildContext context) {
@@ -76,6 +84,7 @@ class BookCover extends StatelessWidget {
       onTap: onTap,
       onLongPress: onLongPress,
       badge: hasPdf ? 'PDF' : null,
+      image: coverImage,
     );
   }
 }
@@ -96,7 +105,11 @@ class BookCoverFace extends StatelessWidget {
     this.onLongPress,
     this.badge,
     this.bottomRight,
+    this.image,
   });
+
+  /// Kapak resmi (PDF 1. sayfa); varsa renkli yazılı yüz yerine bu gösterilir.
+  final File? image;
 
   final String title;
   final String kicker;
@@ -154,6 +167,17 @@ class BookCoverFace extends StatelessWidget {
                     onLongPress: onLongPress,
                     child: Stack(
                       children: [
+                        if (image != null)
+                          Positioned.fill(
+                            child: Image.file(
+                              image!,
+                              fit: BoxFit.cover,
+                              alignment: Alignment.topCenter,
+                              cacheWidth: 300,
+                              gaplessPlayback: true,
+                              errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                            ),
+                          ),
                         // Sağda ince sırt gölgesi.
                         Positioned(
                           top: 0,
@@ -176,6 +200,42 @@ class BookCoverFace extends StatelessWidget {
                           width: 2,
                           child: ColoredBox(color: Color(0x33FFFFFF)),
                         ),
+                        if (image != null)
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            child: ColoredBox(
+                              color: const Color(0xCC000000),
+                              child: Padding(
+                                padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (ratio != null)
+                                      ClipRRect(
+                                        borderRadius: BorderRadius.circular(3),
+                                        child: LinearProgressIndicator(
+                                          value: ratio!.clamp(0.0, 1.0),
+                                          minHeight: 4,
+                                          backgroundColor: const Color(0x55FFFFFF),
+                                          valueColor: const AlwaysStoppedAnimation(Color(0xFFFFFFFF)),
+                                        ),
+                                      ),
+                                    if (footer != null)
+                                      Text(
+                                        footer!,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(color: white, fontSize: small, fontWeight: FontWeight.w600),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          )
+                        else
                         Padding(
                           padding: EdgeInsets.fromLTRB(c.maxWidth * 0.1, 10, c.maxWidth * 0.14, 8),
                           child: Column(
@@ -285,6 +345,7 @@ class BookShelfView extends StatelessWidget {
     this.header,
     this.padding = const EdgeInsets.fromLTRB(16, 12, 16, 96),
     this.pdfBookIds = const {},
+    this.pdfShaByBook = const {},
     this.onLongPress,
   });
 
@@ -296,6 +357,9 @@ class BookShelfView extends StatelessWidget {
   /// PDF'i olan kitapların kimlikleri (kapakta "PDF" rozeti).
   final Set<String> pdfBookIds;
 
+  /// Kitap kimliği -> bağlı PDF'in sha256'sı (1. sayfa kapağı için).
+  final Map<String, String> pdfShaByBook;
+
   /// Kapağa uzun basma (ör. "PDF'te aç").
   final void Function(Book book)? onLongPress;
 
@@ -305,11 +369,15 @@ class BookShelfView extends StatelessWidget {
       items: items,
       header: header,
       padding: padding,
-      itemBuilder: (context, p) => BookCover(
-        progress: p,
-        onTap: () => onOpen(p.book),
-        hasPdf: pdfBookIds.contains(p.book.id),
-        onLongPress: onLongPress == null ? null : () => onLongPress!(p.book),
+      itemBuilder: (context, p) => _BookCoverWithPdfImage(
+        sha: pdfShaByBook[p.book.id],
+        builder: (file) => BookCover(
+          progress: p,
+          onTap: () => onOpen(p.book),
+          hasPdf: pdfBookIds.contains(p.book.id),
+          coverImage: file,
+          onLongPress: onLongPress == null ? null : () => onLongPress!(p.book),
+        ),
       ),
     );
   }
@@ -396,5 +464,20 @@ class _ShelfRow<T> extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+
+/// PDF'i olan kitapta 1. sayfa kapağını (tembel, sıralı üretim) bulup [builder]'a verir.
+class _BookCoverWithPdfImage extends ConsumerWidget {
+  const _BookCoverWithPdfImage({required this.sha, required this.builder});
+  final String? sha;
+  final Widget Function(File? image) builder;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final s = sha;
+    if (s == null) return builder(null);
+    return builder(ref.watch(pdfCoverFileProvider(s)).value);
   }
 }

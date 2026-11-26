@@ -170,26 +170,60 @@ void main() {
       expect((await desktopStore.phone())!.id, phoneId);
     });
 
-    test('telefon tarafı da tek bilgisayar tutar', () async {
+    test('istemci tarafı en çok maxPeers eş tutar; eş başına kaldırma öbürlerine dokunmaz', () async {
       final store = PhoneSyncStore(() async => File('${tmp.path}/telefon/esitleme.json'));
       await server.openPairing();
       final computer = await pair();
       await store.saveComputer(computer);
       await store.saveComputer(computer.copyWith(host: '10.0.0.7'));
       expect((await store.computer())!.host, '10.0.0.7');
-      final other = PairedComputer(
-        id: 'baskabilgisayar1',
-        name: 'B',
-        host: '10.0.0.8',
-        port: 1,
-        key: List.filled(32, 0),
-        pairedAt: DateTime(2026),
-      );
-      await expectLater(store.saveComputer(other), throwsA(isA<SyncException>()));
+      PairedComputer peer(String id, {String platform = 'linux'}) => PairedComputer(
+            id: id,
+            name: id,
+            host: '10.0.0.8',
+            port: 1,
+            key: List.filled(32, 0),
+            pairedAt: DateTime(2026),
+            platform: platform,
+            kind: platform == 'android' ? 'tablet' : 'bilgisayar',
+          );
+      for (var i = 2; i <= SyncLimits.maxPeers; i++) {
+        await store.saveComputer(peer('baskaes$i${'x' * 6}', platform: 'android'));
+      }
+      expect(await store.computers(), hasLength(SyncLimits.maxPeers));
+      await expectLater(store.saveComputer(peer('fazlaes0000000')), throwsA(isA<SyncException>()));
+      await store.removeComputer('baskaes2xxxxxx');
+      expect(await store.computers(), hasLength(SyncLimits.maxPeers - 1));
+      expect((await store.peer('baskaes3xxxxxx'))!.isAndroid, isTrue);
       await store.removeComputer();
-      await store.saveComputer(other);
+      expect(await store.computers(), isEmpty);
+      await store.saveComputer(peer('baskabilgisayar1'));
       expect((await store.computer())!.id, 'baskabilgisayar1');
       expect(await store.phoneId(), await store.phoneId(), reason: 'kimlik kalıcı');
+    });
+
+    test('eski tek bilgisayar kaydı (bilgisayar:) eşler listesine taşınır, imleç bayrağı alır', () async {
+      final file = File('${tmp.path}/telefon/eski.json');
+      await file.parent.create(recursive: true);
+      final old = PairedComputer(
+          id: 'eskibilgisayar1',
+          name: 'Eski',
+          host: '192.168.1.5',
+          port: 47321,
+          key: List.filled(32, 7),
+          pairedAt: DateTime(2026, 1, 2));
+      final json = old.toJson()
+        ..remove('platform')
+        ..remove('tur');
+      await file.writeAsString(jsonEncode({'id': 'telefoneski0001', 'bilgisayar': json}));
+      final store = PhoneSyncStore(() async => file);
+      final peers = await store.computers();
+      expect(peers.single.id, 'eskibilgisayar1');
+      expect(peers.single.platform, 'linux');
+      expect(peers.single.kind, 'bilgisayar');
+      expect(peers.single.legacyCursors, isTrue);
+      expect(peers.single.key, List.filled(32, 7));
+      expect(jsonDecode(await file.readAsString()), isNot(contains('bilgisayar')));
     });
   });
 

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart' show PointerDeviceKind, PointerDownEvent;
 import 'package:flutter/material.dart';
@@ -32,6 +33,8 @@ import 'note_tool_settings.dart';
 import 'page_items_controller.dart';
 import 'page_items_layer.dart';
 import 'page_template_painter.dart';
+import 'tool_rail.dart';
+import '../../ink/presentation/ink_mask.dart';
 
 /// Defter sayfası düzenleyicisi: sabit boyutlu sayfa (not koordinatı), parmakla
 /// kaydır/yakınlaştır, kalem çizer. PDF okuyucunun kalem girişi ve oturumu aynen
@@ -66,10 +69,13 @@ class NotePageEditor extends ConsumerStatefulWidget {
   /// çizgi yarıda kalmaz. Hata atarsa bir sonraki denemede yeniden istenir.
   final Future<void> Function(double newHeight)? onGrow;
 
-  /// Zum aralığı (1 = sayfa genişliğe sığmış): 0.1 sayfayı küçük görmek, 60 (%6000)
-  /// en küçük ayrıntı için.
-  static const minZoom = 0.1;
-  static const maxZoom = 60.0;
+  /// Zum aralığı (1 = sayfa genişliğe sığmış): pratikte sınırsız (InteractiveViewer
+  /// sonlu sınır ister): 0.02 sayfayı çok küçük görmek, 1000 (×1000) en küçük ayrıntı için.
+  static const minZoom = 0.02;
+  static const maxZoom = 1000.0;
+
+  /// Zum göstergesi: ×100 ve üstü "×250" (taşmasın), altı yüzde.
+  static String zoomLabel(double z) => z >= 100 ? '×${z.round()}' : '%${(z * 100).round()}';
 
   /// Zum bu değerin altına inince "Panoya geç" çipi çıkar (yüzde 12).
   static const boardChipZoom = 0.12;
@@ -140,6 +146,9 @@ class NotePageEditorState extends ConsumerState<NotePageEditor> implements DockD
       if (v != null) items.sync(v);
     }, fireImmediately: true);
     _transform.addListener(_zoomChanged);
+    session.zoomInteraction
+      ..visibleRect = _visibleRect
+      ..zoomOf = (() => _transform.value.getMaxScaleOnAxis());
     // Geriye dönük avuç reddi: avuç kalemden önce değip sayfayı oynattıysa geri al.
     session.readViewMatrix = () => _transform.value.clone();
     session.writeViewMatrix = (m) => _transform.value = (m as Matrix4).clone();
@@ -175,9 +184,20 @@ class NotePageEditorState extends ConsumerState<NotePageEditor> implements DockD
     if (_zoom.value != z) _zoom.value = z;
     final hi = z > 1.8;
     if (_highRes.value != hi) _highRes.value = hi;
+    session.zoomInteraction.pulse(); // zum/kaydırma: çizgiler hafif çizilir
+  }
+
+  /// Görünür dikdörtgen: sayfa katmanının yerel pikselinde (hafif çizimde kırpma için).
+  ui.Rect? _visibleRect() {
+    final m = _transform.value, area = _areaKey.currentContext?.size;
+    final z = m.getMaxScaleOnAxis();
+    if (area == null || z <= 0) return null;
+    final t = m.getTranslation();
+    return ui.Rect.fromLTWH(-t.x / z, -t.y / z, area.width / z, area.height / z);
   }
 
   late DockPosition _dockSeen;
+  late bool _railSeen = widget.tools.rail;
   late final PagePen _pen;
 
   /// Büyütme istendi ama sayfa kaydı henüz güncellenmedi (çift istek olmasın).
@@ -187,8 +207,11 @@ class NotePageEditorState extends ConsumerState<NotePageEditor> implements DockD
   void _applyTools() {
     widget.tools.apply(session);
     // Yuva konumu değişince yerleşim yenilenir (diğer ayar değişimlerinde gerekmez).
-    if (_dockSeen != widget.tools.dockPosition && mounted) {
-      setState(() => _dockSeen = widget.tools.dockPosition);
+    if ((_dockSeen != widget.tools.dockPosition || _railSeen != widget.tools.rail) && mounted) {
+      setState(() {
+        _dockSeen = widget.tools.dockPosition;
+        _railSeen = widget.tools.rail;
+      });
     }
     // Öğe aracı açılınca düzenleme/seçim sürmez (Alt sayfa aracı vb.).
     if (widget.tools.itemTool == ItemTool.none) return;
@@ -657,6 +680,25 @@ class NotePageEditorState extends ConsumerState<NotePageEditor> implements DockD
     final notebookPages = ref.watch(inkNotebookPagesProvider(page.notebookId)).value ?? const <InkNotePageRecord>[];
     final nodes = _nodes(links, notebookPages);
     final hasRouter = GoRouter.maybeOf(context) != null;
+    final styleControl = PageStyleControl(
+                    template: template,
+                    background: background,
+                    spacing: widget.spacing,
+                    onTemplate: (t) {
+                      setState(() => _tplLocal = t);
+                      widget.onTemplate(t);
+                    },
+                    onTemplateAll: (t) {
+                      setState(() => _tplLocal = t);
+                      widget.onTemplateAll(t);
+                    },
+                    onBackground: (c) {
+                      setState(() => _bgLocal = c);
+                      widget.onBackground(c);
+                    },
+                    onSpacing: widget.onSpacing,
+                    onTranscribe: widget.onTranscribe,
+    );
     final viewer = ColoredBox(
       color: cs.surfaceContainerHighest,
       child: LayoutBuilder(
@@ -695,6 +737,8 @@ class NotePageEditorState extends ConsumerState<NotePageEditor> implements DockD
                         boundaryMargin: const EdgeInsets.all(double.infinity),
                         minScale: NotePageEditor.minZoom,
                         maxScale: NotePageEditor.maxZoom,
+                        onInteractionStart: (_) => session.zoomInteraction.begin(),
+                        onInteractionEnd: (_) => session.zoomInteraction.end(),
                         child: SizedBox(
                           key: _pageKey,
                           width: w,
@@ -788,7 +832,7 @@ class NotePageEditorState extends ConsumerState<NotePageEditor> implements DockD
                       ValueListenableBuilder<Matrix4>(
                         valueListenable: _transform,
                         builder: (_, m, _) => Text(
-                          '%${(m.getMaxScaleOnAxis() * 100).round()}',
+                          NotePageEditor.zoomLabel(m.getMaxScaleOnAxis()),
                           key: const Key('note-zoom-label'),
                         ),
                       ),
@@ -828,7 +872,8 @@ class NotePageEditorState extends ConsumerState<NotePageEditor> implements DockD
                 left: 8,
                 right: 8,
                 child: Center(
-                  child: ItemToolbar(
+                  child: InkMask(
+                   child: ItemToolbar(
                     controller: items,
                     onDeleted: (id) {
                       if (!mounted) return;
@@ -846,9 +891,20 @@ class NotePageEditorState extends ConsumerState<NotePageEditor> implements DockD
                         );
                     },
                   ),
+                  ),
                 ),
               ),
               // Yuva: kenarda ya da serbest; sürüklerken parmağı izler.
+              if (widget.tools.rail)
+                ToolRail(
+                  tools: widget.tools,
+                  session: session,
+                  small: focus,
+                  itemTools: true,
+                  onPhoto: addPhoto,
+                  page: styleControl,
+                )
+              else
               DockPlacement(
                 tools: widget.tools,
                 drag: _dockDrag,
@@ -860,25 +916,7 @@ class NotePageEditorState extends ConsumerState<NotePageEditor> implements DockD
                   dockDrag: this,
                   itemTools: true,
                   onPhoto: addPhoto,
-                  page: PageStyleControl(
-                    template: template,
-                    background: background,
-                    spacing: widget.spacing,
-                    onTemplate: (t) {
-                      setState(() => _tplLocal = t);
-                      widget.onTemplate(t);
-                    },
-                    onTemplateAll: (t) {
-                      setState(() => _tplLocal = t);
-                      widget.onTemplateAll(t);
-                    },
-                    onBackground: (c) {
-                      setState(() => _bgLocal = c);
-                      widget.onBackground(c);
-                    },
-                    onSpacing: widget.onSpacing,
-                    onTranscribe: widget.onTranscribe,
-                  ),
+                  page: styleControl,
                 ),
               ),
               ValueListenableBuilder<DockDrag?>(

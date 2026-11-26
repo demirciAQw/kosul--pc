@@ -7,6 +7,7 @@ import '../features/ink/presentation/ink_lab_page.dart';
 import '../features/pdf/domain/book_analysis.dart' show ReaderLink;
 import '../features/pdf/presentation/pdf_library_page.dart';
 import '../features/pdf/presentation/pdf_reader_page.dart';
+import '../features/pdf/presentation/pdf_layer_window_page.dart';
 import '../features/pdf/presentation/pdf_solve_page.dart';
 import '../features/ledger/presentation/ledger_screens.dart';
 import '../features/home/home_screen.dart';
@@ -293,6 +294,13 @@ final routerProvider = Provider<GoRouter>((ref) {
           );
         },
         routes: [
+          GoRoute(
+            path: 'katman/:layerId',
+            builder: (context, state) => PdfLayerWindowPage(
+              documentId: state.pathParameters['id']!,
+              layerId: state.pathParameters['layerId']!,
+            ),
+          ),
           GoRoute(
             path: 'soru/:questionId',
             builder: (context, state) => PdfSolvePage(

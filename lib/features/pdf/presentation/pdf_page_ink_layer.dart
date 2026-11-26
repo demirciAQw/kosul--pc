@@ -12,7 +12,9 @@ import '../../ink/domain/ink_models.dart';
 import '../../ink/domain/ink_object.dart' show InkRect;
 import '../../ink/domain/lasso_gesture.dart';
 import '../../ink/domain/shape_recognizer.dart';
+import '../../ink/presentation/zoom_interaction.dart';
 import '../domain/page_coords.dart';
+import 'pdf_ink_overlay.dart' show OverlayLayerGeometry, globalVisibleRect;
 import 'pdf_ink_session.dart';
 
 /// Bir PDF sayfasının üstündeki kalem katmanı (InkSurface B denetleyicisi).
@@ -113,6 +115,54 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
     }
   }
 
+  // --- Ink katmanı (yerel ıslak çizim) köprüsü ---
+
+  ModalRoute<dynamic>? _route;
+  bool _tickersOn = true;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _route = ModalRoute.of(context);
+    _tickersOn = TickerMode.of(context);
+  }
+
+  /// Bu katmanın pencere içi durumu; üstte başka rota (diyalog, alt sayfa) ya da gizli sekme
+  /// varsa, ya da tümüyle kırpıldıysa null: yerel katman burada çizmesin.
+  OverlayLayerGeometry? overlayGeometry() {
+    final b = _box;
+    if (b == null || !mounted || !_tickersOn) return null;
+    final route = _route;
+    if (route != null && !route.isCurrent) return null;
+    final visible = globalVisibleRect(b);
+    if (visible == null) return null;
+    return OverlayLayerGeometry(
+      visible: visible,
+      origin: b.localToGlobal(Offset.zero),
+      dpr: View.of(context).devicePixelRatio,
+    );
+  }
+
+  /// Yerel katmandan gelen biten çizgi (GÖRÜNÜM noktaları): Flutter yolundaki gibi kaydedilir.
+  void acceptOverlayStroke(List<InkPoint> viewPoints) {
+    final c = _coords;
+    if (c == null || viewPoints.isEmpty) return;
+    final s = widget.session;
+    // Yerel Ink yolunda "basılı tut, şekle dön": canlı önizleme yok; çizgi bitince sonunda
+    // kalem [holdMs] boyunca yerinde durduysa o ana kadarki kısım tanınır ve şekil kaydedilir.
+    if (s.shapeSnap && s.brush.tool != InkTool.eraser && viewPoints.length >= 5) {
+      final anchor = heldStrokeEnd(viewPoints, holdMs: s.holdMs, tolerance: s.holdTolerancePx);
+      if (anchor != null) {
+        final r = recognizeShape(viewPoints.sublist(0, anchor + 1));
+        if (r != null) {
+          s.addStroke(widget.page, s.brush, _stamped(r.points, viewPoints.first.tMs, viewPoints.last.tMs), c);
+          return;
+        }
+      }
+    }
+    s.addStroke(widget.page, s.brush, viewPoints, c);
+  }
+
   @override
   void dispose() {
     if (_erasing) {
@@ -135,7 +185,14 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
 
   int get page => widget.page;
 
-  void _syncBrush() => _ctl.setBrush(widget.session.brush);
+  /// Çizimler gizli mi (oturumun göz düğmesi); değişince yeniden kurulur.
+  late bool _hiddenSeen = widget.session.inkHidden;
+
+  void _syncBrush() {
+    _ctl.setBrush(widget.session.brush);
+    final h = widget.session.inkHidden;
+    if (h != _hiddenSeen && mounted) setState(() => _hiddenSeen = h);
+  }
 
   // --- işaretçi girişi (PdfInkInput çağırır) ---
 
@@ -546,8 +603,11 @@ class PdfPageInkLayerState extends State<PdfPageInkLayer> {
             fit: StackFit.expand,
             children: [
               // Kayıtlı çizgiler: yalnız sayfa çizgileri değişince ya da boyut değişince boyanır.
-              RepaintBoundary(
-                child: CustomPaint(painter: _SavedPainter(_pen, coords), size: Size.infinite),
+              Offstage(
+                offstage: _hiddenSeen,
+                child: RepaintBoundary(
+                  child: CustomPaint(painter: _SavedPainter(_pen, coords, widget.session.zoomInteraction), size: Size.infinite),
+                ),
               ),
               // Süren çizgi: küçük ve ayrı katman.
               RepaintBoundary(
@@ -690,22 +750,30 @@ class _LassoPainter extends CustomPainter {
 }
 
 class _SavedPainter extends CustomPainter {
-  _SavedPainter(this.pen, this.coords) : super(repaint: pen);
+  _SavedPainter(this.pen, this.coords, this.zi) : super(repaint: Listenable.merge([pen, zi.repaint]));
   final PagePen pen;
   final PageCoords coords;
+  final ZoomInteraction zi;
 
   @override
-  void paint(Canvas canvas, Size size) => pen.paint(
-    canvas,
-    coords.viewWidth / coords.pageWidth,
-    coords.viewHeight / coords.pageHeight,
-    originX: coords.originX,
-    originY: coords.originY,
-  );
+  void paint(Canvas canvas, Size size) {
+    final light = zi.active.value;
+    pen.paint(
+      canvas,
+      coords.viewWidth / coords.pageWidth,
+      coords.viewHeight / coords.pageHeight,
+      originX: coords.originX,
+      originY: coords.originY,
+      light: light,
+      viewport: light ? zi.visibleRect?.call() : null,
+      zoom: zi.zoomOf?.call() ?? 1,
+    );
+  }
 
   @override
   bool shouldRepaint(_SavedPainter old) =>
       old.pen != pen ||
+      old.zi != zi ||
       old.coords.originX != coords.originX ||
       old.coords.originY != coords.originY ||
       old.coords.viewWidth != coords.viewWidth ||

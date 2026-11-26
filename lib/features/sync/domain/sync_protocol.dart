@@ -81,9 +81,12 @@ abstract final class SyncLimits {
 
   static const nameLength = 40;
 
-  /// Bir bilgisayara aynı anda eşleşebilecek telefon/tablet sayısı (v9.15).
-  /// Telefon ↔ tablet doğrudan eşleşmez; bilgisayar merkezdir.
+  /// Bir alıcıya (bilgisayar ya da ekranı açık Android) aynı anda eşleşebilecek
+  /// cihaz sayısı (v9.15). v9.23: her cihaz hem alıcı hem istemci olabilir.
   static const maxDevices = 4;
+
+  /// Bir istemcinin aynı anda eşleşebileceği alıcı (eş) sayısı (v9.23).
+  static const maxPeers = 4;
 }
 
 /// Eşleşen cihazın türü (ekranda simge ve ad için; güvenlikte rolü yok).
@@ -92,13 +95,27 @@ const deviceKindTablet = 'tablet';
 
 String cleanDeviceKind(Object? kind) => kind == deviceKindTablet ? deviceKindTablet : deviceKindPhone;
 
+/// Eş (karşı uç) türü: bilgisayar de olabilir (yalnızca gösterim; güvenlikte rolü yok).
+const deviceKindComputer = 'bilgisayar';
+
+/// Eş türü: bilinmeyen/eksik ise platformdan tahmin edilir (eski sürüm bilgisayar
+/// `tur` göndermez: linux → bilgisayar, android → telefon).
+String cleanPeerKind(Object? kind, {String? platform}) {
+  if (kind == deviceKindComputer || kind == deviceKindTablet || kind == deviceKindPhone) return kind! as String;
+  return platform == 'android' ? deviceKindPhone : deviceKindComputer;
+}
+
 /// Eşleşebilen telefon/tablet platformları. Windows ve diğerleri reddedilir.
 /// Not: platform karşı tarafın kendi beyanıdır; asıl kilit ekrandaki kod ve
 /// ondan türeyen anahtardır.
 const acceptedPhonePlatforms = {'android'};
 
-/// Telefonun veri gönderdiği bilgisayar platformları.
-const acceptedComputerPlatforms = {'linux'};
+/// Bir cihazın veri gönderdiği ALICI (sunucu) platformları: Linux bilgisayar ve
+/// (v9.23) ekranı açıkken alıcı olabilen Android telefon/tablet. Windows ve
+/// diğerleri reddedilir. Alıcı Android'in ek kuralları: yalnızca Android istemci
+/// eşleşir (`acceptedPhonePlatforms`), arka plan servisi yoktur, tam yedek (ZIP)
+/// içe aktarmaz (404); kayıtlar defter ve tam durumla taşınır.
+const acceptedComputerPlatforms = {'linux', 'android'};
 
 /// Kanıt etiketleri: aynı anahtarla üretilen imzalar birbirinin yerine
 /// kullanılamasın diye her biri ayrı etiketle başlar.
@@ -230,11 +247,15 @@ class SyncHello {
     required this.paired,
     required this.challenge,
     this.dhPublic,
+    this.kind,
   });
 
   final String id;
   final String name;
   final String platform;
+
+  /// Alıcının türü: `bilgisayar | telefon | tablet` (eski sürüm göndermez: null).
+  final String? kind;
 
   /// Bilgisayarda kod ekranı açık mı?
   final bool pairingOpen;
@@ -259,6 +280,7 @@ class SyncHello {
         'eslesmis': paired,
         'meydanOkuma': challenge,
         if (dhPublic != null) 'dh': dhPublic,
+        if (kind != null) 'tur': kind,
       };
 
   factory SyncHello.fromJson(Object? json) {
@@ -277,6 +299,7 @@ class SyncHello {
       paired: _bool(m, 'eslesmis'),
       challenge: _str(m, 'meydanOkuma'),
       dhPublic: _strOrNull(m, 'dh'),
+      kind: _strOrNull(m, 'tur'),
     );
   }
 }

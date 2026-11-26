@@ -661,11 +661,10 @@ class PdfDocuments extends Table {
 
 // ───────────── PDF sayfa katmanları (v20) ─────────────
 
-/// PDF görüntüleme katmanı: filigran temizleme ya da renkli örtü. PDF dosyası
-/// ASLA değişmez; katman yalnızca görüntülemede uygulanır ve kullanıcı verisi
-/// gibi senkron olur. `page`: 0'dan; -1 = belgenin TÜM sayfaları. Kutu (PDF
-/// sayfa birimi, sol-üst, y aşağı) null ise tüm sayfa. `kind`: watermark | cover.
-/// `params`: JSON (filigran: tone, strength, hueRange; örtü: color, opacity).
+/// PDF katmanı (şeffaf çizim katmanı; PDF dosyası değişmez). `kind`: full (tüm sayfalar, page=-1) |
+/// question (tek sayfa + kutu, PDF sayfa birimi, sol-üst, y aşağı). Eski watermark/cover satırları yok sayılır.
+/// `z`: katman sırası (numara = sıra, 1'den). `params`: JSON (opacity, color, width, buttonX/Y, note, noteOpen).
+/// Çizgiler `ink_strokes.layer` = katman numarası.
 /// `z`: küçük olan altta. Silme yumuşaktır (`deleted`). Belge için yabancı anahtar
 /// yok: PDF satırı başka cihazdan sonra gelebilir.
 @DataClassName('PdfPageLayerRow')

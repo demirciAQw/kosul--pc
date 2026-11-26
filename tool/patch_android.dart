@@ -18,9 +18,11 @@ import 'camera_patch.dart';
 import 'gece_patch.dart';
 import 'genai_patch.dart';
 import 'health_patch.dart';
+import 'ink_overlay_patch.dart';
 import 'ink_patch.dart';
 import 'network_patch.dart';
 import 'r8_patch.dart';
+import 'secure_store_patch.dart';
 
 const _desugarVersion = '2.1.4';
 
@@ -48,7 +50,9 @@ void main() {
   _copyLauncherIcons();
   _patchGenAi(kts, groovy);
   _patchInk(kts, groovy);
+  _patchInkOverlay();
   _patchHealth(kts, groovy, manifest);
+  _patchSecureStore();
   _patchR8(kts, groovy);
   _patchGece(kts, groovy);
   _patchAbi(kts, groovy);
@@ -130,6 +134,22 @@ void _patchHealth(File kts, File groovy, File manifest) {
   activity.writeAsStringSync(patchHealthMainActivity(activity.readAsStringSync()));
 }
 
+/// Claude API anahtarı için Keystore korumalı depo (kanal kocum/secure).
+/// _patchGenAi'den SONRA çalışmalı (MainActivity'yi o yeniden yazar).
+void _patchSecureStore() {
+  final root = Directory('android/app/src/main/kotlin');
+  final activity = root.existsSync()
+      ? root.listSync(recursive: true).whereType<File>().where((f) => f.path.endsWith('MainActivity.kt')).firstOrNull
+      : null;
+  final pkg = activity == null ? null : packageOf(activity.readAsStringSync());
+  if (activity == null || pkg == null) {
+    stderr.writeln('Uyarı: MainActivity.kt bulunamadı; güvenli depo eklenmedi.');
+    return;
+  }
+  File('${activity.parent.path}/KocumSecure.kt').writeAsStringSync(secureKotlin(pkg));
+  activity.writeAsStringSync(patchSecureMainActivity(activity.readAsStringSync()));
+}
+
 /// Kalem yüzeyi (Jetpack Ink): bağımlılıklar, Kotlin dosyası, MainActivity kaydı.
 /// _patchGenAi'den SONRA çalışmalı (MainActivity'yi o yeniden yazar).
 /// R8 kuralı _patchR8 içinde değil burada: proguard-rules.pro'ya eklenir.
@@ -152,6 +172,22 @@ void _patchInk(File kts, File groovy) {
   }
   activity.writeAsStringSync(patchInkMainActivity(activity.readAsStringSync()));
   File('${activity.parent.path}/KocumInk.kt').writeAsStringSync(inkKotlin(pkg));
+}
+
+/// Ink katmanı (FlutterView üstünde tam pencere yerel çizim katmanı): Kotlin dosyası ve
+/// MainActivity bağlaması. Bağımlılıklar _patchInk'te. _patchGenAi ve _patchInk'ten SONRA çalışmalı.
+void _patchInkOverlay() {
+  final root = Directory('android/app/src/main/kotlin');
+  final activity = root.existsSync()
+      ? root.listSync(recursive: true).whereType<File>().where((f) => f.path.endsWith('MainActivity.kt')).firstOrNull
+      : null;
+  final pkg = activity == null ? null : packageOf(activity.readAsStringSync());
+  if (activity == null || pkg == null) {
+    stderr.writeln('Uyarı: MainActivity.kt bulunamadı; Ink katmanı eklenmedi.');
+    return;
+  }
+  File('${activity.parent.path}/KocumInkOverlay.kt').writeAsStringSync(inkOverlayKotlin(pkg));
+  activity.writeAsStringSync(patchInkOverlayMainActivity(activity.readAsStringSync()));
 }
 
 /// Koçum simgesi: tool/android_icon/res altındakiler (tool/make_icon.py ile

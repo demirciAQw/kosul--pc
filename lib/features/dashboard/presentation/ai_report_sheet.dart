@@ -22,6 +22,7 @@ import '../dashboard_providers.dart';
 import '../domain/ai_report.dart';
 import '../../ocr/ocr_providers.dart';
 import '../../ocr/auto_tag_providers.dart';
+import '../../claude_api/presentation/claude_reply_sheet.dart';
 
 /// "Yapay zekâ raporu": istatistikleri ve yanlışları bir yapay zekâ sohbetine
 /// (Claude, ChatGPT…) yapıştırılacak metne çevirir. API anahtarı gerekmez.
@@ -68,6 +69,12 @@ class _AiReportSheetState extends ConsumerState<_AiReportSheet> {
     messenger.showSnackBar(const SnackBar(
       content: Text('Rapor kopyalandı. Yapay zekâ sohbetine yapıştır.'),
     ));
+  }
+
+  /// Raporun AYNI metni önizlenir, açık onaydan sonra Claude'a gönderilir.
+  Future<void> _sendToClaude() async {
+    final text = _build().markdown;
+    await sendReportToClaude(context, ref, text);
   }
 
   Future<void> _share() async {
@@ -205,6 +212,16 @@ class _AiReportSheetState extends ConsumerState<_AiReportSheet> {
               ),
             ),
           ],
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.tonalIcon(
+            key: const Key('claude-send'),
+            onPressed: _busy ? null : _sendToClaude,
+            icon: const Icon(Icons.auto_awesome_rounded),
+            label: const Text('Claude\'a gönder'),
+          ),
         ),
       ],
     );
