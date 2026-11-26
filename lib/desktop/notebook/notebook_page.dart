@@ -6,12 +6,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/palette.dart';
 import '../../core/utils/formatters.dart';
+import '../../features/anlik/presentation/widgets/card_links.dart';
 import '../../features/ocr/domain/ocr.dart';
 import '../../features/ocr/ocr_providers.dart';
 import '../../features/question_bank/domain/question_card.dart';
 import '../../features/question_bank/domain/similar_questions.dart';
 import '../../features/question_bank/presentation/widgets/media_image.dart';
 import '../../features/question_bank/similar_providers.dart';
+import '../entry/question_editor.dart';
 import '../widgets/desktop_page.dart';
 import 'domain/notebook_table.dart';
 import 'notebook_providers.dart';
@@ -92,6 +94,16 @@ class _NotebookPageState extends ConsumerState<NotebookPage> {
     return DesktopPage(
       title: 'Defter',
       subtitle: total == null ? null : '$total soru · ${rows.length} gösteriliyor',
+      actions: [
+        FilledButton.icon(
+          key: const ValueKey('soru-ekle'),
+          onPressed: () => showDesktopQuestionEditor(context).then((c) {
+            if (c != null) _select(c.id);
+          }),
+          icon: const Icon(Icons.add),
+          label: const Text('Soru ekle'),
+        ),
+      ],
       child: all.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('Defter okunamadı: $e')),
@@ -452,7 +464,17 @@ class _DetailPane extends ConsumerWidget {
     return ListView(
       padding: const EdgeInsets.all(24),
       children: [
-        SelectableText(card.locationText, style: theme.textTheme.titleLarge),
+        Row(
+          children: [
+            Expanded(child: SelectableText(card.locationText, style: theme.textTheme.titleLarge)),
+            OutlinedButton.icon(
+              key: const ValueKey('soru-duzenle'),
+              onPressed: () => showDesktopQuestionEditor(context, card: card),
+              icon: const Icon(Icons.edit_outlined, size: 18),
+              label: const Text('Düzenle'),
+            ),
+          ],
+        ),
         const SizedBox(height: 8),
         Wrap(
           spacing: 6,
@@ -467,6 +489,8 @@ class _DetailPane extends ConsumerWidget {
             if (r.deletedOnPhone) const _Tag('Telefonda silindi', color: KocumColors.amber),
           ],
         ),
+        const SizedBox(height: 12),
+        CardTagsSection(cardId: card.id),
         if (card.answerText != null) ...[
           const SizedBox(height: 12),
           Text(card.answerText!, style: theme.textTheme.bodyLarge),

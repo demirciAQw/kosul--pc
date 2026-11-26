@@ -1,3 +1,5 @@
+import '../../pdf/domain/pdf_engine.dart' show PdfBox;
+
 enum QuestionStatus {
   wrong('Yanlış'),
   blank('Boş'),
@@ -72,6 +74,9 @@ class QuestionCard {
     this.testLabel,
     this.sessionItemId,
     this.mockExamId,
+    this.pdfDocumentId,
+    this.pdfPage,
+    this.pdfBox,
   });
 
   final String id;
@@ -128,6 +133,14 @@ class QuestionCard {
   final String? sessionItemId;
   final String? mockExamId;
 
+  /// Soru bir PDF sayfasındaki kutuysa: belge (sha256), sayfa (0'dan) ve kutu
+  /// (sayfa birimi, sol-üst başlangıç). [questionImage] bu kutunun küçük önizlemesidir.
+  final String? pdfDocumentId;
+  final int? pdfPage;
+  final PdfBox? pdfBox;
+
+  bool get hasPdfAnchor => pdfDocumentId != null && pdfPage != null && pdfBox != null;
+
   bool get hasPhoto => questionImage != null;
 
   /// Ekranda gösterilecek neden: "Diğer" için kullanıcının kendi cümlesi.
@@ -167,6 +180,8 @@ class QuestionCard {
     QuestionStatus? status,
     String? Function()? topicText,
     String? Function()? mebNodeId,
+    String? Function()? correctAnswer,
+    String? Function()? givenAnswer,
   }) =>
       QuestionCard(
         id: id,
@@ -185,8 +200,8 @@ class QuestionCard {
         reason: reason,
         reasonNote: reasonNote,
         topicText: topicText != null ? topicText() : this.topicText,
-        correctAnswer: correctAnswer,
-        givenAnswer: givenAnswer,
+        correctAnswer: correctAnswer != null ? correctAnswer() : this.correctAnswer,
+        givenAnswer: givenAnswer != null ? givenAnswer() : this.givenAnswer,
         avgSecondsPerQuestion: avgSecondsPerQuestion,
         difficulty: difficulty,
         isStarred: isStarred ?? this.isStarred,
@@ -196,6 +211,9 @@ class QuestionCard {
         testLabel: testLabel,
         sessionItemId: sessionItemId,
         mockExamId: mockExamId,
+        pdfDocumentId: pdfDocumentId,
+        pdfPage: pdfPage,
+        pdfBox: pdfBox,
       );
 }
 

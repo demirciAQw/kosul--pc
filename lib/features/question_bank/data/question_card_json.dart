@@ -1,5 +1,6 @@
 import '../../../core/json/json_reader.dart';
 import '../../../core/utils/enum_x.dart';
+import '../../pdf/domain/pdf_engine.dart' show PdfBox;
 import '../domain/question_card.dart';
 
 /// Yedekleme/taşıma için JSON sözleşmesi (domain varlığını kirletmeden).
@@ -32,6 +33,11 @@ extension QuestionCardJson on QuestionCard {
         if (topicText != null) 'topicText': topicText,
         if (correctAnswer != null) 'correctAnswer': correctAnswer,
         if (givenAnswer != null) 'givenAnswer': givenAnswer,
+        if (hasPdfAnchor) ...{
+          'pdfDocumentId': pdfDocumentId,
+          'pdfPage': pdfPage,
+          'pdfBox': [pdfBox!.left, pdfBox!.top, pdfBox!.right, pdfBox!.bottom],
+        },
       };
 }
 
@@ -81,5 +87,14 @@ QuestionCard questionCardFromJson(Map<String, dynamic> json, {String path = r'$'
     topicText: r.optString('topicText'),
     correctAnswer: r.optString('correctAnswer', maxLength: 500),
     givenAnswer: r.optString('givenAnswer', maxLength: 500),
+    pdfDocumentId: r.optString('pdfDocumentId'),
+    pdfPage: r.optInt('pdfPage', min: 0),
+    pdfBox: _pdfBox(r.raw['pdfBox']),
   );
+}
+
+PdfBox? _pdfBox(Object? v) {
+  if (v is! List || v.length != 4 || v.any((e) => e is! num || !e.isFinite)) return null;
+  final n = [for (final e in v) (e as num).toDouble()];
+  return n[2] > n[0] && n[3] > n[1] ? PdfBox(n[0], n[1], n[2], n[3]) : null;
 }

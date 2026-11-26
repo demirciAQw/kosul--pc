@@ -67,7 +67,7 @@ class ImportService {
       final database = File(p.join(_workDir.path, 'ice_aktarma', 'kocum_${_now().microsecondsSinceEpoch}.db'));
       if (!await source.extractDatabase(database)) {
         throw const ImportException('Bu yedekte veritabanı kopyası (kocum.db) yok. Telefona Koçum 8.5 ya da '
-            'sonrasını kur ve Araçlar → Tüm veriyi dışa aktar ile yeni bir yedek al.');
+            'sonrasını kur ve Ayarlar → Araçlar → Tüm veriyi dışa aktar ile yeni bir yedek al.');
       }
       return PreparedImport._(
         source: source,

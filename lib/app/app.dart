@@ -12,6 +12,9 @@ import '../features/settings/domain/settings.dart';
 import '../features/settings/settings_providers.dart';
 import '../features/study_session/domain/study_session.dart';
 import '../features/study_session/study_session_providers.dart';
+import '../features/sync/presentation/receive_controller.dart';
+import '../features/welcome/welcome_screen.dart';
+import '../core/startup_trace.dart';
 import 'router.dart';
 import 'theme.dart';
 
@@ -28,6 +31,7 @@ class _KocumAppState extends ConsumerState<KocumApp> {
 
   @override
   void dispose() {
+    _backgroundTimer?.cancel();
     _lifecycle.dispose();
     super.dispose();
   }
@@ -73,6 +77,26 @@ class _KocumAppState extends ConsumerState<KocumApp> {
       if (previous?.hasValue != true && next.hasValue) refreshReminders();
     }, fireImmediately: true);
 
+    // Ağır arka plan işleri (tüm soruları/notları okuyan OCR eşitleme, Gemini
+    // Nano, kamera ısıtma) ilk ekran çizilip açılış sorguları bittikten sonra başlar.
+    _backgroundTimer = Timer(backgroundStartDelay, _startBackgroundWork);
+    ref.listenManual<AsyncValue<int>>(dueCountProvider, (previous, next) {
+      if (next.hasValue) StartupTrace.instance.mark('ana-sayfa-ilk-veri');
+      if (next.hasValue && previous?.value != next.value) refreshReminders();
+    });
+  }
+
+
+  /// İlk kareden sonra gecikmeli başlar; widget kapandıysa hiçbir şey yapmaz.
+  static const backgroundStartDelay = Duration(milliseconds: 1500);
+  Timer? _backgroundTimer;
+
+  void _startBackgroundWork() {
+    if (!mounted) return;
+    StartupTrace.instance.mark('arka-plan-isleri');
+    // Alıcı (v9.23): kullanıcı "bu cihazda alıcıyı aç" dediyse uygulama açılınca dinlemeye
+    // başlar (ekran açıkken). Dinleyici sağlayıcıyı canlı tutar; kapalıysa hiçbir şey yapmaz.
+    ref.listenManual(receiveControllerProvider, (previous, next) {}, fireImmediately: true);
     // Fotoğraflardaki metin: sorular, notlar ya da kayıtlar değişince eksikler
     // arka plan kuyruğuna alınır (yeni soru eklenince kendiliğinden başlar).
     void syncOcr() {
@@ -119,9 +143,6 @@ class _KocumAppState extends ConsumerState<KocumApp> {
       capture.camera = settings.fastPhotos ? camera : null;
       unawaited(camera.keepWarm ? camera.warmUp() : camera.close());
     }, fireImmediately: true);
-    ref.listenManual<AsyncValue<int>>(dueCountProvider, (previous, next) {
-      if (next.hasValue && previous?.value != next.value) refreshReminders();
-    });
   }
 
   @override
@@ -136,6 +157,7 @@ class _KocumAppState extends ConsumerState<KocumApp> {
       supportedLocales: const [Locale('tr', 'TR')],
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
       routerConfig: ref.watch(routerProvider),
+      builder: (context, child) => WelcomeGate(child: child ?? const SizedBox.shrink()),
     );
   }
 }

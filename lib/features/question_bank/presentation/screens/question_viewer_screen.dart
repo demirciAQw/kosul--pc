@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../app/palette.dart';
@@ -6,12 +7,14 @@ import '../../../../app/routes.dart';
 import '../../../../core/text/turkish_text.dart';
 import '../../domain/question_card.dart';
 import '../widgets/media_image.dart';
+import '../../question_bank_providers.dart';
+import '../widgets/question_actions.dart';
 import '../widgets/question_tile.dart' show statusColor;
 
 /// Galeri görüntüleyici: arama/filtre sonuçlarında tam ekran sorular; sağa
 /// sola kaydırarak sonuçlar arasında gezilir. Fotoğraf yakınlaştırılabilir,
 /// çözüm tek dokunuşla açılır.
-class QuestionViewerScreen extends StatefulWidget {
+class QuestionViewerScreen extends ConsumerStatefulWidget {
   const QuestionViewerScreen({super.key, required this.cards, required this.initialIndex});
 
   final List<QuestionCard> cards;
@@ -23,10 +26,11 @@ class QuestionViewerScreen extends StatefulWidget {
       ));
 
   @override
-  State<QuestionViewerScreen> createState() => _QuestionViewerScreenState();
+  ConsumerState<QuestionViewerScreen> createState() => _QuestionViewerScreenState();
 }
 
-class _QuestionViewerScreenState extends State<QuestionViewerScreen> {
+class _QuestionViewerScreenState extends ConsumerState<QuestionViewerScreen> {
+  late final List<QuestionCard> _cards = [...widget.cards];
   late final _pages = PageController(initialPage: widget.initialIndex);
   late int _index = widget.initialIndex;
   bool _showSolution = false;
@@ -37,12 +41,53 @@ class _QuestionViewerScreenState extends State<QuestionViewerScreen> {
     super.dispose();
   }
 
+  Future<void> _onAction(QuestionCard card, QuestionAction action) async {
+    final deleted = await performQuestionAction(context, ref, card, action);
+    if (!mounted) return;
+    if (action == QuestionAction.select) {
+      final n = ref.read(questionSelectionProvider).length;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(
+          content: Text(n == 0 ? 'Seçim kalktı.' : '$n soru seçili. Defterde devam edebilirsin.'),
+          duration: const Duration(seconds: 2),
+        ));
+    }
+    if (deleted) _drop(card.id);
+  }
+
+  /// Kartı listeden düşürür (silinmiş); son kartsa ekranı kapatır. Aynı kart
+  /// iki yoldan (eylem dönüşü, akış) gelse de ikinci çağrı etkisizdir.
+  void _drop(String id) {
+    final at = _cards.indexWhere((c) => c.id == id);
+    if (at < 0 || !mounted) return;
+    if (_cards.length <= 1) {
+      Navigator.of(context).pop();
+      return;
+    }
+    setState(() {
+      _cards.removeAt(at);
+      if (at < _index) _index--;
+      if (_index >= _cards.length) _index = _cards.length - 1;
+      _showSolution = false;
+    });
+    if (_pages.hasClients) _pages.jumpToPage(_index);
+  }
+
   @override
   Widget build(BuildContext context) {
-    final card = widget.cards[_index];
+    final stored = _cards[_index];
+    // Düzenleme dönüşünde güncel kart (akış); yoksa listedeki.
+    final live = ref.watch(questionByIdProvider(stored.id));
+    // Akış yüklendi ve kart yoksa (ayrıntı ekranında silindi): eski kopyayı gösterme.
+    if (live.hasValue && live.value == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _drop(stored.id));
+    }
+    final card = live.value ?? stored;
     return Scaffold(
       appBar: AppBar(
-        title: Text('${_index + 1} / ${widget.cards.length}'),
+        bottom: QuestionActionBar(card: card, keyPrefix: 'viewer', onAction: (a) => _onAction(card, a)),
+        title: Text('${_index + 1} / ${_cards.length}'),
         actions: [
           TextButton.icon(
             onPressed: () => context.push(AppRoutes.question(card.id)),
@@ -56,12 +101,12 @@ class _QuestionViewerScreenState extends State<QuestionViewerScreen> {
           Expanded(
             child: PageView.builder(
               controller: _pages,
-              itemCount: widget.cards.length,
+              itemCount: _cards.length,
               onPageChanged: (i) => setState(() {
                 _index = i;
                 _showSolution = false;
               }),
-              itemBuilder: (context, i) => _Page(card: widget.cards[i], showSolution: _showSolution && i == _index),
+              itemBuilder: (context, i) => _Page(card: i == _index ? card : _cards[i], showSolution: _showSolution && i == _index),
             ),
           ),
           _InfoPanel(

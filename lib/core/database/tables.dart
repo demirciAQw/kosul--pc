@@ -201,6 +201,20 @@ class QuestionCards extends Table {
   TextColumn get mockExamId =>
       text().nullable().references(MockExams, #id, onDelete: KeyAction.setNull)();
 
+  // ── v17: soru = PDF koordinatı (tablet). Hepsi boşsa kart PDF'siz. ──
+  /// `pdf_documents.id` (= sha256). Bağ yalnızca bilgidir: PDF bu cihazda
+  /// olmayabilir, satır silinse de kart önizlemesiyle yaşar (yabancı anahtar yok).
+  TextColumn get pdfDocumentId => text().nullable()();
+
+  /// Sayfa, 0'dan (`ink_strokes.pdfPage` ile aynı).
+  IntColumn get pdfPage => integer().nullable()();
+
+  /// Kutu: sayfa birimi (1/72 inç), döndürülmüş sayfa, sol-üst başlangıç, y aşağı.
+  RealColumn get pdfBoxLeft => real().nullable()();
+  RealColumn get pdfBoxTop => real().nullable()();
+  RealColumn get pdfBoxRight => real().nullable()();
+  RealColumn get pdfBoxBottom => real().nullable()();
+
   @override
   Set<Column> get primaryKey => {id};
 
@@ -348,4 +362,645 @@ class AppMeta extends Table {
 
   @override
   Set<Column> get primaryKey => {metaKey};
+}
+
+// ───────────── Anlık notlar, ortak etiketler, kişiler (v12) ─────────────
+
+/// Anlık not (v12): bir kelimeden bir sayfaya. Ders notundan (StudyNotes)
+/// ayrıdır. `kind`: anlik | uyku_yattim | uyku_kalktim.
+@DataClassName('AnlikNoteRow')
+class AnlikNotes extends Table {
+  TextColumn get id => text()();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+  TextColumn get body => text()();
+  TextColumn get kind => text().withDefault(const Constant('anlik'))();
+  IntColumn get mood => integer().nullable()(); // 1–5
+  TextColumn get searchText => text().withDefault(const Constant(''))(); // normalizeTr
+  TextColumn get subject => text().nullable()();
+  TextColumn get mebNodeId => text().nullable()();
+  TextColumn get topicText => text().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// Not: bu Drift sürümü `references(...)` kuralını SQL'e yazmıyor; v12 tablolarında
+/// yabancı anahtar `customConstraint` ile açıkça verilir (CASCADE çalışsın).
+/// Ortak etiket (v12): notlarda ve soru kartlarında. `name` normalizeTr ile
+/// benzersiz anahtardır, `label` görünen addır. `parentId`: üst etiket.
+/// `source`: ben | claude | otomatik.
+@DataClassName('TagRow')
+class Tags extends Table {
+  TextColumn get id => text()();
+  TextColumn get name => text().unique()();
+  TextColumn get label => text()();
+  TextColumn get parentId => text().nullable().customConstraint('REFERENCES tags(id) ON DELETE SET NULL')();
+  TextColumn get source => text().withDefault(const Constant('ben'))();
+  DateTimeColumn get createdAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+@DataClassName('AnlikNoteTagRow')
+class AnlikNoteTags extends Table {
+  /// "<noteId>:<tagId>": tek sütunlu anahtar (birleştirme ve defter için).
+  TextColumn get id => text()();
+  TextColumn get noteId => text().customConstraint('NOT NULL REFERENCES anlik_notes(id) ON DELETE CASCADE')();
+  TextColumn get tagId => text().customConstraint('NOT NULL REFERENCES tags(id) ON DELETE CASCADE')();
+  TextColumn get source => text().withDefault(const Constant('ben'))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  @override
+  List<Set<Column>> get uniqueKeys => [
+        {noteId, tagId},
+      ];
+}
+
+@DataClassName('QuestionCardTagRow')
+class QuestionCardTags extends Table {
+  /// "<cardId>:<tagId>": tek sütunlu anahtar (birleştirme ve defter için).
+  TextColumn get id => text()();
+  TextColumn get cardId => text().customConstraint('NOT NULL REFERENCES question_cards(id) ON DELETE CASCADE')();
+  TextColumn get tagId => text().customConstraint('NOT NULL REFERENCES tags(id) ON DELETE CASCADE')();
+  TextColumn get source => text().withDefault(const Constant('ben'))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  @override
+  List<Set<Column>> get uniqueKeys => [
+        {cardId, tagId},
+      ];
+}
+
+/// Kişiler (v12). `aliases`: aynı kişinin diğer adları (JSON listesi).
+@DataClassName('PersonRow')
+class People extends Table {
+  TextColumn get id => text()();
+  TextColumn get name => text()();
+  TextColumn get aliases => text().withDefault(const Constant('[]')).map(const StringListConverter())();
+  TextColumn get about => text().withDefault(const Constant(''))(); // "sınıf arkadaşı"
+  TextColumn get source => text().withDefault(const Constant('ben'))(); // ben | claude
+  DateTimeColumn get createdAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+@DataClassName('AnlikNotePersonRow')
+class AnlikNotePeople extends Table {
+  /// "<noteId>:<personId>": tek sütunlu anahtar (birleştirme ve defter için).
+  TextColumn get id => text()();
+  TextColumn get noteId => text().customConstraint('NOT NULL REFERENCES anlik_notes(id) ON DELETE CASCADE')();
+  TextColumn get personId => text().customConstraint('NOT NULL REFERENCES people(id) ON DELETE CASCADE')();
+  TextColumn get source => text().withDefault(const Constant('ben'))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  @override
+  List<Set<Column>> get uniqueKeys => [
+        {noteId, personId},
+      ];
+}
+
+/// Nottan nota ya da soru kartına bağ (v12). Biri dolu, öbürü boş.
+@DataClassName('AnlikLinkRow')
+class AnlikLinks extends Table {
+  TextColumn get id => text()();
+  TextColumn get fromNoteId => text().customConstraint('NOT NULL REFERENCES anlik_notes(id) ON DELETE CASCADE')();
+  TextColumn get toNoteId => text().nullable().customConstraint('REFERENCES anlik_notes(id) ON DELETE CASCADE')();
+  TextColumn get toCardId => text().nullable().customConstraint('REFERENCES question_cards(id) ON DELETE CASCADE')();
+  TextColumn get source => text().withDefault(const Constant('ben'))();
+  DateTimeColumn get createdAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+// ───────────── Değişiklik defteri ve senkron (v13) ─────────────
+
+/// Her kullanıcı verisi değişikliği, SQLite tetikleyicileriyle buraya yazılır.
+/// Telefon ve bilgisayar birbirinin satırlarını alır; Claude'un değişiklikleri
+/// geri alınabilir. `eski` ve `yeni`: satırın tamamı (JSON); biri boş olabilir.
+@DataClassName('DegisiklikRow')
+class Degisiklikler extends Table {
+  /// Yerel sıra: bu cihazdaki ekleniş sırası (karşıya "gördüğüm son sıra" için).
+  IntColumn get yerelSira => integer().autoIncrement()();
+  TextColumn get id => text().unique()(); // uuid benzeri; iki cihazda aynıdır
+  TextColumn get cihazId => text()(); // değişikliği yapan cihaz
+  /// telefon | pc | claude | senkron | geri_al
+  TextColumn get kaynak => text()();
+  TextColumn get oturumId => text().nullable()();
+  TextColumn get tablo => text()();
+  TextColumn get satirId => text()();
+  TextColumn get islem => text()(); // ekle | degistir | sil
+  TextColumn get eski => text().nullable()();
+  TextColumn get yeni => text().nullable()();
+  /// Hibrit mantıksal saat (bkz. core/ledger/hlc.dart).
+  TextColumn get saat => text()();
+
+  /// Karşı cihazdan geldi: geri gönderilmez.
+  BoolColumn get uzak => boolean().withDefault(const Constant(false))();
+
+  /// Bu değişikliği geri alan değişikliğin kimliği (geri alma kaydında dolu:
+  /// "şu değişiklik geri alındı" bilgisi).
+  TextColumn get geriAlinan => text().nullable()();
+
+}
+
+/// Tek satırlık bağlam: tetikleyiciler yazanın kim olduğunu ve saati buradan
+/// alır. Dışarıdan yazan araçlar (kocum aracı) işlemden önce burayı doldurur.
+@DataClassName('BaglamRow')
+class Baglam extends Table {
+  @override
+  String get tableName => '_baglam';
+
+  IntColumn get id => integer().withDefault(const Constant(1))();
+  TextColumn get cihazId => text()();
+  TextColumn get kaynak => text().withDefault(const Constant('telefon'))();
+  TextColumn get varsayilan => text().withDefault(const Constant('telefon'))();
+  TextColumn get oturumId => text().nullable()();
+
+  /// 1: tetikleyiciler yazmaz (senkron uygulaması, yedek birleştirme).
+  IntColumn get bastir => integer().withDefault(const Constant(0))();
+  IntColumn get hlcMs => integer().withDefault(const Constant(0))();
+  IntColumn get hlcN => integer().withDefault(const Constant(0))();
+
+  /// Yalnızca testler: gerçek saat yerine bu değer (ms) kullanılır.
+  IntColumn get saatMs => integer().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// İki tarafta da değişen satırın kaybeden sürümü. Silinmez; iki uygulamada
+/// da görünür ve istenirse geri alınır.
+@DataClassName('CakismaRow')
+class Cakismalar extends Table {
+  TextColumn get id => text()();
+  TextColumn get tablo => text()();
+  TextColumn get satirId => text()();
+  TextColumn get kazanan => text().nullable()(); // JSON (null: satır silinmişti)
+  TextColumn get kaybeden => text().nullable()();
+
+  /// yerel | uzak: kazanan taraf. geri_al: geri alma satırın değişmiş olması yüzünden yapılamadı.
+  TextColumn get taraf => text()();
+  TextColumn get saat => text()();
+  DateTimeColumn get createdAt => dateTime()();
+  BoolColumn get cozuldu => boolean().withDefault(const Constant(false))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// Senkron imleçleri (anahtar → değer). Bilgisayara ve yedeğe gitmez.
+@DataClassName('EsitlemeDurumRow')
+class EsitlemeDurum extends Table {
+  TextColumn get key => text()();
+  TextColumn get value => text()();
+
+  @override
+  Set<Column> get primaryKey => {key};
+}
+
+/// Silme önerisi (v14): Claude bir satırı silmez, yalnızca işaretler; kullanıcı
+/// iki uygulamadan birinde onaylar ya da reddeder. Senkronlanır.
+@DataClassName('SilmeOnerisiRow')
+class SilmeOnerileri extends Table {
+  TextColumn get id => text()();
+  TextColumn get tablo => text()();
+  TextColumn get satirId => text()();
+  TextColumn get neden => text().withDefault(const Constant(''))();
+  TextColumn get oneren => text().withDefault(const Constant('claude'))();
+  TextColumn get oturumId => text().nullable()();
+
+  /// bekliyor | onaylandi | reddedildi
+  TextColumn get durum => text().withDefault(const Constant('bekliyor'))();
+  DateTimeColumn get createdAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+// ───────────── Çizgi verisi (v15) ─────────────
+
+/// Kalemle çizilmiş tek çizgi (T2). Sahibi ya bir PDF sayfası (`pdfDocumentId` +
+/// `pdfPage`) ya da bir not sayfasıdır (`noteId` + `notePage`); koordinatlar
+/// sayfa/not koordinatındadır. Belge (`pdf_documents`) ve defter sayfası
+/// (`ink_note_pages`) bağları düz metin sütunlarıdır (yabancı anahtar yok).
+/// Not çizgilerinde `noteId` = `ink_note_pages.id` (SAYFA kimliği, defter değil),
+/// `notePage` = `ink_note_pages.pageNo` (sayfanın değişmeyen numarası).
+/// `points`: `stroke_codec.dart` ikilisi (delta + zigzag + varint).
+/// Silme yumuşaktır (`deleted`): defterle senkronda satır kalır.
+@DataClassName('InkStrokeRow')
+class InkStrokes extends Table {
+  TextColumn get id => text()();
+  TextColumn get pdfDocumentId => text().nullable()();
+  IntColumn get pdfPage => integer().nullable()();
+  TextColumn get noteId => text().nullable()();
+  IntColumn get notePage => integer().nullable()();
+  IntColumn get layer => integer().withDefault(const Constant(0))();
+
+  /// Çözüm denemesi (1, 2, …); not çizgilerinde 0.
+  IntColumn get attemptNo => integer().withDefault(const Constant(0))();
+
+  /// Çözüm çizgisinin ait olduğu soru kartı (T5); not ve sayfa çizgilerinde null.
+  TextColumn get questionId => text().nullable()();
+  TextColumn get tool => text().withDefault(const Constant('pen'))();
+  IntColumn get color => integer().withDefault(const Constant(0xFF000000))(); // ARGB
+  RealColumn get width => real().withDefault(const Constant(1.0))();
+  IntColumn get startedAtMs => integer()(); // epoch ms
+  IntColumn get durationMs => integer().withDefault(const Constant(0))();
+  BlobColumn get points => blob()();
+  IntColumn get pointCount => integer().withDefault(const Constant(0))();
+  BoolColumn get deleted => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// PDF belgeleri (T3). Yalnızca SATIR defterle senkron olur. PDF dosyası
+/// (`<veri klasörü>/pdfs/<sha256>.pdf`) defterle gitmez: her cihaz kendisi ekler
+/// ya da kullanıcı isterse telefon/tablet → bilgisayar yönünde ayrıca aktarılır
+/// (`SyncPaths.pdf`, isteğe bağlı; bkz. docs/KABLOSUZ_AKTARIM.md).
+/// `id` = `sha256` (CHECK ile zorlanır): iki cihazda aynı PDF aynı satır olur.
+/// İki cihaz aynı PDF'i senkrondan ÖNCE ayrı içe aktarırsa iki "ekle" gelir ve
+/// defter satırı HLC'si yeni olan sürümle tümden yazar; kaybeden sürüm
+/// (kitap bağı, ofset) Çakışmalar'da kalır (geri alınabilir). Alan alan
+/// birleştirme yoktur. `ink_strokes.pdfDocumentId` bu kimliği taşır.
+/// `bookPageOf = pdfIndex + 1 + pageOffset` (pdfIndex 0 tabanlı). Silme yumuşaktır.
+@DataClassName('PdfDocumentRow')
+class PdfDocuments extends Table {
+  TextColumn get id => text()();
+  TextColumn get sha256 => text()();
+  TextColumn get title => text().withLength(min: 1, max: 300)();
+  IntColumn get pageCount => integer()();
+  TextColumn get fileName => text()();
+  TextColumn get bookId => text().nullable()();
+  IntColumn get pageOffset => integer().withDefault(const Constant(0))();
+  BoolColumn get deleted => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  /// `sha256` ayrı benzersiz değil: defterin `ON CONFLICT(id)` yazımıyla
+  /// uyuşmazdı. id = sha256 kuralı burada; bozuk gelen satır uygulanmaz,
+  /// defter onu Çakışmalar'a (kaybeden) düşürür, eşitleme takılmaz.
+  @override
+  List<String> get customConstraints => ['CHECK (id = sha256)'];
+}
+
+// ───────────── PDF sayfa katmanları (v20) ─────────────
+
+/// PDF katmanı (şeffaf çizim katmanı; PDF dosyası değişmez). `kind`: full (tüm sayfalar, page=-1) |
+/// question (tek sayfa + kutu, PDF sayfa birimi, sol-üst, y aşağı). Eski watermark/cover satırları yok sayılır.
+/// `z`: katman sırası (numara = sıra, 1'den). `params`: JSON (opacity, color, width, buttonX/Y, note, noteOpen).
+/// Çizgiler `ink_strokes.layer` = katman numarası.
+/// `z`: küçük olan altta. Silme yumuşaktır (`deleted`). Belge için yabancı anahtar
+/// yok: PDF satırı başka cihazdan sonra gelebilir.
+@DataClassName('PdfPageLayerRow')
+class PdfPageLayers extends Table {
+  TextColumn get id => text()();
+  TextColumn get pdfDocumentId => text()();
+  IntColumn get page => integer()();
+  TextColumn get kind => text()();
+  RealColumn get boxLeft => real().nullable()();
+  RealColumn get boxTop => real().nullable()();
+  RealColumn get boxRight => real().nullable()();
+  RealColumn get boxBottom => real().nullable()();
+  TextColumn get params => text().withDefault(const Constant('{}'))();
+  IntColumn get z => integer().withDefault(const Constant(0))();
+  TextColumn get name => text().withDefault(const Constant(''))();
+  BoolColumn get visible => boolean().withDefault(const Constant(true))();
+  BoolColumn get deleted => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+// ───────────── Kalemli defter (v19) ─────────────
+
+/// Kalemli defter (T6). Anlık notlardan (`anlik_notes`) ve ders notlarından
+/// (`study_notes`) ayrıdır. Silme yumuşaktır (`deleted`); sayfaları ve çizgileri
+/// silinmez, defter geri gelince hepsi geri gelir.
+@DataClassName('InkNotebookRow')
+class InkNotebooks extends Table {
+  TextColumn get id => text()();
+  TextColumn get title => text().withDefault(const Constant(''))();
+  IntColumn get coverColor => integer().withDefault(const Constant(0xFF3F51B5))(); // ARGB
+
+  /// Defterin klasörü (v23, `ink_folders.id`); null = kökte. Yabancı anahtar yok:
+  /// sıra bozuk eşitlenirse takılmasın; klasör yoksa defter kökte gösterilir.
+  TextColumn get folderId => text().nullable()();
+
+  /// Yeni sayfaların şablonu: plain | ruled | grid.
+  TextColumn get defaultTemplate => text().withDefault(const Constant('ruled'))();
+  IntColumn get sortOrder => integer().withDefault(const Constant(0))();
+  BoolColumn get deleted => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// Defter sayfası (T6). Sayfanın çizgileri `ink_strokes` satırlarıdır:
+/// `ink_strokes.noteId = ink_note_pages.id` (defterin değil SAYFANIN kimliği) ve
+/// `ink_strokes.notePage = ink_note_pages.pageNo`.
+/// `pageNo`: sayfanın değişmeyen numarası (oluşturulurken verilir, defterde
+/// silinmiş olanlar dahil hiç yeniden kullanılmaz). Sayfa sırası `sortOrder`'dır:
+/// sayfa araya eklenince ya da taşınınca çizgi satırları yeniden yazılmaz
+/// (BLOB'lu satırlar defterde şişerdi). `width`/`height`: not koordinatı
+/// (varsayılan A4 oranı 1404x1984). İki cihaz aynı anda sayfa eklerse `pageNo`
+/// ve `sortOrder` çakışabilir; zararsızdır (çizgiler `id` ile bulunur, sıra
+/// eşitliğinde `createdAt`, sonra `id` bakılır). `notebookId` bağı için yabancı
+/// anahtar yok: sıra bozuk eşitlenirse sayfa takılmasın.
+@DataClassName('InkNotePageRow')
+class InkNotePages extends Table {
+  TextColumn get id => text()();
+  TextColumn get notebookId => text()();
+  IntColumn get pageNo => integer()();
+  IntColumn get sortOrder => integer().withDefault(const Constant(0))();
+
+  /// plain | ruled | grid
+  TextColumn get template => text().withDefault(const Constant('ruled'))();
+  RealColumn get width => real().withDefault(const Constant(1404.0))();
+  RealColumn get height => real().withDefault(const Constant(1984.0))();
+  IntColumn get background => integer().withDefault(const Constant(0xFFFFFFFF))(); // ARGB
+
+  /// Sayfa başlığı (v23); null = başlıksız.
+  TextColumn get title => text().nullable()();
+
+  /// Bağlı MEB konusu (v23, `curriculum_nodes.id`); null = bağsız. Yabancı anahtar
+  /// yok: konu ağacı her cihazda ayrı tohumlanır, deftere girmez.
+  TextColumn get konuId => text().nullable()();
+
+  /// Bu sayfa başka sayfanın içinden açılan alt sayfaysa ebeveyn sayfa (v23).
+  TextColumn get parentPageId => text().nullable()();
+
+  /// Pano konumu ve kart boyutu (v23, pano birimi); null = yerleşim henüz yok / varsayılan boyut.
+  RealColumn get boardX => real().nullable()();
+  RealColumn get boardY => real().nullable()();
+  RealColumn get boardW => real().nullable()();
+  RealColumn get boardH => real().nullable()();
+  BoolColumn get deleted => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// Defter klasörü (v23): klasörler iç içe olur, defterler klasöre girer.
+/// `parentId` null = kök. Yabancı anahtar yok; döngüyü depo engeller, eşitlemede
+/// döngü çıkarsa okuyan taraf (`folderPath`) döngüyü keser. Silme yumuşaktır.
+@DataClassName('InkFolderRow')
+class InkFolders extends Table {
+  TextColumn get id => text()();
+  TextColumn get parentId => text().nullable()();
+  TextColumn get name => text().withDefault(const Constant(''))();
+  IntColumn get color => integer().withDefault(const Constant(0xFF607D8B))(); // ARGB
+  IntColumn get sortOrder => integer().withDefault(const Constant(0))();
+  BoolColumn get deleted => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// Sayfalar arası bağlantı (v23; Pano çizgisi). `kind`: `link` (elle), `child`
+/// (alt sayfa), `konu` (konu ağacında üst konu -> alt konu). `fromX/fromY`: kaynak
+/// sayfada düğümün/çapanın konumu (not birimi); null = sayfanın kendisi.
+@DataClassName('InkPageLinkRow')
+class InkPageLinks extends Table {
+  TextColumn get id => text()();
+  TextColumn get notebookId => text()();
+  TextColumn get fromPageId => text()();
+  TextColumn get toPageId => text()();
+  RealColumn get fromX => real().nullable()();
+  RealColumn get fromY => real().nullable()();
+  TextColumn get label => text().withDefault(const Constant(''))();
+  TextColumn get kind => text().withDefault(const Constant('link'))();
+  IntColumn get color => integer().withDefault(const Constant(0xFF607D8B))(); // ARGB
+  BoolColumn get deleted => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// Sayfa öğesi (v23): çizgilerin altında/üstünde duran metin kutusu ya da görsel.
+/// `kind`: `text` | `image`. Konum/boyut not biriminde, `rotation` radyan, `z` sıra.
+/// `payload` (JSON): text {text,fontSize,color,bold,italic,align}; image {pxW,pxH,alpha}.
+/// `mediaPath`: görselin `notes/yyyy/mm/ad.uzantı` yolu AYRI sütundadır (JSON içinde
+/// kaçışlı kalırsa kablosuz aktarım fotoğrafı fark edemez). Görsel dosyası öğe silinince
+/// SİLİNMEZ; birden çok öğe (çoğaltılan sayfa) aynı dosyayı paylaşır.
+@DataClassName('InkPageItemRow')
+class InkPageItems extends Table {
+  TextColumn get id => text()();
+  TextColumn get pageId => text()();
+  TextColumn get kind => text()();
+  RealColumn get x => real().withDefault(const Constant(0.0))();
+  RealColumn get y => real().withDefault(const Constant(0.0))();
+  RealColumn get w => real().withDefault(const Constant(200.0))();
+  RealColumn get h => real().withDefault(const Constant(80.0))();
+  RealColumn get rotation => real().withDefault(const Constant(0.0))();
+  IntColumn get z => integer().withDefault(const Constant(0))();
+  TextColumn get payload => text().withDefault(const Constant('{}'))();
+  TextColumn get mediaPath => text().nullable()();
+  BoolColumn get deleted => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// Defter ve sayfa için Anlık etiket/kişi bağları (v19). `anlik_note_tags`
+/// deseni: tek sütunlu `sahip:etiket` anahtarı. Yabancı anahtar yalnızca
+/// etiket/kişiye (silinince bağ da gider); sahip yumuşak silindiği için bağ kalır.
+@DataClassName('InkNotebookTagRow')
+class InkNotebookTags extends Table {
+  TextColumn get id => text()();
+  TextColumn get notebookId => text()();
+  TextColumn get tagId => text().customConstraint('NOT NULL REFERENCES tags(id) ON DELETE CASCADE')();
+  TextColumn get source => text().withDefault(const Constant('ben'))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  @override
+  List<Set<Column>> get uniqueKeys => [
+        {notebookId, tagId},
+      ];
+}
+
+@DataClassName('InkNotebookPersonRow')
+class InkNotebookPeople extends Table {
+  TextColumn get id => text()();
+  TextColumn get notebookId => text()();
+  TextColumn get personId => text().customConstraint('NOT NULL REFERENCES people(id) ON DELETE CASCADE')();
+  TextColumn get source => text().withDefault(const Constant('ben'))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  @override
+  List<Set<Column>> get uniqueKeys => [
+        {notebookId, personId},
+      ];
+}
+
+@DataClassName('InkPageTagRow')
+class InkPageTags extends Table {
+  TextColumn get id => text()();
+  TextColumn get pageId => text()();
+  TextColumn get tagId => text().customConstraint('NOT NULL REFERENCES tags(id) ON DELETE CASCADE')();
+  TextColumn get source => text().withDefault(const Constant('ben'))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  @override
+  List<Set<Column>> get uniqueKeys => [
+        {pageId, tagId},
+      ];
+}
+
+@DataClassName('InkPagePersonRow')
+class InkPagePeople extends Table {
+  TextColumn get id => text()();
+  TextColumn get pageId => text()();
+  TextColumn get personId => text().customConstraint('NOT NULL REFERENCES people(id) ON DELETE CASCADE')();
+  TextColumn get source => text().withDefault(const Constant('ben'))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  @override
+  List<Set<Column>> get uniqueKeys => [
+        {pageId, personId},
+      ];
+}
+
+// ───────────── El yazısı metni (v21) ─────────────
+
+/// Defter sayfasının el yazısından çevrilmiş metni (ML Kit). Metin TÜREV veridir:
+/// orijinal çizgiler (`ink_strokes`) hiç değişmez/silinmez. Sayfa başına tek satır:
+/// `id` = sayfa kimliği (iki cihaz aynı sayfayı çevirirse satır çakışmaz, defter
+/// alan alan birleştirir); `pageId` ayrıca saklanır. `strokeSig`: kayıt anında
+/// sayfadaki görünür çizgilerin özeti; şimdiki özetten farklıysa metin "güncel
+/// değil" gösterilir. Sayfa için yabancı anahtar yok (sıra bozuk eşitlenirse takılmasın).
+@DataClassName('InkPageTextRow')
+class InkPageText extends Table {
+  TextColumn get id => text()();
+  TextColumn get pageId => text()();
+
+  /// Düzenlenebilir sayfa metni (kullanıcı düzeltince burası değişir).
+  TextColumn get body => text().withDefault(const Constant(''))();
+
+  /// Tanınan satırlar (JSON; konum, çizgi kimlikleri). Bkz. `TranscriptLine`.
+  TextColumn get linesJson => text().withDefault(const Constant('[]'))();
+  TextColumn get languageCode => text().withDefault(const Constant('tr-TR'))();
+  TextColumn get strokeSig => text().withDefault(const Constant(''))();
+  DateTimeColumn get recognizedAt => dateTime()();
+  BoolColumn get deleted => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+// ───────────────────────── Sağlık verisi (v22) ─────────────────────────
+// HASSAS: üç tablo da değişiklik defterine / kablosuz eşitlemeye / bilgisayara
+// birleştirmeye GİRMEZ (bkz. health_tables.dart). Yedek ZIP'e (veritabanı) girer.
+
+/// Gün başına özet. (gun, kaynak) tekildir.
+@DataClassName('SaglikGunlukRow')
+class SaglikGunluk extends Table {
+  TextColumn get id => text()();
+
+  /// Yerel gün, YYYY-MM-DD (uyku, uyanılan güne yazılır).
+  TextColumn get gun => text()();
+  IntColumn get uykuToplamDk => integer().nullable()();
+  IntColumn get uykuDerinDk => integer().nullable()();
+  IntColumn get uykuHafifDk => integer().nullable()();
+  IntColumn get uykuRemDk => integer().nullable()();
+  IntColumn get uykuUyanikDk => integer().nullable()();
+  IntColumn get uykuBaslangic => integer().nullable()();
+  IntColumn get uykuBitis => integer().nullable()();
+  IntColumn get dinlenmeNabzi => integer().nullable()();
+  RealColumn get ortalamaHrv => real().nullable()();
+  IntColumn get adim => integer().nullable()();
+
+  /// 0..100'e çevrilmiş stres ortalaması / en yükseği (null: veri yok).
+  RealColumn get stresOrtalama => real().nullable()();
+  RealColumn get stresMaks => real().nullable()();
+
+  /// 'health_connect' | 'huawei_zip' | 'manuel'
+  TextColumn get kaynak => text()();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  @override
+  List<Set<Column>> get uniqueKeys => [
+        {gun, kaynak},
+      ];
+}
+
+/// Tek tek stres ölçümü. (kaynak, zaman) tekildir.
+@DataClassName('SaglikStresRow')
+class SaglikStres extends Table {
+  TextColumn get id => text()();
+  IntColumn get zaman => integer()();
+  RealColumn get seviye => real()();
+
+  /// Ölçeğin en büyük değeri: elle 5 (1..5), Huawei 100 (0..100).
+  IntColumn get seviyeMaks => integer().withDefault(const Constant(100))();
+  TextColumn get kaynak => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  @override
+  List<Set<Column>> get uniqueKeys => [
+        {kaynak, zaman},
+      ];
+}
+
+/// Uyku oturumu ve aşamaları. (kaynak, baslangic) tekildir.
+@DataClassName('SaglikUykuOturumRow')
+class SaglikUykuOturum extends Table {
+  TextColumn get id => text()();
+  IntColumn get baslangic => integer()();
+  IntColumn get bitis => integer()();
+  TextColumn get kaynak => text()();
+
+  /// Aşama listesi (JSON): [{"s": başlangıç ms, "e": bitiş ms, "t": "deep|light|rem|awake|…"}]
+  TextColumn get asamaJson => text().withDefault(const Constant('[]'))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  @override
+  List<Set<Column>> get uniqueKeys => [
+        {kaynak, baslangic},
+      ];
 }

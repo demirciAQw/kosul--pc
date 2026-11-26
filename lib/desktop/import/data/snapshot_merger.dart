@@ -52,10 +52,17 @@ class SnapshotMerger {
       await _db.transaction(() async {
         // Tablolar sırayla işlenir; yabancı anahtarlar işlemin sonunda denetlenir.
         await _db.customStatement('PRAGMA defer_foreign_keys = ON');
-        for (final table in _db.allTables) {
-          final name = table.actualTableName;
-          if (skippedTables.contains(name) || !available.contains(name)) continue;
-          results.add(await _mergeTable(table));
+        // Yedek birleştirme değişiklik defterine yazılmaz: iki cihaz bu andan
+        // sonra aynı durumdadır; defter ondan sonrasını izler.
+        await _db.customStatement('UPDATE _baglam SET bastir = 1 WHERE id = 1');
+        try {
+          for (final table in _db.allTables) {
+            final name = table.actualTableName;
+            if (skippedTables.contains(name) || !available.contains(name)) continue;
+            results.add(await _mergeTable(table));
+          }
+        } finally {
+          await _db.customStatement('UPDATE _baglam SET bastir = 0 WHERE id = 1');
         }
       });
       // Defter ve analizler gibi akış sorguları yenilensin.

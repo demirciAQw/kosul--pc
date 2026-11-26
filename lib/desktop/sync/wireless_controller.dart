@@ -6,6 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 
 import '../../app/platform.dart';
+import '../../core/di/core_providers.dart';
+import '../../features/sync/data/ledger_exchange.dart';
 import '../../features/sync/domain/network_rules.dart';
 import '../../features/sync/domain/pairing_window.dart';
 import '../../features/sync/domain/sync_protocol.dart';
@@ -25,7 +27,7 @@ class WirelessState {
     this.addresses = const [],
     this.computerName,
     this.pairing,
-    this.phone,
+    this.devices = const [],
     this.message,
     this.error,
   });
@@ -40,7 +42,8 @@ class WirelessState {
   final List<String> addresses;
   final String? computerName;
   final PairingCode? pairing;
-  final PairedPhone? phone;
+  /// Eşleşmiş telefon ve tabletler (en çok 4).
+  final List<PairedDevice> devices;
   final String? message;
   final String? error;
 }
@@ -85,7 +88,7 @@ class WirelessController extends Notifier<WirelessState> {
     if (on) {
       await _start();
     } else {
-      await _stop('Kablosuz alma kapalı.');
+      await _stop('Cihaz eşleştirme kapalı.');
     }
   }
 
@@ -95,7 +98,7 @@ class WirelessController extends Notifier<WirelessState> {
     try {
       await server.openPairing();
       _error = null;
-      _message = 'Telefonda Araçlar → Bilgisayara gönder → kodu yaz.';
+      _message = 'Telefonda ya da tablette Ayarlar → Araçlar → Bilgisayarla eşitle → kodu yaz.';
     } on SyncException catch (e) {
       _error = e.message;
     }
@@ -108,14 +111,15 @@ class WirelessController extends Notifier<WirelessState> {
     await _publish();
   }
 
-  Future<void> forgetPhone() async {
+  /// Yalnızca bu cihazın eşleşmesi kalkar; öbür cihazlar bağlı kalır.
+  Future<void> forgetDevice(String id) async {
     final server = _server;
     if (server != null) {
-      await server.forgetPhone();
+      await server.forgetDevice(id);
     } else {
-      await _store.removePhone();
+      await _store.removeDevice(id);
     }
-    _message = 'Eşleşme kaldırıldı. Yeni bir telefon eşleştirebilirsin.';
+    _message = 'Eşleşme kaldırıldı. Öbür cihazlar etkilenmedi.';
     await _publish();
   }
 
@@ -125,9 +129,15 @@ class WirelessController extends Notifier<WirelessState> {
     final server = SyncServer(
       store: _store,
       mediaRoot: Directory(p.join(dir.path, desktopMediaFolder)),
+      pdfRoot: Directory(p.join(dir.path, 'pdfs')),
       workDir: dir,
       importBackup: _import,
       platform: platformName,
+      ledger: LedgerExchange(
+        ledger: ref.read(ledgerServiceProvider),
+        schemaVersion: ref.read(appDatabaseProvider).schemaVersion,
+        mediaFile: (path) => File(p.joinAll([dir.path, desktopMediaFolder, ...p.posix.split(path)])),
+      ),
     );
     try {
       await server.start();
@@ -145,7 +155,7 @@ class WirelessController extends Notifier<WirelessState> {
     _events = server.events.listen(_onEvent);
     _addresses = await _localAddresses();
     _error = null;
-    _message = 'Telefon bekleniyor.';
+    _message = 'Cihaz bekleniyor.';
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
     await _publish();
   }
@@ -182,7 +192,7 @@ class WirelessController extends Notifier<WirelessState> {
     _message = event.message;
     if (event.kind == SyncEventKind.paired) {
       _message = 'Eşleşti: ${event.message}';
-      _snack('Telefon eşleşti: ${event.message}');
+      _snack('Cihaz eşleşti: ${event.message}');
     }
     unawaited(_publish());
   }
@@ -194,7 +204,7 @@ class WirelessController extends Notifier<WirelessState> {
       throw const SyncException('Bilgisayar şu an başka bir yedeği içe aktarıyor; birazdan tekrar gönder.', status: 409);
     }
     final busy = ref.read(importBusyProvider.notifier);
-    busy.set('Telefondan kablosuz veri alınıyor…');
+    busy.set('Cihazdan kablosuz veri alınıyor…');
     try {
       final service = ref.read(importServiceProvider);
       final job = await service.prepare(zip.path);
@@ -202,7 +212,7 @@ class WirelessController extends Notifier<WirelessState> {
       ref
         ..invalidate(importHistoryProvider)
         ..invalidate(tombstonesProvider);
-      _snack('Telefondan kablosuz alındı: ${summary.shortText}');
+      _snack('Cihazdan kablosuz alındı: ${summary.shortText}');
       return summary.shortText;
     } on ImportException catch (e) {
       throw SyncException(e.message, status: 422);
@@ -218,7 +228,7 @@ class WirelessController extends Notifier<WirelessState> {
     final server = _server;
     final enabled = canReceiveWirelessly && await _store.enabled();
     final name = await _store.computerName();
-    final phone = await _store.phone();
+    final devices = await _store.devices();
     if (!ref.mounted) return;
     state = WirelessState(
       supported: canReceiveWirelessly,
@@ -228,7 +238,7 @@ class WirelessController extends Notifier<WirelessState> {
       addresses: _addresses,
       computerName: name,
       pairing: server?.pairing,
-      phone: phone,
+      devices: devices,
       message: _message,
       error: _error,
     );

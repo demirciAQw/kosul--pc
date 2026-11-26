@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../app/routes.dart';
+import '../../../../app/widgets/home_logo_button.dart';
 import '../../domain/question_card.dart';
 import '../../domain/question_grouping.dart';
 import '../../question_bank_providers.dart';
@@ -216,6 +217,8 @@ class _NotebookScreenState extends ConsumerState<NotebookScreen> with SingleTick
               ],
             )
           : AppBar(
+        leading: const HomeLogoButton(),
+        leadingWidth: HomeLogoButton.width,
         title: const Text('Defterim'),
         bottom: TabBar(
           controller: _tabs,

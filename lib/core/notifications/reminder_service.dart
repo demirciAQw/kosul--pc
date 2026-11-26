@@ -25,12 +25,15 @@ class ReminderService {
     ),
   );
 
-  Future<void> init() async {
-    const settings = InitializationSettings(android: AndroidInitializationSettings('@mipmap/ic_launcher'));
-    await _plugin.initialize(settings);
-  }
+  Future<void>? _ready;
+
+  /// Eklenti kurulumu bir kez yapılır; açılışı yavaşlatmamak için ilk kareden
+  /// sonra başlatılır, kullanım öncesi de beklenir.
+  Future<void> init() => _ready ??=
+      _plugin.initialize(const InitializationSettings(android: AndroidInitializationSettings('@mipmap/ic_launcher')));
 
   Future<bool> requestPermission() async {
+    await init();
     final android = _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
     return await android?.requestNotificationsPermission() ?? true;
   }
@@ -43,6 +46,7 @@ class ReminderService {
     required String title,
     required String body,
   }) async {
+    await init();
     final now = DateTime.now();
     var next = DateTime(now.year, now.month, now.day, hour, minute);
     if (!next.isAfter(now)) next = next.add(const Duration(days: 1));
@@ -57,13 +61,19 @@ class ReminderService {
     );
   }
 
-  Future<void> cancel(int id) => _plugin.cancel(id);
+  Future<void> cancel(int id) async {
+    await init();
+    await _plugin.cancel(id);
+  }
 
   /// Ayarlardan "dene": bildirimlerin gerçekten geldiğini hemen gösterir.
-  Future<void> showTest() => _plugin.show(
-        _testId,
-        'Hatırlatıcılar çalışıyor',
-        'Seçtiğin saatte böyle bir bildirim gelecek.',
-        _details,
-      );
+  Future<void> showTest() async {
+    await init();
+    await _plugin.show(
+      _testId,
+      'Hatırlatıcılar çalışıyor',
+      'Seçtiğin saatte böyle bir bildirim gelecek.',
+      _details,
+    );
+  }
 }

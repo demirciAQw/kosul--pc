@@ -4,22 +4,59 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import '../domain/ledger_protocol.dart';
 import '../domain/media_rules.dart';
 import '../domain/network_rules.dart';
+import '../domain/pdf_rules.dart';
+import '../domain/sync_cipher.dart';
 import '../domain/sync_crypto.dart';
 import '../domain/sync_protocol.dart';
 import 'phone_sync_store.dart';
 
 /// Yerel ağda bulunan bilgisayar.
 class DiscoveredComputer {
-  const DiscoveredComputer({required this.id, required this.name, required this.host, required this.port});
+  const DiscoveredComputer({
+    required this.id,
+    required this.name,
+    required this.host,
+    required this.port,
+    this.platform = 'linux',
+  });
 
   final String id;
   final String name;
+
+  /// `linux` (bilgisayar) ya da `android` (ekranı açık telefon/tablet).
+  final String platform;
   final String host;
   final int port;
 
   String get address => '$host:$port';
+}
+
+/// Kullanıcı uzun bir aktarımı (PDF) durdurabilsin diye.
+class SyncCancelToken {
+  bool _cancelled = false;
+
+  bool get cancelled => _cancelled;
+
+  void cancel() => _cancelled = true;
+}
+
+class SyncCancelledException extends SyncException {
+  const SyncCancelledException() : super('PDF gönderimi iptal edildi.');
+}
+
+/// Bilgisayar bu PDF'i vermiyor (satırı ya da dosyası yok).
+class PdfNotOnComputer extends SyncException {
+  const PdfNotOnComputer(super.message) : super(status: 404);
+}
+
+/// [SyncClient.sendPdf] sonucu: bilgisayarda zaten varsa gövde gitmemiştir.
+class PdfSendResult {
+  const PdfSendResult({required this.alreadyThere});
+
+  final bool alreadyThere;
 }
 
 /// Açık oturum: her imzalı istek bir sonraki sıra numarasını alır.
@@ -60,7 +97,7 @@ class SyncClient {
   // ───────────── Bulma ─────────────
 
   /// Yerel ağa bulma isteği yollar, [wait] boyunca gelen yanıtları toplar.
-  /// Yalnızca Linux'taki Koçum'lar listelenir.
+  /// Yalnızca Linux'taki ve (ekranı açık) Android'deki Koçum'lar listelenir.
   Future<List<DiscoveredComputer>> discover({
     Duration wait = const Duration(seconds: 2),
     int port = syncDiscoveryPort,
@@ -75,7 +112,8 @@ class SyncClient {
         if (!isAcceptedPeer(d.address.rawAddress, allowLoopback: allowLoopback)) continue;
         final reply = DiscoveryReply.tryParse(d.data);
         if (reply == null || !acceptedComputerPlatforms.contains(reply.platform)) continue;
-        found[reply.id] = DiscoveredComputer(id: reply.id, name: reply.name, host: d.address.address, port: reply.port);
+        found[reply.id] = DiscoveredComputer(
+            id: reply.id, name: reply.name, host: d.address.address, port: reply.port, platform: reply.platform);
       }
     });
     try {
@@ -121,8 +159,8 @@ class SyncClient {
     final request = await _http.getUrl(_uri(host, port, SyncPaths.hello)).timeout(_requestTimeout);
     final hello = SyncHello.fromJson(await _readJson(await request.close().timeout(_requestTimeout)));
     if (!acceptedComputerPlatforms.contains(hello.platform)) {
-      throw SyncException('Bu bilgisayar "${cleanDeviceName(hello.platform)}". Koçum yalnızca Linux bilgisayara '
-          'gönderir; Windows kabul edilmez.');
+      throw SyncException('Bu cihaz "${cleanDeviceName(hello.platform)}". Koçum yalnızca Linux bilgisayara ve '
+          'Android cihaza gönderir; Windows kabul edilmez.');
     }
     return hello;
   }
@@ -136,13 +174,14 @@ class SyncClient {
     required String phoneId,
     required String phoneName,
     required String platform,
+    String kind = deviceKindPhone,
   }) async {
     final clean = code.replaceAll(RegExp(r'\s'), '');
     if (!RegExp(r'^\d{6}$').hasMatch(clean)) throw const SyncException('Kod 6 haneli olmalı.');
     final hello = await this.hello(host, port);
     if (hello.paired) {
-      throw const SyncException('Bu bilgisayar zaten bir telefonla eşleşmiş. Bilgisayarda Ayarlar → Kablosuz alma → '
-          'Eşleşmeyi kaldır, sonra tekrar dene.');
+      throw const SyncException('Bu bilgisayarın cihaz yuvaları dolu (en çok ${SyncLimits.maxDevices} cihaz). '
+          'Bilgisayarda Ayarlar → Cihaz eşleştirme\'den bir cihazı kaldır, sonra tekrar dene.');
     }
     final computerPublic = hello.dhPublic;
     if (!hello.pairingOpen || computerPublic == null) {
@@ -167,13 +206,23 @@ class SyncClient {
       platform: platform,
       dhPublic: dh.publicHex,
       proof: proofOf(key, ProofLabels.phonePair, [hello.challenge, phoneId]),
+      kind: cleanDeviceKind(kind),
     );
     final response = PairResponse.fromJson(await _postJson(host, port, SyncPaths.pair, request.toJson()));
     if (response.id != hello.id ||
         !safeEquals(response.proof, proofOf(key, ProofLabels.computerPair, [hello.challenge, phoneId]))) {
       throw const SyncException('Bilgisayar kimliğini kanıtlayamadı; eşleşme kaydedilmedi.');
     }
-    return PairedComputer(id: hello.id, name: hello.name, host: host, port: port, key: key, pairedAt: DateTime.now());
+    return PairedComputer(
+      id: hello.id,
+      name: hello.name,
+      host: host,
+      port: port,
+      key: key,
+      pairedAt: DateTime.now(),
+      platform: hello.platform,
+      kind: cleanPeerKind(hello.kind, platform: hello.platform),
+    );
   }
 
   /// Oturum açar. Bilgisayar anahtarı bildiğini kanıtlamazsa (ör. ağda
@@ -212,8 +261,216 @@ class SyncClient {
     await _signed(connection, 'PUT', SyncPaths.photo, file: file, mediaPath: entry.path);
   }
 
+  /// PDF'i bilgisayara yollar (`pdfs/<sha256>.pdf`). Önce bilgisayara "bu özet
+  /// sende var mı?" diye (ad = içe aktarmada hesaplanmış özet) gövdesiz bir PUT
+  /// ile sorulur; varsa dosya okunmaz bile. Yoksa dosya bir kez özetlenir ve
+  /// ada uymuyorsa (bozuk dosya) yollanmaz. [onProgress]: (giden, toplam).
+  /// [cancel] iptal edilirse istek yarıda kesilir; bilgisayar `.part` dosyasını siler.
+  Future<PdfSendResult> sendPdf(
+    SyncConnection connection,
+    PdfOffer offer,
+    File file, {
+    void Function(int sent, int total)? onProgress,
+    SyncCancelToken? cancel,
+  }) async {
+    final name = pdfNameOfSha(offer.sha256);
+    if (name == null) throw SyncException('PDF adı kurallara uymuyor: ${offer.sha256}');
+    if (offer.size <= 0 || offer.size > SyncLimits.pdf) {
+      throw SyncException('PDF boyutu sınırı aşıyor (en çok ${formatPdfSize(SyncLimits.pdf)}).');
+    }
+    // Önce tek özetlik soru (gövdesiz PUT, ad = özet): bilgisayarda varsa dosya
+    // hiç okunmaz ve özetlenmez, gövde hiç gitmez.
+    final probe = await _signed(connection, 'PUT', SyncPaths.pdf, body: const <int>[], mediaPath: name);
+    if (probe is Map && probe['zatenVar'] == true) return const PdfSendResult(alreadyThere: true);
+    // Yüklenecek: dosya BİR kez özetlenir; ad ve boyutla uyuşmazsa (bozuk ya da
+    // değişmiş dosya) hiçbir şey yollanmaz.
+    final hash = StreamingSha256();
+    var n = 0;
+    await for (final chunk in file.openRead()) {
+      if (cancel?.cancelled == true) throw const SyncCancelledException();
+      hash.add(chunk);
+      n += chunk.length;
+    }
+    if (hash.close() != offer.sha256 || n != offer.size) {
+      throw const SyncException('PDF dosyası değişmiş ya da bozuk; gönderilmedi.');
+    }
+    if (cancel?.cancelled == true) throw const SyncCancelledException();
+    final json = await _signed(
+      connection,
+      'PUT',
+      SyncPaths.pdf,
+      file: file,
+      mediaPath: name,
+      fileHash: offer.sha256,
+      fileLength: n,
+      onBytes: onProgress,
+      cancel: cancel,
+      timeout: const Duration(minutes: 30),
+    );
+    return PdfSendResult(alreadyThere: json is Map && json['zatenVar'] == true);
+  }
+
   Future<BackupResponse> sendBackup(SyncConnection connection, File zip) async => BackupResponse.fromJson(
       await _signed(connection, 'PUT', SyncPaths.backup, file: zip, timeout: const Duration(minutes: 10)));
+
+  /// Değişiklik defteri alışverişi. Yanıtın imzası doğrulanmadan hiçbir
+  /// değişiklik döndürülmez (ağdaki biri yanıtı değiştirip veri sokamaz).
+  Future<LedgerResponse> exchangeLedger(SyncConnection connection, LedgerRequest request) async {
+    final body = utf8.encode(jsonEncode(request.toJson()));
+    return LedgerResponse.fromJson(
+      await _signed(connection, 'POST', SyncPaths.ledger, body: body, timeout: const Duration(minutes: 5)),
+    );
+  }
+
+  /// Bilgisayarın verdiği bir fotoğrafı [target] yoluna indirir. Önce geçici
+  /// dosyaya yazılır; imza ve boyut tutarsa yerine konur.
+  Future<void> fetchPhoto(SyncConnection connection, MediaEntry entry, File target) async {
+    if (!isTransferableMediaPath(entry.path)) throw SyncException('Fotoğraf yolu kurallara uymuyor: ${entry.path}');
+    final computer = connection.computer;
+    final body = utf8.encode(jsonEncode(PhotoGetRequest(entry.path).toJson()));
+    final (:response, :sequence, :reply) = await _postSealed(connection, SyncPaths.photoGet, body);
+    if (response.statusCode != HttpStatus.ok) {
+      await _readJson(response); // hata iletisini fırlatır
+      throw SyncException('Bilgisayar fotoğrafı vermedi (${response.statusCode}).');
+    }
+    _requireSealed(response);
+    await target.parent.create(recursive: true);
+    final temp = File('${target.path}.part');
+    final hash = StreamingSha256();
+    final sink = temp.openWrite();
+    var total = 0;
+    try {
+      await for (final chunk in openStream(
+        response.timeout(const Duration(minutes: 2)),
+        reply,
+        maxPlain: SyncLimits.photo,
+      )) {
+        total += chunk.length;
+        if (total > SyncLimits.photo) throw const SyncException('Fotoğraf beklenenden büyük geldi.');
+        hash.add(chunk);
+        sink.add(chunk);
+      }
+      await sink.flush();
+    } on SealException catch (e) {
+      throw SyncException('Fotoğraf çözülemedi: ${e.message}');
+    } finally {
+      await sink.close();
+    }
+    final expected = responseSignature(computer.key,
+        session: connection.session, sequence: sequence, bodyHash: hash.close());
+    if (!safeEquals(expected, response.headers.value(SyncHeaders.responseSignature) ?? '')) {
+      await temp.delete();
+      throw const SyncException('Fotoğrafın imzası tutmadı; alınmadı.');
+    }
+    await temp.rename(target.path);
+  }
+
+  /// Bilgisayardaki PDF'i [target] yoluna indirir (`pdf-al`, v9.15; ayar açıksa
+  /// çağrılır). Yalnızca `<sha256>.pdf` adı gider; baytların SHA-256'sı ADLA
+  /// tutmazsa dosya atılır (bilgisayar ya da ağ bozmuş olsa da yanlış dosya yazılmaz).
+  /// Kopan indirme `.part` dosyasından sürer (kısmi dosya yeniden özetlenir).
+  /// Hedef (ya da klasör) symlink ise yazılmaz. İptalde ve özet tutmazsa `.part` silinir.
+  /// Bilgisayarda yoksa (404) [PdfNotOnComputer] fırlatır.
+  Future<void> fetchPdf(
+    SyncConnection connection,
+    String sha256,
+    File target, {
+    void Function(int received, int total)? onProgress,
+    SyncCancelToken? cancel,
+  }) async {
+    final name = pdfNameOfSha(sha256);
+    if (name == null) throw SyncException('PDF adı kurallara uymuyor: $sha256');
+    final computer = connection.computer;
+    _checkHost(computer.host);
+    final dir = target.parent;
+    await dir.create(recursive: true);
+    if (await FileSystemEntity.isLink(target.path) || await FileSystemEntity.isLink(dir.path)) {
+      throw const SyncException('PDF klasörü ya da dosyası bağlantı (symlink); indirilmedi.');
+    }
+    final temp = File('${target.path}.part');
+    if (await FileSystemEntity.isLink(temp.path)) await temp.delete();
+    final hash = StreamingSha256();
+    var have = 0;
+    if (await temp.exists()) {
+      // Yarım kalmış indirme: baytlar yeniden özetlenir, kaldığı yerden sürer.
+      await for (final chunk in temp.openRead()) {
+        hash.add(chunk);
+        have += chunk.length;
+      }
+      if (have > SyncLimits.pdf) {
+        await temp.delete();
+        throw const SyncException('Yarım PDF beklenenden büyük; silindi, yeniden dene.');
+      }
+    }
+    final body = utf8.encode(jsonEncode(PdfGetRequest(name, start: have).toJson()));
+    final (:response, :sequence, :reply) = await _postSealed(connection, SyncPaths.pdfGet, body);
+    if (response.statusCode != HttpStatus.ok) {
+      try {
+        await _readJson(response);
+      } on SyncException catch (e) {
+        if (response.statusCode == HttpStatus.notFound) throw PdfNotOnComputer(e.message);
+        if (response.statusCode == HttpStatus.badRequest && have > 0) await temp.delete(); // başlangıç tutmadı: baştan
+        rethrow;
+      }
+      throw SyncException('Bilgisayar PDF\'i vermedi (${response.statusCode}).');
+    }
+    _requireSealed(response);
+    // Gövde şifreli: Content-Length şifreli uzunluktur; düz uzunluk ondan çıkar.
+    final remaining = plainLength(response.contentLength) ?? -1;
+    if (remaining < 0 || have + remaining > SyncLimits.pdf) {
+      throw SyncException('PDF boyutu sınırı aşıyor (en çok ${formatPdfSize(SyncLimits.pdf)}).');
+    }
+    final total = have + remaining;
+    final sink = temp.openWrite(mode: FileMode.append);
+    var got = have;
+    try {
+      await for (final chunk in openStream(
+        response.timeout(const Duration(minutes: 2)),
+        reply,
+        maxPlain: total - have,
+      )) {
+        if (cancel?.cancelled == true) throw const SyncCancelledException();
+        got += chunk.length;
+        if (got > total) throw const SyncException('PDF beklenenden büyük geldi.');
+        hash.add(chunk);
+        sink.add(chunk);
+        onProgress?.call(got, total);
+      }
+      await sink.flush();
+    } on SyncCancelledException {
+      await sink.close();
+      if (await temp.exists()) await temp.delete();
+      rethrow;
+    } on SealException catch (e) {
+      // Çözülen parçalar etiketle doğrulanmıştı; yarım dosya kalır, yeniden denenince sürer.
+      throw SyncException('PDF çözülemedi: ${e.message}');
+    } finally {
+      try {
+        await sink.close();
+      } on Object {
+        // zaten kapandı
+      }
+    }
+    final expected = responseSignature(computer.key,
+        session: connection.session, sequence: sequence, bodyHash: sha256Hex(utf8.encode(pdfGetMeta(name, have, total))));
+    if (!safeEquals(expected, response.headers.value(SyncHeaders.responseSignature) ?? '')) {
+      await temp.delete();
+      throw const SyncException('PDF yanıtının imzası tutmadı; alınmadı.');
+    }
+    if (got != total) {
+      // Eksik geldi (kopma): .part kalır, yeniden denenince sürer.
+      throw const HttpException('PDF yarıda kesildi.');
+    }
+    if (hash.close() != sha256) {
+      await temp.delete();
+      throw const SyncException('PDF içeriği adındaki özetle uyuşmuyor; alınmadı.');
+    }
+    if (await FileSystemEntity.isLink(target.path)) {
+      await temp.delete();
+      throw const SyncException('PDF hedefi bağlantı (symlink); alınmadı.');
+    }
+    await temp.rename(target.path);
+  }
 
   // ───────────── Yardımcılar ─────────────
 
@@ -244,12 +501,19 @@ class SyncClient {
     File? file,
     String mediaPath = '',
     Duration timeout = const Duration(minutes: 2),
+    String? fileHash,
+    int? fileLength,
+    void Function(int sent, int total)? onBytes,
+    SyncCancelToken? cancel,
   }) async {
     final computer = connection.computer;
     _checkHost(computer.host);
     final String hash;
     final int length;
-    if (file != null) {
+    if (file != null && fileHash != null && fileLength != null) {
+      hash = fileHash; // çağıran dosyayı zaten özetledi (büyük PDF'i iki kez okumayalım)
+      length = fileLength;
+    } else if (file != null) {
       final h = StreamingSha256();
       var n = 0;
       await for (final chunk in file.openRead()) {
@@ -264,8 +528,17 @@ class SyncClient {
       length = b.length;
     }
     final sequence = connection._next();
+    final seal = SealContext(
+      pairingKey: computer.key,
+      direction: SealDirection.toReceiver,
+      session: connection.session,
+      sequence: sequence,
+      path: path,
+      mediaPath: mediaPath,
+    );
     final request = await _http.openUrl(method, _uri(computer.host, computer.port, path)).timeout(_requestTimeout);
     request.headers
+      ..set(SyncHeaders.cipher, syncCipherName)
       ..set(SyncHeaders.session, connection.session)
       ..set(SyncHeaders.sequence, '$sequence')
       ..set(
@@ -281,26 +554,118 @@ class SyncClient {
         ),
       );
     if (mediaPath.isNotEmpty) request.headers.set(SyncHeaders.mediaPath, mediaPath);
-    request.contentLength = length;
-    if (file != null) {
-      await request.addStream(file.openRead(0, length));
-    } else if (body != null) {
-      request.add(body);
+    // Gövde şifreli akar (imza düz içeriğin özetinde kalır); boş gövde boştur.
+    request.contentLength = sealedLength(length);
+    if (file != null && length > 0) {
+      var sent = 0;
+      final stream = sealStream(
+        file.openRead(0, length).map((chunk) {
+          if (cancel?.cancelled == true) throw const SyncCancelledException();
+          sent += chunk.length;
+          onBytes?.call(sent, length);
+          return chunk;
+        }),
+        seal,
+      );
+      try {
+        await request.addStream(stream);
+      } on SyncCancelledException {
+        request.abort();
+        rethrow;
+      } on Object {
+        // Bilgisayar gövdeyi beklemeden yanıtladı ve bağlantıyı kapattı ("zaten var"
+        // ya da ret); asıl yanıt aşağıda okunur, okunamazsa hata fırlar.
+        if (fileHash == null) rethrow;
+      }
+    } else if (body != null && body.isNotEmpty) {
+      request.add(sealBytes(body, seal));
     }
-    return _readJson(await request.close().timeout(timeout));
+    return _readJson(
+      await request.close().timeout(timeout),
+      verify: (key: computer.key, session: connection.session, sequence: sequence),
+      reply: seal.reply(),
+    );
   }
 
-  Future<Object?> _readJson(HttpClientResponse response) async {
+  /// Gövdeli imzalı POST (fotoğraf/PDF alma): istek gövdesi şifreli gider, yanıt
+  /// akışı çağıranda çözülür. İmza düz gövdenin özetindedir.
+  Future<({HttpClientResponse response, int sequence, SealContext reply})> _postSealed(
+    SyncConnection connection,
+    String path,
+    List<int> body,
+  ) async {
+    final computer = connection.computer;
+    _checkHost(computer.host);
+    final sequence = connection._next();
+    final seal = SealContext(
+      pairingKey: computer.key,
+      direction: SealDirection.toReceiver,
+      session: connection.session,
+      sequence: sequence,
+      path: path,
+    );
+    final wire = sealBytes(body, seal);
+    final request = await _http.openUrl('POST', _uri(computer.host, computer.port, path)).timeout(_requestTimeout);
+    request.headers
+      ..set(SyncHeaders.cipher, syncCipherName)
+      ..set(SyncHeaders.session, connection.session)
+      ..set(SyncHeaders.sequence, '$sequence')
+      ..set(
+        SyncHeaders.signature,
+        requestSignature(
+          computer.key,
+          method: 'POST',
+          path: path,
+          session: connection.session,
+          sequence: sequence,
+          mediaPath: '',
+          bodyHash: sha256Hex(body),
+        ),
+      );
+    request.contentLength = wire.length;
+    request.add(wire);
+    final response = await request.close().timeout(_requestTimeout);
+    return (response: response, sequence: sequence, reply: seal.reply());
+  }
+
+  /// Başarılı yanıt şifreli gelmeli; gelmediyse ŞİFRESİZE düşülmez.
+  static void _requireSealed(HttpClientResponse response) {
+    if (response.headers.value(SyncHeaders.cipher) != syncCipherName) {
+      throw const SyncException('Karşıdaki cihaz yanıtı şifresiz verdi (eski sürüm). Diğer cihazı güncelleyin.');
+    }
+  }
+
+  Future<Object?> _readJson(
+    HttpClientResponse response, {
+    ({List<int> key, String session, int sequence})? verify,
+    SealContext? reply,
+  }) async {
     final out = BytesBuilder(copy: false);
     await for (final chunk in response) {
-      if (out.length + chunk.length > SyncLimits.jsonBody) {
+      if (out.length + chunk.length > sealedLength(SyncLimits.jsonBody)) {
         throw const SyncException('Bilgisayardan beklenmedik büyüklükte yanıt geldi.');
       }
       out.add(chunk);
     }
+    var raw = out.takeBytes();
+    if (reply != null && response.statusCode == HttpStatus.ok) {
+      _requireSealed(response);
+      try {
+        raw = await openBytes(raw, reply, maxPlain: SyncLimits.jsonBody);
+      } on SealException catch (e) {
+        throw SyncException('Bilgisayarın yanıtı çözülemedi (${e.message}); hiçbir şey uygulanmadı.');
+      }
+    }
+    if (verify != null && response.statusCode == HttpStatus.ok) {
+      final expected = responseSignature(verify.key,
+          session: verify.session, sequence: verify.sequence, bodyHash: sha256Hex(raw));
+      if (!safeEquals(expected, response.headers.value(SyncHeaders.responseSignature) ?? '')) {
+        throw const SyncException('Bilgisayarın yanıtının imzası tutmadı; hiçbir şey uygulanmadı.');
+      }
+    }
     Object? json;
     try {
-      json = jsonDecode(utf8.decode(out.takeBytes()));
+      json = jsonDecode(utf8.decode(raw));
     } on FormatException {
       json = null;
     }

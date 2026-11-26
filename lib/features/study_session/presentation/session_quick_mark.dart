@@ -107,12 +107,12 @@ QuestionPrefill sessionItemPrefill(
     sessionId: session.id,
     sessionItemId: item.id,
     bookId: item.bookId,
-    contentNodeId: isTest ? node!.id : null,
+    contentNodeId: isTest ? node.id : null,
     mebNodeId: node == null ? item.mebNodeId : effectiveMeb(book!, node.id),
     sourceName: book?.title ?? item.label,
     subject: _subjectOf(item, book),
-    testLabel: isTest ? nodeLabel(book!, node!.id) : item.testLabel,
-    testTotalQuestions: isTest ? (node!.questionCount ?? testTotalQuestions) : testTotalQuestions,
+    testLabel: isTest ? nodeLabel(book!, node.id) : item.testLabel,
+    testTotalQuestions: isTest ? (node.questionCount ?? testTotalQuestions) : testTotalQuestions,
     avgSecondsPerQuestion: avgSecondsPerQuestion ?? session.secondsPerQuestion,
   );
 }

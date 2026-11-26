@@ -71,7 +71,7 @@ Her aşama ayrı sürüm, ayrı testler; telefon akışı her aşamada çalış�
 - Sayfa küçük resimleri, akıcı kaydırma ve yakınlaştırma, son kalınan sayfa.
 - Kabul: 300 sayfalık PDF'te sayfa açılışı < 300 ms (orta seviye tablet).
 
-### C. Saydam kalem katmanı ("filigran")
+### C. Saydam kalem katmanı (katman)
 - Kalem çizer, parmak kaydırır (`PointerDeviceKind.stylus`); ayarda "parmakla da
   çiz". Avuç içi temasları yok sayılır.
 - Araçlar: kalem, fosforlu kalem, silgi (çizgi silme), geri al / yinele, renk.
@@ -162,6 +162,15 @@ tablet verisi aynı fonksiyondan geçer (yalnızca benzerlik anahtarı değişir
 - El yazısında arama (Digital Ink, `tr`; sonuçlar sayfaya gider ve vurgular).
 - Video çözüm bağlantısı: soru başına bağlantı + saniye ("Çözümü izle").
 - Benzer soru bağlama, bir görseli birden çok soruya bağlama.
+
+## Soru nasıl saklanır (PDF'ten seçilen soru)
+
+- Kaynak gerçek: `question_cards.pdfDocumentId` (PDF'in sha256'sı) + `pdfPage` (0'dan) + `pdfBox` (PDF sayfa birimi, sol-üst, y aşağı). Soru PDF'e bu üçlüyle bağlıdır; kırpılmış büyük resim saklanmaz.
+- `questionImage`: kutudan kırpılmış yaklaşık 480 px genişliğinde küçük önizleme (WebP/PNG, `media/questions/`). Galeri, telefon ve PDF'i olmayan cihaz bunu gösterir; PDF dosyası cihazlar arası gitmez, yalnızca satır eşitlenir.
+- PDF bu cihazdaysa dokunuş/çözüm PDF sayfasını açar (çözüm arka planı sayfanın kutu çevresi); yoksa önizleme kutunun yerine oturur ve çizgiler yine PDF birimindedir, PDF sonradan eklenince çizgiler yerinde durur.
+- Fotoğraflı (PDF'siz) kartta çözüm çizgileri `ink_strokes` satırlarında `questionId` + `attemptNo` ile saklanır, `pdfDocumentId/pdfPage/noteId` boştur. Koordinat: görüntü genişliği 1000 birim, yükseklik orantılı (`photoUnitWidth`); görüntü başka çözünürlükte olsa da oran aynıysa çizgi yerinde kalır. Fotoğraf başka bir oranlı resimle değiştirilirse eski çizgiler kayar (ele alınmadı).
+- Bağlam karttan türer (`solveSpaceOf`): PDF bağı varsa PDF birimi, yoksa fotoğraf birimi; iki uzay aynı soruda karışmaz. Çözüm ekranı: `/soru/:questionId/coz`; giriş: soru ayrıntısındaki "Çiz / Çöz" (telefonda da; yalnız kalem çizer) ve tablette kart köşesindeki kalem simgesi.
+- Kart silinince çizgiler yumuşak silinir (`deleted`), satır kalır.
 
 ## Kapsam dışı
 

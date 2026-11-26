@@ -10,6 +10,7 @@ import '../domain/patterns.dart';
 import 'ai_report_sheet.dart';
 import 'deep_analysis_section.dart';
 import 'stem_analysis_section.dart';
+import '../../../app/widgets/home_logo_button.dart';
 
 /// "En çok hangi konuda/nedenden yanlış yapıyorum ve ne kadar süre kaybediyorum?"
 class DashboardScreen extends ConsumerWidget {
@@ -17,14 +18,10 @@ class DashboardScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final dimension = ref.watch(dashboardDimensionProvider);
-    final range = ref.watch(dashboardRangeProvider);
-    final stats = ref.watch(mistakeStatsProvider);
-    final daily = ref.watch(dailyStudyProvider);
-    final patterns = ref.watch(subjectPatternsProvider);
-
     return Scaffold(
       appBar: AppBar(
+        leading: const HomeLogoButton(),
+        leadingWidth: HomeLogoButton.width,
         title: const Text('Analiz'),
         actions: [
           TextButton.icon(
@@ -34,53 +31,75 @@ class DashboardScreen extends ConsumerWidget {
           ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
-        children: [
-          SegmentedButton<int>(
-            segments: const [
-              ButtonSegment(value: 7, label: Text('7 gün')),
-              ButtonSegment(value: 30, label: Text('30 gün')),
-              ButtonSegment(value: 90, label: Text('90 gün')),
-              ButtonSegment(value: 0, label: Text('Tümü')),
-            ],
-            selected: {range},
-            onSelectionChanged: (s) => ref.read(dashboardRangeProvider.notifier).set(s.first),
-          ),
-          const SizedBox(height: 20),
-          const DeepAnalysisSection(),
-          const StemAnalysisSection(),
-          const SizedBox(height: 28),
-          Text('Derslere göre örüntüler', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
-          patterns.when(
-            loading: () => const SizedBox.shrink(),
-            error: (e, _) => Text('Örüntüler okunamadı: $e'),
-            data: (list) => _PatternSection(patterns: list),
-          ),
-          const SizedBox(height: 28),
-          Text('En çok yanlış', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
-          SegmentedButton<MistakeDimension>(
-            segments: [for (final d in MistakeDimension.values) ButtonSegment(value: d, label: Text(d.label))],
-            selected: {dimension},
-            onSelectionChanged: (s) => ref.read(dashboardDimensionProvider.notifier).set(s.first),
-          ),
-          const SizedBox(height: 16),
-          stats.when(
-            loading: () => const Padding(padding: EdgeInsets.all(32), child: Center(child: CircularProgressIndicator())),
-            error: (e, _) => Text('Analiz yüklenemedi: $e'),
-            data: (list) => _MistakeSection(stats: list, dimension: dimension),
-          ),
-          const SizedBox(height: 28),
-          daily.when(
-            loading: () => const SizedBox.shrink(),
-            error: (e, _) => Text('Çalışma süresi okunamadı: $e'),
-            data: (days) => _StudyChart(days: days),
-          ),
-        ],
-      ),
+      body: const DashboardContent(),
     );
+  }
+}
+
+/// Analiz içeriği (başlıksız): telefondaki Analiz sekmesi ve bilgisayardaki
+/// salt okunur Analiz sayfası aynı bölümleri gösterir.
+class DashboardContent extends ConsumerWidget {
+  const DashboardContent({super.key, this.maxWidth});
+
+  /// Geniş ekranda satır uzunluğunu sınırlar (bilgisayar).
+  final double? maxWidth;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final dimension = ref.watch(dashboardDimensionProvider);
+    final range = ref.watch(dashboardRangeProvider);
+    final stats = ref.watch(mistakeStatsProvider);
+    final daily = ref.watch(dailyStudyProvider);
+    final patterns = ref.watch(subjectPatternsProvider);
+
+    final list = ListView(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
+      children: [
+        SegmentedButton<int>(
+          segments: const [
+            ButtonSegment(value: 7, label: Text('7 gün')),
+            ButtonSegment(value: 30, label: Text('30 gün')),
+            ButtonSegment(value: 90, label: Text('90 gün')),
+            ButtonSegment(value: 0, label: Text('Tümü')),
+          ],
+          selected: {range},
+          onSelectionChanged: (s) => ref.read(dashboardRangeProvider.notifier).set(s.first),
+        ),
+        const SizedBox(height: 20),
+        const DeepAnalysisSection(),
+        const StemAnalysisSection(),
+        const SizedBox(height: 28),
+        Text('Derslere göre örüntüler', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        patterns.when(
+          loading: () => const SizedBox.shrink(),
+          error: (e, _) => Text('Örüntüler okunamadı: $e'),
+          data: (list) => _PatternSection(patterns: list),
+        ),
+        const SizedBox(height: 28),
+        Text('En çok yanlış', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        SegmentedButton<MistakeDimension>(
+          segments: [for (final d in MistakeDimension.values) ButtonSegment(value: d, label: Text(d.label))],
+          selected: {dimension},
+          onSelectionChanged: (s) => ref.read(dashboardDimensionProvider.notifier).set(s.first),
+        ),
+        const SizedBox(height: 16),
+        stats.when(
+          loading: () => const Padding(padding: EdgeInsets.all(32), child: Center(child: CircularProgressIndicator())),
+          error: (e, _) => Text('Analiz yüklenemedi: $e'),
+          data: (list) => _MistakeSection(stats: list, dimension: dimension),
+        ),
+        const SizedBox(height: 28),
+        daily.when(
+          loading: () => const SizedBox.shrink(),
+          error: (e, _) => Text('Çalışma süresi okunamadı: $e'),
+          data: (days) => _StudyChart(days: days),
+        ),
+      ],
+    );
+    final w = maxWidth;
+    return w == null ? list : Align(alignment: Alignment.topCenter, child: ConstrainedBox(constraints: BoxConstraints(maxWidth: w), child: list));
   }
 }
 

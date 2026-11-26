@@ -2,7 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/di/core_providers.dart';
+import 'package:go_router/go_router.dart';
+
 import '../../curriculum/domain/curriculum.dart';
+import '../../pdf/domain/book_analysis.dart';
+import '../../pdf/pdf_providers.dart';
 import '../../question_bank/domain/question_card.dart';
 import '../../question_bank/domain/quick_mark.dart';
 import '../../question_bank/presentation/quick_mark_flow.dart';
@@ -124,5 +128,25 @@ Future<OpticFormResult?> markBookScope(
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Test durumu kaydedilemedi: $e')));
     }
   }
+  if (context.mounted) _offerPdf(context, ref, book: book, node: node, tests: tests);
   return result;
+}
+
+/// Kitabın PDF'i varsa sonuçtan sonra "PDF'te aç" önerir: ilk dahil testin
+/// sayfasında, analiz modu açık. PDF yoksa hiçbir şey yapmaz.
+void _offerPdf(BuildContext context, WidgetRef ref, {required Book book, ContentNode? node, required List<ContentNode> tests}) {
+  final doc = ref.read(pdfForBookProvider(book.id));
+  if (doc == null) return;
+  final target = tests.isNotEmpty ? tests.first : node;
+  final page = target == null ? null : testStartPdfPage(book, doc, target.id);
+  final router = GoRouter.maybeOf(context);
+  ScaffoldMessenger.of(context)
+    ..hideCurrentSnackBar()
+    ..showSnackBar(SnackBar(
+      content: const Text('Yanlışlarını PDF kitapta görebilirsin.'),
+      action: SnackBarAction(
+        label: "PDF'te aç",
+        onPressed: () => router?.push(pdfPageRoute(doc.id, page: page, analysis: true)),
+      ),
+    ));
 }

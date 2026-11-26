@@ -5,11 +5,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/utils/formatters.dart';
 import '../../features/sync/domain/pairing_window.dart';
+import '../../features/sync/domain/sync_protocol.dart';
 import '../widgets/settings_card.dart';
 import 'data/desktop_sync_store.dart';
 import 'wireless_controller.dart';
 
-/// Ayarlar → Kablosuz alma: aç/kapat, adres, eşleştirme kodu, eşleşmiş telefon.
+/// Ayarlar → Cihaz eşleştirme: aç/kapat, adres, eşleşmiş telefon ve tabletler
+/// (ad, tür, son eşitleme, kaldır), "Yeni cihaz ekle" ile kod.
 class WirelessSection extends ConsumerStatefulWidget {
   const WirelessSection({super.key});
 
@@ -43,16 +45,17 @@ class _WirelessSectionState extends ConsumerState<WirelessSection> {
     final small = theme.textTheme.bodySmall;
     return SettingsCard(
       icon: Icons.wifi,
-      title: 'Kablosuz alma (yerel ağ)',
+      title: 'Cihaz eşleştirme (yerel ağ)',
       children: [
         Text(
-          'Telefon aynı Wi-Fi\'dayken Koçum\'da Araçlar → Bilgisayara gönder. İnternet ya da bulut kullanılmaz; '
-          'yalnızca eşleşmiş tek telefon kabul edilir ve yalnızca bilgisayarda olmayan fotoğraflar gelir.',
+          'Telefon ve tablet aynı Wi-Fi\'dayken Koçum\'da Ayarlar → Araçlar → Bilgisayarla eşitle. İnternet ya da bulut '
+          'kullanılmaz. En çok ${SyncLimits.maxDevices} cihaz aynı anda bağlı kalır; yeni cihaz eklemek öbürlerini koparmaz. '
+          'Telefon ile tablet birbirine doğrudan bağlanmaz: kayıtlar bilgisayar üzerinden herkese ulaşır.',
           style: mutedStyle(context),
         ),
         if (!s.supported) ...[
           const SizedBox(height: 12),
-          const Text('Kablosuz alma yalnızca Linux\'ta açılır.'),
+          const Text('Cihaz eşleştirme yalnızca Linux\'ta açılır.'),
         ] else ...[
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
@@ -67,24 +70,29 @@ class _WirelessSectionState extends ConsumerState<WirelessSection> {
             ),
           ),
           const SizedBox(height: 8),
-          if (s.phone case final phone?)
+          for (final device in s.devices)
             ListTile(
               contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.phone_android),
-              title: Text(phone.name),
-              subtitle: Text('Eşleşme: ${formatShortDate(phone.pairedAt)}'),
-              trailing: OutlinedButton(
-                onPressed: () => unawaited(_confirmForget(phone)),
-                child: const Text('Eşleşmeyi kaldır'),
+              leading: Icon(device.isTablet ? Icons.tablet_android : Icons.phone_android),
+              title: Text('${device.name} [${device.isTablet ? 'tablet' : 'telefon'}]'),
+              subtitle: Text(
+                'Eşleşme: ${formatShortDate(device.pairedAt)} · '
+                'Son eşitleme: ${device.lastSyncAt == null ? 'henüz yok' : formatShortDate(device.lastSyncAt!)}',
               ),
-            )
-          else if (s.pairing case final code?)
+              trailing: OutlinedButton(
+                onPressed: () => unawaited(_confirmForget(device)),
+                child: const Text('Kaldır'),
+              ),
+            ),
+          if (s.pairing case final code?)
             _CodeBox(code: code, onCancel: () => unawaited(controller.cancelPairing()))
+          else if (s.devices.length >= SyncLimits.maxDevices)
+            Text('${SyncLimits.maxDevices} cihaz eşleşmiş. Yeni cihaz için önce birini kaldır.', style: small)
           else
             FilledButton.icon(
               onPressed: s.running ? () => unawaited(controller.startPairing()) : null,
-              icon: const Icon(Icons.link),
-              label: const Text('Telefon eşleştir'),
+              icon: const Icon(Icons.add_link),
+              label: const Text('Yeni cihaz ekle'),
             ),
           if (s.error case final error?) ...[
             const SizedBox(height: 8),
@@ -96,9 +104,10 @@ class _WirelessSectionState extends ConsumerState<WirelessSection> {
           ],
           const SizedBox(height: 12),
           Text(
-            'Telefon bilgisayarı bulamazsa: ikisi aynı ağda mı? Güvenlik duvarı açıksa 47321/TCP ve 47322/UDP '
-            'izinli olmalı. Okul ya da kafe gibi ortak Wi-Fi\'da kullanma: anahtar ağdan hiç geçmez ve kimse senin '
-            'yerine gönderemez, ama fotoğraflar ve veriler şifrelenmeden gider.',
+            'Cihaz bilgisayarı bulamazsa: ikisi aynı ağda mı? Güvenlik duvarı açıksa 47321/TCP ve 47322/UDP '
+            'izinli olmalı. Veriler ve fotoğraflar uçtan uca şifreli gider (ChaCha20-Poly1305); anahtar ağdan hiç '
+            'geçmez, kimse okuyamaz ya da senin yerine gönderemez. Yine de okul ya da kafe gibi ortak Wi-Fi\'da '
+            'cihaz adı ve dosya adları (fotoğraf yolu, PDF özeti) görünebilir; evde ya da güvendiğin ağda kullan.',
             style: small,
           ),
         ],
@@ -106,14 +115,15 @@ class _WirelessSectionState extends ConsumerState<WirelessSection> {
     );
   }
 
-  Future<void> _confirmForget(PairedPhone phone) async {
+  Future<void> _confirmForget(PairedDevice device) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Eşleşme kaldırılsın mı?'),
         content: Text(
-          '${phone.name} artık bu bilgisayara veri gönderemez. Bilgisayardaki veriler silinmez. '
-          'Telefonda da Bilgisayara gönder → Eşleşmeyi kaldır yap.',
+          '${device.name} artık bu bilgisayara veri gönderemez. Bilgisayardaki veriler silinmez; '
+          'öbür cihazların eşleşmesi bozulmaz. Cihazda da Ayarlar → Araçlar → Bilgisayarla eşitle → '
+          'Eşleşmeyi kaldır yap.',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Vazgeç')),
@@ -121,7 +131,7 @@ class _WirelessSectionState extends ConsumerState<WirelessSection> {
         ],
       ),
     );
-    if (ok == true) await ref.read(wirelessProvider.notifier).forgetPhone();
+    if (ok == true) await ref.read(wirelessProvider.notifier).forgetDevice(device.id);
   }
 }
 
@@ -146,7 +156,7 @@ class _CodeBox extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Telefonda bu kodu yaz', style: theme.textTheme.titleSmall),
+          Text('Cihazda bu kodu yaz', style: theme.textTheme.titleSmall),
           const SizedBox(height: 8),
           SelectableText(
             '${code.code.substring(0, 3)} ${code.code.substring(3)}',

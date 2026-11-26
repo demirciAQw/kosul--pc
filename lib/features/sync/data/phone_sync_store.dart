@@ -5,7 +5,9 @@ import 'dart:math';
 import '../domain/sync_crypto.dart';
 import '../domain/sync_protocol.dart';
 
-/// Telefonun eşleştiği tek bilgisayar.
+/// İstemcinin eşleştiği bir eş (alıcı): bilgisayar ya da ekranı açık Android
+/// telefon/tablet. Sınıf adı eski sürümden kaldı; her eşin kendi anahtarı,
+/// kimliği ve adresi vardır, imleçler eş kimliğiyle ayrı tutulur.
 class PairedComputer {
   const PairedComputer({
     required this.id,
@@ -15,10 +17,25 @@ class PairedComputer {
     required this.key,
     required this.pairedAt,
     this.lastSentAt,
+    this.platform = 'linux',
+    this.kind = deviceKindComputer,
+    this.legacyCursors = false,
   });
 
   final String id;
   final String name;
+
+  /// Eşin platformu (`linux` ya da `android`): tam yedek yalnızca Linux alıcıya gider.
+  final String platform;
+
+  /// `bilgisayar | telefon | tablet` (yalnızca gösterim).
+  final String kind;
+
+  /// v9.22'den göçen eş: genel (eş kimliksiz) imleçler ilk eşitlemede bu eşin
+  /// imleçlerine kopyalanır (bir kez), sonra bayrak kalkar.
+  final bool legacyCursors;
+
+  bool get isAndroid => platform == 'android';
 
   /// Son bilinen adres; değişirse bulma ile kimliğe göre yeniden bulunur.
   final String host;
@@ -31,7 +48,7 @@ class PairedComputer {
 
   String get address => '$host:$port';
 
-  PairedComputer copyWith({String? host, int? port, DateTime? lastSentAt}) => PairedComputer(
+  PairedComputer copyWith({String? host, int? port, DateTime? lastSentAt, bool? legacyCursors}) => PairedComputer(
         id: id,
         name: name,
         host: host ?? this.host,
@@ -39,6 +56,9 @@ class PairedComputer {
         key: key,
         pairedAt: pairedAt,
         lastSentAt: lastSentAt ?? this.lastSentAt,
+        platform: platform,
+        kind: kind,
+        legacyCursors: legacyCursors ?? this.legacyCursors,
       );
 
   Map<String, Object?> toJson() => {
@@ -49,6 +69,9 @@ class PairedComputer {
         'anahtar': base64.encode(key),
         'eslesme': pairedAt.toIso8601String(),
         if (lastSentAt != null) 'sonGonderim': lastSentAt!.toIso8601String(),
+        'platform': platform,
+        'tur': kind,
+        if (legacyCursors) 'eskiImlec': true,
       };
 
   static PairedComputer? tryParse(Object? json) {
@@ -69,6 +92,9 @@ class PairedComputer {
         key: bytes,
         pairedAt: at,
         lastSentAt: DateTime.tryParse('${json['sonGonderim']}'),
+        platform: json['platform'] is String ? json['platform'] as String : 'linux',
+        kind: cleanPeerKind(json['tur'], platform: json['platform'] is String ? json['platform'] as String : 'linux'),
+        legacyCursors: json['eskiImlec'] == true,
       );
     } on FormatException {
       return null;
@@ -119,22 +145,100 @@ class PhoneSyncStore {
 
   Future<String> phoneId() async => (await _load())['id']! as String;
 
-  Future<PairedComputer?> computer() async => PairedComputer.tryParse((await _load())['bilgisayar']);
+  /// PDF dosyalarını da bilgisayara gönder (T7). Varsayılan KAPALI: dosyalar
+  /// büyük olabilir; kullanıcı kendi açar. Satırlar (belge, çizgi) bundan bağımsız gider.
+  Future<bool> sendPdfs() async => (await _load())['pdfGonder'] == true;
 
-  /// En fazla bir bilgisayar: başka bir bilgisayar varken yenisi kaydedilmez
-  /// (aynı bilgisayarın adresi ya da son gönderim tarihi güncellenebilir).
-  Future<void> saveComputer(PairedComputer computer) async {
-    final data = await _load();
-    final existing = PairedComputer.tryParse(data['bilgisayar']);
-    if (existing != null && existing.id != computer.id) {
-      throw const SyncException('Telefon zaten bir bilgisayarla eşleşmiş. Önce o eşleşmeyi kaldır.');
-    }
-    data['bilgisayar'] = computer.toJson();
+  Future<void> setSendPdfs(bool value) async {
+    (await _load())['pdfGonder'] = value;
     await _save();
   }
 
-  Future<void> removeComputer() async {
-    (await _load()).remove('bilgisayar');
+  /// "PDF'leri bilgisayardan al" (v9.15): bilgisayarda olup bu cihazda olmayan PDF
+  /// dosyalarını eşitlemede indir. Varsayılan KAPALI (dosyalar büyük olabilir).
+  Future<bool> pullPdfs() async => (await _load())['pdfAl'] == true;
+
+  Future<void> setPullPdfs(bool value) async {
+    (await _load())['pdfAl'] = value;
+    await _save();
+  }
+
+  /// Bu cihazın bilgisayarda görünen adı; kullanıcı yazmadıysa null.
+  Future<String?> deviceName() async {
+    final v = (await _load())['cihazAdi'];
+    return v is String && v.trim().isNotEmpty ? v : null;
+  }
+
+  Future<void> setDeviceName(String name) async {
+    (await _load())['cihazAdi'] = cleanDeviceName(name);
+    await _save();
+  }
+
+  /// Eşler (eşleşme sırasıyla). Eski tek bilgisayar kaydı (`bilgisayar:`) okunurken
+  /// `esler` listesine taşınır ve `eskiImlec` bayrağı alır (eşleşme bozulmaz).
+  Future<List<PairedComputer>> computers() async {
+    final data = await _load();
+    var dirty = false;
+    final legacy = PairedComputer.tryParse(data['bilgisayar']);
+    if (data.containsKey('bilgisayar')) {
+      final list = _rawPeers(data);
+      if (legacy != null && !list.any((e) => e['id'] == legacy.id)) {
+        list.add(legacy.copyWith(legacyCursors: true).toJson());
+      }
+      data['esler'] = list;
+      data.remove('bilgisayar');
+      dirty = true;
+    }
+    if (dirty) await _save();
+    return [
+      for (final e in _rawPeers(data))
+        if (PairedComputer.tryParse(e) case final c?) c,
+    ];
+  }
+
+  static List<Map<String, Object?>> _rawPeers(Map<String, Object?> data) {
+    final v = data['esler'];
+    return [
+      if (v is List)
+        for (final e in v)
+          if (e is Map) e.cast<String, Object?>(),
+    ];
+  }
+
+  /// Eski ad: ilk eş ya da null.
+  Future<PairedComputer?> computer() async => (await computers()).firstOrNull;
+
+  Future<PairedComputer?> peer(String id) async {
+    for (final c in await computers()) {
+      if (c.id == id) return c;
+    }
+    return null;
+  }
+
+  /// Eşi kaydeder; aynı kimlik varsa güncellenir (adres, son eşitleme). Yeni eş,
+  /// [SyncLimits.maxPeers] doluysa [SyncException].
+  Future<void> saveComputer(PairedComputer computer) async {
+    final existing = await computers(); // eski kaydı da taşır
+    final data = await _load();
+    final list = _rawPeers(data);
+    final at = list.indexWhere((e) => e['id'] == computer.id);
+    if (at < 0 && existing.length >= SyncLimits.maxPeers) {
+      throw const SyncException('Bu cihaz en çok ${SyncLimits.maxPeers} eşle eşleşebilir. Önce birini kaldır.');
+    }
+    if (at < 0) {
+      list.add(computer.toJson());
+    } else {
+      list[at] = computer.toJson();
+    }
+    data['esler'] = list;
+    await _save();
+  }
+
+  /// [id] verilirse yalnızca o eş, verilmezse hepsi kalkar (eski davranış).
+  Future<void> removeComputer([String? id]) async {
+    await computers();
+    final data = await _load();
+    data['esler'] = id == null ? <Object?>[] : (_rawPeers(data)..removeWhere((e) => e['id'] == id));
     await _save();
   }
 }

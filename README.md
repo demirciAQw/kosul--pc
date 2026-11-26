@@ -1,5 +1,10 @@
 # Koçum
 
+> **Dışarıdan bakan bir mühendis ya da ajan için:** bu dal (`tablet-1`) tablet + PDF + el yazısı defter çalışmasını içerir.
+> Ne yapıldığı, neden, neyin **yarım/doğrulanmamış** kaldığı ve nereden başlanacağı:
+> **[`docs/DEVIR_RAPORU.md`](docs/DEVIR_RAPORU.md)** (ardından `CLAUDE.md` ve `docs/TABLET_RAPORU.md`).
+> Dürüstlük notu: büyük ölçüde yapay zekâ alt ajanlarıyla geliştirildi; testlerin geçmesi tablette iyi çalıştığı anlamına gelmez.
+
 YKS öğrencileri için **çevrimdışı** çalışma, süre ve hata analizi takipçisi. İki uygulama, tek kod tabanı:
 
 | | Platform | Rol |

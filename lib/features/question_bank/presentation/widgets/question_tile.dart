@@ -3,10 +3,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../app/routes.dart';
+import '../../../../app/tablet.dart' show isTabletContext;
 import '../../../../core/text/turkish_text.dart';
+import '../../../pdf/domain/solve.dart';
 import '../../domain/question_card.dart';
+import '../../../pdf/pdf_providers.dart';
 import '../../question_bank_providers.dart';
 import 'media_image.dart';
+import 'question_actions.dart';
 import '../../../../app/palette.dart';
 
 Color statusColor(QuestionStatus status) => switch (status) {
@@ -16,7 +20,7 @@ Color statusColor(QuestionStatus status) => switch (status) {
     };
 
 /// Galeri hissi: soru fotoğrafı, sağ üstte yıldız (GK), altta neden + zorluk.
-class QuestionTile extends ConsumerWidget {
+class QuestionTile extends ConsumerStatefulWidget {
   const QuestionTile({super.key, required this.card, this.onOpen});
   final QuestionCard card;
 
@@ -24,12 +28,36 @@ class QuestionTile extends ConsumerWidget {
   final VoidCallback? onOpen;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<QuestionTile> createState() => _QuestionTileState();
+}
+
+class _QuestionTileState extends ConsumerState<QuestionTile> {
+  final _menuKey = GlobalKey<PopupMenuButtonState<QuestionAction>>();
+
+  @override
+  Widget build(BuildContext context) {
+    final card = widget.card;
+    final onOpen = widget.onOpen;
     final scheme = Theme.of(context).colorScheme;
     const onImage = TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600);
     final selection = ref.watch(questionSelectionProvider);
     final selected = selection.contains(card.id);
     final selecting = selection.isNotEmpty;
+    // PDF kartı: dokunuş her zaman her zamanki gibi açar (geçmiş yazılır);
+    // PDF bu cihazdaysa köşede küçük PDF simgesi sayfaya/kutuya götürür.
+    final pdfId = card.hasPdfAnchor ? card.pdfDocumentId : null;
+    final hasPdf = pdfId != null && (ref.watch(pdfAvailableProvider(pdfId)).value ?? false);
+    final openPdf = hasPdf
+        ? () {
+            final b = card.pdfBox!;
+            context.push(AppRoutes.pdfReaderAt(pdfId, card.pdfPage!, b.left, b.top, b.right, b.bottom));
+          }
+        : null;
+    // Tablette köşede kalem simgesi: soruyu (fotoğraflı ya da PDF'li) çiz/çöz ekranında açar.
+    final canSolve = solveSpaceOf(hasPdfAnchor: card.hasPdfAnchor, hasImage: card.questionImage != null) !=
+        SolveSpace.none;
+    final showSolve = canSolve && isTabletContext(context);
+    final solved = ref.watch(solveSummariesProvider).value?[card.id];
     return Material(
       color: scheme.surfaceContainerHighest,
       clipBehavior: Clip.antiAlias,
@@ -38,7 +66,8 @@ class QuestionTile extends ConsumerWidget {
         side: selected ? BorderSide(color: scheme.primary, width: 3) : BorderSide.none,
       ),
       child: InkWell(
-        // Seçim modundayken dokunmak seçer; değilken soruyu açar. Uzun bas: seçimi başlat.
+        // Seçim modundayken dokunmak seçer; değilken soruyu açar.
+        // Uzun bas: seçim başlatır (seçim modundaysa değiştirir). Eylem menüsü ⋮ düğmesinde.
         onTap: selecting
             ? () => ref.read(questionSelectionProvider.notifier).toggle(card.id)
             : (onOpen ?? () => context.push(AppRoutes.question(card.id))),
@@ -80,6 +109,15 @@ class QuestionTile extends ConsumerWidget {
                           style: onImage,
                         ),
                       ),
+                      if (solved != null) ...[
+                        Icon(Icons.edit_rounded, size: 12, color: Colors.white, key: const Key('tile-solved-mark')),
+                        const SizedBox(width: 2),
+                        Text(
+                          '${solved.attempts} · ${formatSolveDuration(solved.lastDuration)}',
+                          style: onImage,
+                        ),
+                        const SizedBox(width: 8),
+                      ],
                       Text('Z${card.difficulty}', style: onImage),
                     ],
                   ),
@@ -101,6 +139,50 @@ class QuestionTile extends ConsumerWidget {
                 ),
               ),
             ),
+            if (!selecting)
+              Positioned(
+                top: 40,
+                right: 4,
+                child: PopupMenuButton<QuestionAction>(
+                  key: _menuKey,
+                  tooltip: 'Soru işlemleri',
+                  padding: EdgeInsets.zero,
+                  style: IconButton.styleFrom(backgroundColor: Colors.black38, visualDensity: VisualDensity.compact),
+                  icon: const Icon(Icons.more_vert_rounded, color: Colors.white, size: 20),
+                  itemBuilder: (_) => questionMenuItems(questionActionEntries(
+                    card,
+                    pdfAvailable: card.hasPdfAnchor ? hasPdf : null,
+                    selected: selected,
+                  )),
+                  onSelected: (a) => performQuestionAction(context, ref, card, a),
+                ),
+              ),
+            if (openPdf != null && !selecting)
+              Positioned(
+                top: 4,
+                left: 4,
+                child: IconButton(
+                  key: const Key('tile-open-pdf'),
+                  tooltip: 'PDF\'te göster',
+                  visualDensity: VisualDensity.compact,
+                  style: IconButton.styleFrom(backgroundColor: Colors.black38),
+                  onPressed: openPdf,
+                  icon: const Icon(Icons.picture_as_pdf_outlined, color: Colors.white, size: 20),
+                ),
+              ),
+            if (showSolve && !selecting)
+              Positioned(
+                top: 4,
+                left: openPdf != null ? 44 : 4,
+                child: IconButton(
+                  key: const Key('tile-open-solve'),
+                  tooltip: 'Çiz / Çöz',
+                  visualDensity: VisualDensity.compact,
+                  style: IconButton.styleFrom(backgroundColor: Colors.black38),
+                  onPressed: () => context.push(AppRoutes.questionSolve(card.id)),
+                  icon: const Icon(Icons.draw_outlined, color: Colors.white, size: 20),
+                ),
+              ),
             if (selecting)
               Positioned(
                 top: 6,

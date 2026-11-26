@@ -1,13 +1,41 @@
 abstract final class AppRoutes {
-  // Alt gezinme sekmeleri
+  // Ana ekran ve alt gezinme sekmeleri (ana ekran çubukta yok: logoyla açılır)
   static const home = '/';
   static const books = '/books';
   static const notebook = '/notebook';
   static const mockExams = '/mock';
   static const insights = '/insights';
+  static const anlikTab = '/anlik';
   static const tools = '/tools';
   static const practiceTest = '/tools/test';
   static const sendToComputer = '/tools/computer';
+  static const claudeChanges = '/tools/degisiklikler';
+  static const conflicts = '/tools/cakismalar';
+  static const inkLab = '/tools/kalem';
+  static const pdfLibrary = '/pdf';
+  static const health = '/saglik';
+  static const huaweiImport = '/saglik/huawei';
+  static const notebooks = '/defter';
+  static String inkNotebook(String id) => '/defter/$id';
+  static String inkBoard(String id) => '/defter/$id/pano';
+
+  /// Defteri belirli sayfada aç (el yazısı metin araması).
+  static String inkNotebookAt(String id, String pageId) => '/defter/$id?sayfa=${Uri.encodeQueryComponent(pageId)}';
+  static String pdfReader(String id) => '/pdf/$id';
+
+  /// Soru kartından PDF'e: sayfa (0'dan) ve kutu `sol,üst,sağ,alt` (sayfa birimi).
+  /// [questionId] verilirse okuyucuda "Çöz" düğmesi çıkar.
+  static String pdfReaderAt(String id, int page, double l, double t, double r, double b, {String? questionId}) =>
+      '/pdf/$id?page=$page&box=$l,$t,$r,$b${questionId == null ? '' : '&q=${Uri.encodeQueryComponent(questionId)}'}';
+
+  /// Soru katmanının ayrı penceresi (beyaz sayfa üzerinde çizim).
+  static String pdfLayerWindow(String id, String layerId) => '/pdf/$id/katman/${Uri.encodeComponent(layerId)}';
+
+  /// Çözüm ekranı, soru kartından (fotoğraflı ya da PDF'li; arka planı karttan türer).
+  static String questionSolve(String questionId) => '/soru/${Uri.encodeComponent(questionId)}/coz';
+
+  /// Çözüm ekranı: sorunun PDF kutusu + çevresi, her deneme ayrı katman.
+  static String pdfSolve(String id, String questionId) => '/pdf/$id/soru/${Uri.encodeComponent(questionId)}';
 
   // Tam ekran sayfalar
   static const newSession = '/session/new';
@@ -21,6 +49,11 @@ abstract final class AppRoutes {
   static const newPlan = '/plan/new';
   static const sessions = '/sessions';
   static const newNote = '/notes/new';
+  static const newAnlik = '/anlik/yeni';
+  static String anlik(String id) => '/anlik/not/$id';
+  static const people = '/kisiler';
+  static String person(String id) => '/kisiler/$id';
+  static const tags = '/etiketler';
   static const settings = '/settings';
   static String note(String id) => '/notes/$id';
   static String book(String id) => '/books/$id';

@@ -129,6 +129,16 @@ String requestSignature(
 }) =>
     proofOf(key, ProofLabels.request, [method.toUpperCase(), path, session, '$sequence', mediaPath, bodyHash]);
 
+/// Bilgisayarın yanıtının imzası: isteğin oturumu, sıra numarası ve yanıt
+/// gövdesinin özeti. Telefon doğrulamadan yanıttaki veriyi uygulamaz.
+String responseSignature(
+  List<int> key, {
+  required String session,
+  required int sequence,
+  required String bodyHash,
+}) =>
+    proofOf(key, ProofLabels.response, [session, '$sequence', bodyHash]);
+
 String sha256Hex(List<int> data) => sha256.convert(data).toString();
 
 /// Süre sızdırmayan karşılaştırma: imza tahmini için zamanlama ölçülemesin.

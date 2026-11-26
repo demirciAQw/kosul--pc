@@ -20,7 +20,11 @@ class TopicSelectionView extends ConsumerStatefulWidget {
     required this.actionIcon,
     required this.onSubmit,
     this.busy = false,
+    this.allowEmpty = false,
   });
+
+  /// Seçim boşken de gönderilebilir (oturum başlatma: dersi boş tek blok, "Kitapsız" gibi).
+  final bool allowEmpty;
 
   final String actionLabel;
   final IconData actionIcon;
@@ -63,6 +67,7 @@ class _TopicSelectionViewState extends ConsumerState<TopicSelectionView> {
     final states = _selection.computeStates(roots);
     final rows = _visibleRows(roots);
     final drafts = _selection.isEmpty ? const <SessionItemDraft>[] : _selection.toDrafts(roots, states);
+    final emptyOk = widget.allowEmpty && drafts.isEmpty;
     final estimate = drafts.fold<int>(0, (sum, d) => sum + (d.estimatedQuestions ?? 0));
 
     return Column(
@@ -103,11 +108,24 @@ class _TopicSelectionViewState extends ConsumerState<TopicSelectionView> {
         ),
         _ActionBar(
           count: drafts.length,
+          emptyHint: emptyOk ? 'İstersen konu ya da sayfa seç' : null,
           estimate: estimate,
           busy: widget.busy,
           label: widget.actionLabel,
           icon: widget.actionIcon,
-          onPressed: drafts.isEmpty ? null : () => widget.onSubmit(drafts),
+          onPressed: drafts.isEmpty && !emptyOk
+              ? null
+              : () => widget.onSubmit(
+                  emptyOk
+                      ? [
+                          SessionItemDraft(
+                            label: StudyActivity.lecture.label,
+                            pages: const [],
+                            activity: StudyActivity.lecture,
+                          ),
+                        ]
+                      : drafts,
+                ),
         ),
       ],
     );
@@ -293,8 +311,10 @@ class _ActionBar extends StatelessWidget {
     required this.label,
     required this.icon,
     required this.onPressed,
+    this.emptyHint,
   });
 
+  final String? emptyHint;
   final int count;
   final int estimate;
   final bool busy;
@@ -316,7 +336,7 @@ class _ActionBar extends StatelessWidget {
               Expanded(
                 child: Text(
                   count == 0
-                      ? 'Konu ya da sayfa seç'
+                      ? (emptyHint ?? 'Konu ya da sayfa seç')
                       : '$count bölüm seçildi${estimate > 0 ? ', yaklaşık $estimate soru' : ''}',
                   style: theme.textTheme.titleSmall,
                 ),

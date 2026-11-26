@@ -1,4 +1,4 @@
-/// Telefon → bilgisayar kablosuz aktarımın ortak sözleşmesi (sürüm 1).
+/// Telefon → bilgisayar kablosuz aktarımın ortak sözleşmesi (sürüm 2: içerik şifreli).
 /// İki taraf da adları, sınırları ve mesajları yalnızca buradan alır.
 ///
 /// Akış:
@@ -8,12 +8,20 @@
 ///     ile iki tarafta ayrı ayrı hesaplanır; ağdan hiç geçmez.
 ///  3. Oturum: her bağlantıda iki taraf anahtarı bildiğini kanıtlar.
 ///  4. Aktarım: her istek imzalı ve sıra numaralı; aynı istek iki kez
-///     kabul edilmez.
+///     kabul edilmez. Sürüm 2'den beri imzalı isteklerin ve 200 yanıtlarının
+///     GÖVDESİ de şifrelidir (`sync_cipher.dart`, ChaCha20-Poly1305). Şifresiz
+///     konuşma yoktur: sürümler uyuşmazsa anlaşılır hata verilir.
+///
+/// Düz kalanlar (bilerek): bulma (UDP) ve `merhaba` yanıtı, eşleştirme ve oturum
+/// açma mesajları (yalnızca açık DH değerleri, meydan okumalar, kimlikler, ad ve
+/// kanıtlar; sırlar zaten ağdan geçmez), istek başlıkları (oturum, sıra, imza, yol
+/// = fotoğraf yolu ya da PDF özeti), HTTP yöntemi ve yolu, hata yanıtları
+/// (yalnızca kısa iletiler) ve gövde boyutu (parça başına sabit ek yük).
 library;
 
 import 'dart:convert';
 
-const syncProtocolVersion = 1;
+const syncProtocolVersion = 2;
 const syncAppName = 'kocum';
 
 /// Bilgisayarın dinlediği TCP portu (HTTP) ve bulma portu (UDP).
@@ -28,6 +36,19 @@ abstract final class SyncPaths {
   static const photoList = '$prefix/fotograflar';
   static const photo = '$prefix/fotograf';
   static const backup = '$prefix/yedek';
+
+  /// İki yönlü senkron (v8.8): değişiklik defteri alışverişi ve bilgisayarın
+  /// telefona gönderdiği fotoğraflar (yalnızca kendi değişikliklerinde geçenler).
+  static const ledger = '$prefix/degisiklikler';
+  static const photoGet = '$prefix/fotograf-al';
+
+  /// PDF dosyası (T7): yalnızca telefon/tablet → bilgisayar, `PUT`, isteğe bağlı.
+  /// Ad `x-kocum-yol` başlığında `<sha256>.pdf`; imzaya girer.
+  static const pdf = '$prefix/pdf';
+
+  /// PDF dosyasını bilgisayardan alma (v9.15, isteğe bağlı, ayar varsayılan KAPALI):
+  /// yalnızca bilgisayarın `pdf_documents` satırında geçen özet. Bkz. `SyncServer._pdfGet`.
+  static const pdfGet = '$prefix/pdf-al';
 }
 
 /// İmzalı isteklerin başlıkları (küçük harf; HTTP başlıkları harf duyarsız).
@@ -36,6 +57,12 @@ abstract final class SyncHeaders {
   static const sequence = 'x-kocum-sira';
   static const signature = 'x-kocum-imza';
   static const mediaPath = 'x-kocum-yol';
+
+  /// Gövde şifreli: değer [syncCipherName]. İmzalı her istekte ve her 200 yanıtında şart.
+  static const cipher = 'x-kocum-sifre';
+
+  /// Bilgisayarın yanıt imzası (telefon doğrular; ağdaki biri yanıtı değiştiremez).
+  static const responseSignature = 'x-kocum-yanit-imza';
 }
 
 abstract final class SyncLimits {
@@ -47,6 +74,9 @@ abstract final class SyncLimits {
 
   /// Fotoğrafsız yedek ZIP (JSON + veritabanı kopyası).
   static const backup = 512 * 1024 * 1024;
+
+  /// Tek PDF dosyası (T7).
+  static const pdf = 300 * 1024 * 1024;
 
   static const photoListLength = 200000;
   static const pairingCodeTtl = Duration(minutes: 5);
@@ -61,6 +91,29 @@ abstract final class SyncLimits {
   static const banDuration = Duration(minutes: 10);
 
   static const nameLength = 40;
+
+  /// Bir alıcıya (bilgisayar ya da ekranı açık Android) aynı anda eşleşebilecek
+  /// cihaz sayısı (v9.15). v9.23: her cihaz hem alıcı hem istemci olabilir.
+  static const maxDevices = 4;
+
+  /// Bir istemcinin aynı anda eşleşebileceği alıcı (eş) sayısı (v9.23).
+  static const maxPeers = 4;
+}
+
+/// Eşleşen cihazın türü (ekranda simge ve ad için; güvenlikte rolü yok).
+const deviceKindPhone = 'telefon';
+const deviceKindTablet = 'tablet';
+
+String cleanDeviceKind(Object? kind) => kind == deviceKindTablet ? deviceKindTablet : deviceKindPhone;
+
+/// Eş (karşı uç) türü: bilgisayar de olabilir (yalnızca gösterim; güvenlikte rolü yok).
+const deviceKindComputer = 'bilgisayar';
+
+/// Eş türü: bilinmeyen/eksik ise platformdan tahmin edilir (eski sürüm bilgisayar
+/// `tur` göndermez: linux → bilgisayar, android → telefon).
+String cleanPeerKind(Object? kind, {String? platform}) {
+  if (kind == deviceKindComputer || kind == deviceKindTablet || kind == deviceKindPhone) return kind! as String;
+  return platform == 'android' ? deviceKindPhone : deviceKindComputer;
 }
 
 /// Eşleşebilen telefon/tablet platformları. Windows ve diğerleri reddedilir.
@@ -68,8 +121,12 @@ abstract final class SyncLimits {
 /// ondan türeyen anahtardır.
 const acceptedPhonePlatforms = {'android'};
 
-/// Telefonun veri gönderdiği bilgisayar platformları.
-const acceptedComputerPlatforms = {'linux'};
+/// Bir cihazın veri gönderdiği ALICI (sunucu) platformları: Linux bilgisayar ve
+/// (v9.23) ekranı açıkken alıcı olabilen Android telefon/tablet. Windows ve
+/// diğerleri reddedilir. Alıcı Android'in ek kuralları: yalnızca Android istemci
+/// eşleşir (`acceptedPhonePlatforms`), arka plan servisi yoktur, tam yedek (ZIP)
+/// içe aktarmaz (404); kayıtlar defter ve tam durumla taşınır.
+const acceptedComputerPlatforms = {'linux', 'android'};
 
 /// Kanıt etiketleri: aynı anahtarla üretilen imzalar birbirinin yerine
 /// kullanılamasın diye her biri ayrı etiketle başlar.
@@ -79,6 +136,7 @@ abstract final class ProofLabels {
   static const phoneSession = 'telefon-oturum';
   static const computerSession = 'bilgisayar-oturum';
   static const request = 'istek';
+  static const response = 'yanit';
 }
 
 class SyncException implements Exception {
@@ -142,7 +200,8 @@ class DiscoveryReply {
       final j = jsonDecode(utf8.decode(data));
       if (j is! Map) return null;
       final m = j.cast<String, Object?>();
-      if (m['uygulama'] != syncAppName || m['surum'] != syncProtocolVersion) return null;
+      // Sürüm farkı olan cihaz da listelenir: bağlanınca anlaşılır "güncelleyin" hatası çıkar.
+      if (m['uygulama'] != syncAppName || m['surum'] is! int) return null;
       final id = m['id'], name = m['ad'], port = m['port'], platform = m['platform'];
       if (id is! String || !isValidDeviceId(id)) return null;
       if (name is! String || port is! int || port <= 0 || port > 65535 || platform is! String) return null;
@@ -190,6 +249,13 @@ String? _strOrNull(Map<String, Object?> m, String key) {
 
 bool _bool(Map<String, Object?> m, String key) => m[key] == true;
 
+/// Sürüm uyuşmazlığı: şifresiz konuşmaya düşülmez; hangi tarafın güncelleneceği söylenir.
+SyncException versionMismatch(Object? theirs) => SyncException(
+  theirs is int && theirs > syncProtocolVersion
+      ? 'Bu cihazdaki Koçum eski; karşıdaki daha yeni sürümle konuşamaz. Bu cihazı güncelleyin.'
+      : 'Karşıdaki cihazın Koçum sürümü eski (şifreli aktarım yok). Diğer cihazı güncelleyin.',
+);
+
 /// GET merhaba yanıtı: kimlik, durum ve tek kullanımlık meydan okuma.
 class SyncHello {
   const SyncHello({
@@ -200,16 +266,21 @@ class SyncHello {
     required this.paired,
     required this.challenge,
     this.dhPublic,
+    this.kind,
   });
 
   final String id;
   final String name;
   final String platform;
 
+  /// Alıcının türü: `bilgisayar | telefon | tablet` (eski sürüm göndermez: null).
+  final String? kind;
+
   /// Bilgisayarda kod ekranı açık mı?
   final bool pairingOpen;
 
-  /// Bilgisayar zaten bir telefonla eşleşmiş mi?
+  /// Bilgisayarın cihaz yuvaları dolu mu? (v9.15: en çok [SyncLimits.maxDevices] cihaz;
+  /// anahtar adı eski sürümlerle uyum için `eslesmis` kaldı.) Doluysa yeni eşleşme olmaz.
   final bool paired;
 
   /// Bir sonraki istekte kullanılacak tek seferlik değer.
@@ -228,14 +299,14 @@ class SyncHello {
         'eslesmis': paired,
         'meydanOkuma': challenge,
         if (dhPublic != null) 'dh': dhPublic,
+        if (kind != null) 'tur': kind,
       };
 
   factory SyncHello.fromJson(Object? json) {
     final m = _map(json);
     if (m['uygulama'] != syncAppName) throw const SyncException('Bu adreste Koçum yok.');
-    if (m['surum'] != syncProtocolVersion) {
-      throw const SyncException('Bilgisayardaki Koçum farklı sürümde; iki tarafı da güncelle.');
-    }
+    final theirs = m['surum'];
+    if (theirs != syncProtocolVersion) throw versionMismatch(theirs);
     final id = _str(m, 'id');
     if (!isValidDeviceId(id)) throw const SyncException('Bozuk mesaj: kimlik.');
     return SyncHello(
@@ -246,6 +317,7 @@ class SyncHello {
       paired: _bool(m, 'eslesmis'),
       challenge: _str(m, 'meydanOkuma'),
       dhPublic: _strOrNull(m, 'dh'),
+      kind: _strOrNull(m, 'tur'),
     );
   }
 }
@@ -258,6 +330,7 @@ class PairRequest {
     required this.platform,
     required this.dhPublic,
     required this.proof,
+    this.kind = deviceKindPhone,
   });
 
   final String challenge;
@@ -265,6 +338,9 @@ class PairRequest {
   final String name;
   final String platform;
   final String dhPublic;
+
+  /// `telefon` ya da `tablet` (yalnızca gösterim; imzaya girmez).
+  final String kind;
 
   /// Telefonun, ekrandaki kodla türettiği anahtarı bildiğinin kanıtı.
   final String proof;
@@ -276,6 +352,7 @@ class PairRequest {
         'platform': platform,
         'dh': dhPublic,
         'kanit': proof,
+        'tur': kind,
       };
 
   factory PairRequest.fromJson(Object? json) {
@@ -287,6 +364,7 @@ class PairRequest {
       platform: _str(m, 'platform'),
       dhPublic: _str(m, 'dh'),
       proof: _str(m, 'kanit'),
+      kind: cleanDeviceKind(m['tur']),
     );
   }
 }

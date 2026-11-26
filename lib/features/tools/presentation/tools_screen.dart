@@ -1,3 +1,7 @@
+import '../../../core/pen_diag.dart';
+import '../../../core/pen_diag_store.dart';
+import '../../../app/platform.dart';
+import '../../ink/data/ink_overlay_host.dart';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -6,6 +10,7 @@ import 'package:go_router/go_router.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../health/health_providers.dart';
 import '../../../app/palette.dart';
 import '../../../app/routes.dart';
 import '../../../app/widgets/tone_icon.dart';
@@ -85,6 +90,7 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen> {
         stems: ref.read(stemReportProvider),
         sessions: sessions,
         deadline: settings?.booksDeadline,
+        healthSection: await ref.read(healthReportSectionProvider.future),
       );
       final out = await _temp('Kocum_Claude_Paket$number${full ? '_tum' : ''}_${_stamp(now)}.md');
       await out.writeAsString(report.markdown, flush: true);
@@ -196,7 +202,6 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final settings = ref.watch(settingsProvider).value;
     final log = ref.watch(claudeExportLogProvider).value ?? const <ClaudeBatch>[];
     final last = log.isEmpty ? null : log.last;
@@ -271,12 +276,32 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen> {
               ),
               const _Section('Bilgisayar'),
               Card(
-                child: tile(
-                  Icons.computer,
-                  KocumColors.blue,
-                  'Bilgisayara gönder',
-                  'Aynı Wi-Fi\'daki bilgisayardaki Koçum\'a (Linux); yalnızca eksik fotoğraflar gider',
-                  () => context.push(AppRoutes.sendToComputer),
+                child: Column(
+                  children: [
+                    tile(
+                      Icons.computer,
+                      KocumColors.blue,
+                      'Bilgisayarla eşitle',
+                      'Aynı Wi-Fi\'daki bilgisayardaki Koçum\'la (Linux) iki yönlü; ilkinde tam yedek, sonra yalnızca değişiklikler',
+                      () => context.push(AppRoutes.sendToComputer),
+                    ),
+                    const Divider(indent: 72),
+                    tile(
+                      Icons.auto_fix_high_outlined,
+                      KocumColors.green,
+                      'Claude\'un değişiklikleri',
+                      'Oturum oturum; madde ya da oturum başına geri al',
+                      () => context.push(AppRoutes.claudeChanges),
+                    ),
+                    const Divider(indent: 72),
+                    tile(
+                      Icons.merge_type_rounded,
+                      KocumColors.amber,
+                      'Çakışmalar',
+                      'İki cihazda da değişen satırların kaybeden sürümü',
+                      () => context.push(AppRoutes.conflicts),
+                    ),
+                  ],
                 ),
               ),
               const _Section('Dışa aktar'),
@@ -349,6 +374,12 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen> {
                   () => context.push(AppRoutes.settings),
                 ),
               ),
+              if (isAndroid) ...[
+                const _Section('Kalem'),
+                const Card(child: _InkNativeTile()),
+              ],
+              const _Section('Tanı'),
+              const Card(child: _PenDiagTile()),
               if (log.isNotEmpty) ...[
                 const _Section('Claude paket geçmişi'),
                 Card(
@@ -386,5 +417,50 @@ class _Section extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(4, 18, 4, 6),
         child: Text(text,
             style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Theme.of(context).colorScheme.primary)),
+      );
+}
+
+
+/// "Kalem giriş tanısı": açıkken işaretçi olayları günlüğe yazılır
+/// (`adb logcat -s flutter | grep KocumPen`). Kapalı varsayılan.
+class _PenDiagTile extends ConsumerStatefulWidget {
+  const _PenDiagTile();
+
+  @override
+  ConsumerState<_PenDiagTile> createState() => _PenDiagTileState();
+}
+
+class _PenDiagTileState extends ConsumerState<_PenDiagTile> {
+  @override
+  Widget build(BuildContext context) => SwitchListTile(
+        key: const Key('pen-diag-switch'),
+        secondary: const Icon(Icons.edit_note_rounded),
+        title: const Text('Kalem giriş tanısı'),
+        subtitle: const Text('Kalem ve parmak olaylarını günlüğe yazar (avuç/kalem takılma incelemesi). Kapalıyken hiçbir şey yapmaz.'),
+        value: PenDiag.enabled,
+        onChanged: (v) async {
+          await savePenDiag(ref.read(appDatabaseProvider), v);
+          if (mounted) setState(() {});
+        },
+      );
+}
+
+
+/// "Yerel Ink kalemi": Android'de kalem çizgisini Google Ink (yerel ıslak çizim) çizer.
+/// Varsayılan AÇIK; sorun olursa kapatılınca Flutter çizim yolu kullanılır.
+class _InkNativeTile extends ConsumerWidget {
+  const _InkNativeTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) => ValueListenableBuilder<bool>(
+        valueListenable: InkOverlayHost.nativeEnabled,
+        builder: (context, on, _) => SwitchListTile(
+          key: const Key('ink-native-switch'),
+          secondary: const Icon(Icons.draw_outlined),
+          title: const Text('Yerel Ink kalemi'),
+          subtitle: const Text('Kalem çizgisini Google Ink çizer (daha düşük gecikme). Kalem takılır ya da yanlış çizerse kapat.'),
+          value: on,
+          onChanged: (v) => saveInkNative(ref.read(appDatabaseProvider), v),
+        ),
       );
 }

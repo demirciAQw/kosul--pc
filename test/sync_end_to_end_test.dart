@@ -8,6 +8,7 @@ import 'package:kocum/desktop/sync/data/desktop_sync_store.dart';
 import 'package:kocum/desktop/sync/data/sync_server.dart';
 import 'package:kocum/features/sync/data/phone_sync_store.dart';
 import 'package:kocum/features/sync/data/sync_client.dart';
+import 'package:kocum/features/sync/domain/sync_cipher.dart';
 import 'package:kocum/features/sync/domain/sync_crypto.dart';
 import 'package:kocum/features/sync/domain/sync_protocol.dart';
 
@@ -98,8 +99,14 @@ void main() {
       req.contentLength = body.length;
       req.add(body);
       final res = await req.close();
-      final text = await utf8.decodeStream(res);
-      final json = jsonDecode(text);
+      final text = utf8.decode(await res.fold<List<int>>(<int>[], (a, b) => a..addAll(b)), allowMalformed: true);
+      // 200 yanıtları şifreli (düz JSON değil); hata yanıtları düz JSON.
+      Object? json;
+      try {
+        json = jsonDecode(text);
+      } on FormatException {
+        json = null;
+      }
       return (res.statusCode, json is Map ? '${json['hata'] ?? ''}' : '');
     } finally {
       http.close(force: true);
@@ -151,37 +158,79 @@ void main() {
       expect(await desktopStore.phone(), isNull);
     });
 
-    test('en fazla bir telefon: ikinci telefon eşleşemez, kod ekranı da açılmaz', () async {
+    test('birden çok cihaz: ikinci cihaz eşleşir, birincisi kopmaz; yuvalar dolunca yenisi reddedilir', () async {
       await server.openPairing();
       await pair();
+      // Yeni cihaz için kod ekranı yine açılır; mevcut eşleşme kopmaz.
+      final code = (await server.openPairing()).code;
+      await pair(code: code, id: 'telefon0002bb');
+      expect((await desktopStore.devices()).map((d) => d.id), [phoneId, 'telefon0002bb']);
+      for (final id in ['telefon0003cc', 'telefon0004dd']) {
+        await pair(code: (await server.openPairing()).code, id: id);
+      }
+      expect((await desktopStore.devices()), hasLength(SyncLimits.maxDevices));
       await expectLater(server.openPairing(), throwsA(isA<SyncException>()));
       await expectLater(
-        client.pair(host: '127.0.0.1', port: server.port!, code: '123456', phoneId: 'telefon0002bb', phoneName: 'x', platform: 'android'),
-        throwsA(isA<SyncException>().having((e) => e.message, 'mesaj', contains('zaten bir telefonla'))),
+        client.pair(host: '127.0.0.1', port: server.port!, code: '123456', phoneId: 'telefon0005ee', phoneName: 'x', platform: 'android'),
+        throwsA(isA<SyncException>().having((e) => e.message, 'mesaj', contains('dolu'))),
       );
       expect((await desktopStore.phone())!.id, phoneId);
     });
 
-    test('telefon tarafı da tek bilgisayar tutar', () async {
+    test('istemci tarafı en çok maxPeers eş tutar; eş başına kaldırma öbürlerine dokunmaz', () async {
       final store = PhoneSyncStore(() async => File('${tmp.path}/telefon/esitleme.json'));
       await server.openPairing();
       final computer = await pair();
       await store.saveComputer(computer);
       await store.saveComputer(computer.copyWith(host: '10.0.0.7'));
       expect((await store.computer())!.host, '10.0.0.7');
-      final other = PairedComputer(
-        id: 'baskabilgisayar1',
-        name: 'B',
-        host: '10.0.0.8',
-        port: 1,
-        key: List.filled(32, 0),
-        pairedAt: DateTime(2026),
-      );
-      await expectLater(store.saveComputer(other), throwsA(isA<SyncException>()));
+      PairedComputer peer(String id, {String platform = 'linux'}) => PairedComputer(
+            id: id,
+            name: id,
+            host: '10.0.0.8',
+            port: 1,
+            key: List.filled(32, 0),
+            pairedAt: DateTime(2026),
+            platform: platform,
+            kind: platform == 'android' ? 'tablet' : 'bilgisayar',
+          );
+      for (var i = 2; i <= SyncLimits.maxPeers; i++) {
+        await store.saveComputer(peer('baskaes$i${'x' * 6}', platform: 'android'));
+      }
+      expect(await store.computers(), hasLength(SyncLimits.maxPeers));
+      await expectLater(store.saveComputer(peer('fazlaes0000000')), throwsA(isA<SyncException>()));
+      await store.removeComputer('baskaes2xxxxxx');
+      expect(await store.computers(), hasLength(SyncLimits.maxPeers - 1));
+      expect((await store.peer('baskaes3xxxxxx'))!.isAndroid, isTrue);
       await store.removeComputer();
-      await store.saveComputer(other);
+      expect(await store.computers(), isEmpty);
+      await store.saveComputer(peer('baskabilgisayar1'));
       expect((await store.computer())!.id, 'baskabilgisayar1');
       expect(await store.phoneId(), await store.phoneId(), reason: 'kimlik kalıcı');
+    });
+
+    test('eski tek bilgisayar kaydı (bilgisayar:) eşler listesine taşınır, imleç bayrağı alır', () async {
+      final file = File('${tmp.path}/telefon/eski.json');
+      await file.parent.create(recursive: true);
+      final old = PairedComputer(
+          id: 'eskibilgisayar1',
+          name: 'Eski',
+          host: '192.168.1.5',
+          port: 47321,
+          key: List.filled(32, 7),
+          pairedAt: DateTime(2026, 1, 2));
+      final json = old.toJson()
+        ..remove('platform')
+        ..remove('tur');
+      await file.writeAsString(jsonEncode({'id': 'telefoneski0001', 'bilgisayar': json}));
+      final store = PhoneSyncStore(() async => file);
+      final peers = await store.computers();
+      expect(peers.single.id, 'eskibilgisayar1');
+      expect(peers.single.platform, 'linux');
+      expect(peers.single.kind, 'bilgisayar');
+      expect(peers.single.legacyCursors, isTrue);
+      expect(peers.single.key, List.filled(32, 7));
+      expect(jsonDecode(await file.readAsString()), isNot(contains('bilgisayar')));
     });
   });
 
@@ -243,7 +292,16 @@ void main() {
     test('aynı istek ikinci kez gönderilirse reddedilir ve oturum kapanır', () async {
       final conn = await client.connect(computer, phoneId: phoneId);
       final body = utf8.encode(jsonEncode(const PhotoListRequest([]).toJson()));
+      List<int> sealed(int seq) => sealBytes(
+          body,
+          SealContext(
+              pairingKey: computer.key,
+              direction: SealDirection.toReceiver,
+              session: conn.session,
+              sequence: seq,
+              path: SyncPaths.photoList));
       Map<String, String> headers(int seq) => {
+            SyncHeaders.cipher: syncCipherName,
             SyncHeaders.session: conn.session,
             SyncHeaders.sequence: '$seq',
             SyncHeaders.signature: requestSignature(
@@ -256,20 +314,99 @@ void main() {
               bodyHash: sha256Hex(body),
             ),
           };
-      expect((await raw('POST', SyncPaths.photoList, headers: headers(1), body: body)).$1, 200);
-      final replay = await raw('POST', SyncPaths.photoList, headers: headers(1), body: body);
+      expect((await raw('POST', SyncPaths.photoList, headers: headers(1), body: sealed(1))).$1, 200);
+      final replay = await raw('POST', SyncPaths.photoList, headers: headers(1), body: sealed(1));
       expect(replay.$1, 401);
       expect(replay.$2, contains('Sıra numarası'));
       // Oturum kapandı: doğru sıradaki istek de artık geçmez; yeni oturum gerekir.
-      expect((await raw('POST', SyncPaths.photoList, headers: headers(2), body: body)).$1, 401);
+      expect((await raw('POST', SyncPaths.photoList, headers: headers(2), body: sealed(2))).$1, 401);
       final again = await client.connect(computer, phoneId: phoneId);
       expect((await client.missingPhotos(again, const [])).missing, isEmpty);
+    });
+
+    test('şifresiz (cipher başlığı yok) imzalı istek reddedilir; sessizce düz konuşmaya düşülmez', () async {
+      final conn = await client.connect(computer, phoneId: phoneId);
+      final body = utf8.encode(jsonEncode(const PhotoListRequest([]).toJson()));
+      final r = await raw('POST', SyncPaths.photoList, body: body, headers: {
+        SyncHeaders.session: conn.session,
+        SyncHeaders.sequence: '1',
+        SyncHeaders.signature: requestSignature(
+          computer.key,
+          method: 'POST',
+          path: SyncPaths.photoList,
+          session: conn.session,
+          sequence: 1,
+          mediaPath: '',
+          bodyHash: sha256Hex(body),
+        ),
+      });
+      expect(r.$1, 400);
+      expect(r.$2, contains('Diğer cihazı güncelleyin'));
+    });
+
+    test('ağdaki gövde şifreli: yanıt düz JSON değildir, yalnızca doğru anahtarla çözülür; fotoğraf adı gövdede görünmez',
+        () async {
+      final conn = await client.connect(computer, phoneId: phoneId);
+      const name = 'questions/2026/10/gizli-foto-adi.webp';
+      final body = utf8.encode(jsonEncode(const PhotoListRequest([MediaEntry(name, 10)]).toJson()));
+      final seal = SealContext(
+          pairingKey: computer.key,
+          direction: SealDirection.toReceiver,
+          session: conn.session,
+          sequence: 1,
+          path: SyncPaths.photoList);
+      final wireBody = sealBytes(body, seal);
+      expect(utf8.decode(wireBody, allowMalformed: true), isNot(contains('gizli-foto-adi')));
+      final http = HttpClient()..findProxy = ((_) => 'DIRECT');
+      try {
+        final req = await http.postUrl(Uri.parse('http://127.0.0.1:${server.port}${SyncPaths.photoList}'));
+        req.headers
+          ..set(SyncHeaders.cipher, syncCipherName)
+          ..set(SyncHeaders.session, conn.session)
+          ..set(SyncHeaders.sequence, '1')
+          ..set(
+              SyncHeaders.signature,
+              requestSignature(computer.key,
+                  method: 'POST',
+                  path: SyncPaths.photoList,
+                  session: conn.session,
+                  sequence: 1,
+                  mediaPath: '',
+                  bodyHash: sha256Hex(body)));
+        req.contentLength = wireBody.length;
+        req.add(wireBody);
+        final res = await req.close();
+        final wire = await res.fold<List<int>>(<int>[], (a, b) => a..addAll(b));
+        expect(res.statusCode, 200);
+        expect(res.headers.value(SyncHeaders.cipher), syncCipherName);
+        expect(utf8.decode(wire, allowMalformed: true), isNot(contains('eksik')), reason: 'düz JSON değil');
+        await expectLater(
+            openBytes(wire, SealContext(pairingKey: List<int>.filled(32, 1), direction: SealDirection.toSender, session: conn.session, sequence: 1, path: SyncPaths.photoList)),
+            throwsA(isA<SealException>()));
+        final plain = await openBytes(wire, seal.reply());
+        expect(jsonDecode(utf8.decode(plain)), containsPair('eksik', [name]));
+        // Yanıt imzası düz gövdenin özetindedir.
+        expect(
+            res.headers.value(SyncHeaders.responseSignature),
+            responseSignature(computer.key, session: conn.session, sequence: 1, bodyHash: sha256Hex(plain)));
+      } finally {
+        http.close(force: true);
+      }
     });
 
     test('yanlış anahtarla imzalanan istek reddedilir', () async {
       final conn = await client.connect(computer, phoneId: phoneId);
       final body = utf8.encode(jsonEncode(const PhotoListRequest([]).toJson()));
-      final r = await raw('POST', SyncPaths.photoList, body: body, headers: {
+      final sealedBody = sealBytes(
+          body,
+          SealContext(
+              pairingKey: computer.key,
+              direction: SealDirection.toReceiver,
+              session: conn.session,
+              sequence: 1,
+              path: SyncPaths.photoList));
+      final r = await raw('POST', SyncPaths.photoList, body: sealedBody, headers: {
+        SyncHeaders.cipher: syncCipherName,
         SyncHeaders.session: conn.session,
         SyncHeaders.sequence: '1',
         SyncHeaders.signature: requestSignature(
@@ -321,7 +458,7 @@ void main() {
     });
 
     test('eşleşme bilgisayardan kaldırılınca telefon bağlanamaz', () async {
-      await server.forgetPhone();
+      await server.forgetDevice(phoneId);
       await expectLater(client.connect(computer, phoneId: phoneId), throwsA(isA<SyncException>()));
     });
   });

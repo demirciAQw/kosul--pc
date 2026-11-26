@@ -245,6 +245,10 @@ class UpdateQuestionCard {
         testLabel: _clean(draft.testLabel),
         sessionItemId: draft.sessionItemId,
         mockExamId: draft.mockExamId,
+        // PDF bağı düzenlemede korunur (taslakta yok).
+        pdfDocumentId: original.pdfDocumentId,
+        pdfPage: original.pdfPage,
+        pdfBox: original.pdfBox,
       );
       final correct = card.status == QuestionStatus.correct;
       await _repository.update(

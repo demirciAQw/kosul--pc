@@ -3,19 +3,26 @@
 //
 //  - Bildirim izni (oturum kronometresi için)
 //  - Ağ izni (yalnızca yerel ağdaki bilgisayara kablosuz aktarım için)
-//  - Uygulama adı: Koçum
+//  - Uygulama adı: Koçum (debug derlemede "Koçum (deneme)", kimliği ".gece" sonlu)
 //  - flutter_local_notifications için core library desugaring
 //  - Sabit imza: android/key.properties varsa release APK onunla imzalanır
 //    (yoksa eskisi gibi hata ayıklama anahtarı kullanılır)
+//  - Sağlık verisi: Health Connect salt okuma kanalı (tool/health_patch.dart)
 //  - Eski eklentileri yeni Android SDK ile derleme
 //
 // v0.2: harici kırpıcı (uCrop / image_cropper) kaldırıldı; kırpma uygulama içinde.
 import 'dart:io';
 
+import 'abi_patch.dart';
 import 'camera_patch.dart';
+import 'gece_patch.dart';
 import 'genai_patch.dart';
+import 'health_patch.dart';
+import 'ink_overlay_patch.dart';
+import 'ink_patch.dart';
 import 'network_patch.dart';
 import 'r8_patch.dart';
+import 'secure_store_patch.dart';
 
 const _desugarVersion = '2.1.4';
 
@@ -42,8 +49,37 @@ void main() {
   _patchRootGradle();
   _copyLauncherIcons();
   _patchGenAi(kts, groovy);
+  _patchInk(kts, groovy);
+  _patchInkOverlay();
+  _patchHealth(kts, groovy, manifest);
+  _patchSecureStore();
   _patchR8(kts, groovy);
+  _patchGece(kts, groovy);
+  _patchAbi(kts, groovy);
   stdout.writeln('Android ayarları tamam.');
+}
+
+/// Deneme (debug) sürümü: ".gece" kimliği ve "Koçum (deneme)" adı; release aynı.
+void _patchGece(File kts, File groovy) {
+  try {
+    if (kts.existsSync()) {
+      kts.writeAsStringSync(patchGeceKts(kts.readAsStringSync()));
+    } else if (groovy.existsSync()) {
+      groovy.writeAsStringSync(patchGeceGroovy(groovy.readAsStringSync()));
+    }
+  } on GeceYamaHatasi catch (e) {
+    stderr.writeln('Deneme sürümü yaması yapılamadı: $e');
+    exit(1);
+  }
+}
+
+/// APK boyutu: yalnız arm64-v8a (tool/abi_patch.dart).
+void _patchAbi(File kts, File groovy) {
+  if (kts.existsSync()) {
+    kts.writeAsStringSync(patchAbiKts(kts.readAsStringSync()));
+  } else if (groovy.existsSync()) {
+    groovy.writeAsStringSync(patchAbiGroovy(groovy.readAsStringSync()));
+  }
 }
 
 /// R8: ML Kit'in kullanılmayan dil okuyucuları için uyarılar kapatılır.
@@ -74,6 +110,84 @@ void _patchGenAi(File kts, File groovy) {
     return;
   }
   activity.writeAsStringSync(genAiMainActivity(pkg));
+}
+
+/// Sağlık verisi (Health Connect, salt okuma): bağımlılık, izinler, Kotlin kanalı.
+/// _patchGenAi'den SONRA çalışmalı (MainActivity'yi o yeniden yazar).
+void _patchHealth(File kts, File groovy, File manifest) {
+  if (kts.existsSync()) {
+    kts.writeAsStringSync(patchHealthKts(kts.readAsStringSync()));
+  } else if (groovy.existsSync()) {
+    groovy.writeAsStringSync(patchHealthGroovy(groovy.readAsStringSync()));
+  }
+  manifest.writeAsStringSync(patchHealthManifest(manifest.readAsStringSync()));
+  final root = Directory('android/app/src/main/kotlin');
+  final activity = root.existsSync()
+      ? root.listSync(recursive: true).whereType<File>().where((f) => f.path.endsWith('MainActivity.kt')).firstOrNull
+      : null;
+  final pkg = activity == null ? null : packageOf(activity.readAsStringSync());
+  if (activity == null || pkg == null) {
+    stderr.writeln('Uyarı: MainActivity.kt bulunamadı; sağlık kanalı eklenmedi.');
+    return;
+  }
+  File('${activity.parent.path}/KocumHealth.kt').writeAsStringSync(healthKotlin(pkg));
+  activity.writeAsStringSync(patchHealthMainActivity(activity.readAsStringSync()));
+}
+
+/// Claude API anahtarı için Keystore korumalı depo (kanal kocum/secure).
+/// _patchGenAi'den SONRA çalışmalı (MainActivity'yi o yeniden yazar).
+void _patchSecureStore() {
+  final root = Directory('android/app/src/main/kotlin');
+  final activity = root.existsSync()
+      ? root.listSync(recursive: true).whereType<File>().where((f) => f.path.endsWith('MainActivity.kt')).firstOrNull
+      : null;
+  final pkg = activity == null ? null : packageOf(activity.readAsStringSync());
+  if (activity == null || pkg == null) {
+    stderr.writeln('Uyarı: MainActivity.kt bulunamadı; güvenli depo eklenmedi.');
+    return;
+  }
+  File('${activity.parent.path}/KocumSecure.kt').writeAsStringSync(secureKotlin(pkg));
+  activity.writeAsStringSync(patchSecureMainActivity(activity.readAsStringSync()));
+}
+
+/// Kalem yüzeyi (Jetpack Ink): bağımlılıklar, Kotlin dosyası, MainActivity kaydı.
+/// _patchGenAi'den SONRA çalışmalı (MainActivity'yi o yeniden yazar).
+/// R8 kuralı _patchR8 içinde değil burada: proguard-rules.pro'ya eklenir.
+void _patchInk(File kts, File groovy) {
+  if (kts.existsSync()) {
+    kts.writeAsStringSync(patchInkKts(kts.readAsStringSync()));
+  } else if (groovy.existsSync()) {
+    groovy.writeAsStringSync(patchInkGroovy(groovy.readAsStringSync()));
+  }
+  final rules = File('android/app/proguard-rules.pro');
+  rules.writeAsStringSync(patchInkProguard(rules.existsSync() ? rules.readAsStringSync() : null));
+  final root = Directory('android/app/src/main/kotlin');
+  final activity = root.existsSync()
+      ? root.listSync(recursive: true).whereType<File>().where((f) => f.path.endsWith('MainActivity.kt')).firstOrNull
+      : null;
+  final pkg = activity == null ? null : packageOf(activity.readAsStringSync());
+  if (activity == null || pkg == null) {
+    stderr.writeln('Uyarı: MainActivity.kt bulunamadı; kalem yüzeyi eklenmedi.');
+    return;
+  }
+  activity.writeAsStringSync(patchInkMainActivity(activity.readAsStringSync()));
+  File('${activity.parent.path}/KocumInk.kt').writeAsStringSync(inkKotlin(pkg));
+}
+
+/// Ink katmanı (FlutterView üstünde tam pencere yerel çizim katmanı): Kotlin dosyası ve
+/// MainActivity bağlaması. Bağımlılıklar _patchInk'te. _patchGenAi ve _patchInk'ten SONRA çalışmalı.
+void _patchInkOverlay() {
+  final root = Directory('android/app/src/main/kotlin');
+  final activity = root.existsSync()
+      ? root.listSync(recursive: true).whereType<File>().where((f) => f.path.endsWith('MainActivity.kt')).firstOrNull
+      : null;
+  final pkg = activity == null ? null : packageOf(activity.readAsStringSync());
+  if (activity == null || pkg == null) {
+    stderr.writeln('Uyarı: MainActivity.kt bulunamadı; Ink katmanı eklenmedi.');
+    return;
+  }
+  File('${activity.parent.path}/KocumInkOverlay.kt').writeAsStringSync(inkOverlayKotlin(pkg));
+  activity.writeAsStringSync(patchInkOverlayMainActivity(activity.readAsStringSync()));
 }
 
 /// Koçum simgesi: tool/android_icon/res altındakiler (tool/make_icon.py ile
@@ -132,7 +246,8 @@ void _patchManifest(File file) {
     RegExp(r'\s*<activity\s+android:name="com\.yalantis\.ucrop\.UCropActivity"[^>]*/>'),
     '',
   );
-  s = s.replaceFirst(RegExp(r'android:label="[^"]*"'), 'android:label="Koçum"');
+  // Ad yer tutucudur: release "Koçum", debug "Koçum (deneme)" (tool/gece_patch.dart).
+  s = patchGeceManifest(s);
   // Kamera eklentisinin eklediği mikrofon izni (ses kaydı yok).
   s = removeAudioPermission(s);
   // Kablosuz aktarım: yalnızca yerel ağdaki eşleşmiş bilgisayara.

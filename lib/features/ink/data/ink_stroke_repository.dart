@@ -1,0 +1,315 @@
+import 'package:drift/drift.dart';
+
+import '../../../core/database/app_database.dart';
+import '../../../core/utils/id_generator.dart';
+import '../domain/ink_stroke_record.dart';
+import '../domain/stroke_codec.dart';
+
+/// [InkStrokeRepository.updatePoints]: kimliği veritabanında olmayan çizgi (kalıcı durum).
+class MissingStrokeError extends StateError {
+  MissingStrokeError(String id) : super('Çizgi yok: $id');
+}
+
+/// Çizgi deposu (T2). Silme yumuşaktır: satır kalır, `deleted` işaretlenir.
+class InkStrokeRepository {
+  InkStrokeRepository(this._db, {IdGenerator ids = const UuidV7Generator(), DateTime Function()? clock})
+    : _ids = ids,
+      _clock = clock ?? DateTime.now;
+
+  final AppDatabase _db;
+  final IdGenerator _ids;
+  final DateTime Function() _clock;
+
+  /// Çizgiyi ekler, kimliğini döner. Süre verilmezse noktalardan hesaplanır.
+  Future<String> add({
+    required StrokeOwner owner,
+    required List<StrokePoint> points,
+    required int startedAtMs,
+    int layer = 0,
+    int attemptNo = 0,
+    String? questionId,
+    String tool = 'pen',
+    int color = 0xFF000000,
+    double width = 1.0,
+    int? durationMs,
+    String? tag,
+  }) async {
+    final id = _ids.next();
+    final now = _clock();
+    await _db
+        .into(_db.inkStrokes)
+        .insert(
+          InkStrokesCompanion.insert(
+            id: id,
+            pdfDocumentId: Value(owner is PdfPageOwner ? owner.documentId : null),
+            pdfPage: Value(owner is PdfPageOwner ? owner.page : null),
+            noteId: Value(owner is NotePageOwner ? owner.noteId : tag),
+            notePage: Value(owner is NotePageOwner ? owner.page : null),
+            layer: Value(layer),
+            attemptNo: Value(attemptNo),
+            questionId: Value(questionId),
+            tool: Value(tool),
+            color: Value(color),
+            width: Value(width),
+            startedAtMs: startedAtMs,
+            durationMs: Value(durationMs ?? StrokeCodec.durationOf(points)),
+            points: StrokeCodec.encode(points),
+            pointCount: Value(points.length),
+            createdAt: now,
+            updatedAt: now,
+          ),
+        );
+    return id;
+  }
+
+  /// Alan silgisi: [deleteIds] yumuşak silinir, [adds] eklenir; TEK işlemde (ya hep ya hiç,
+  /// bu yüzden yeniden deneme güvenli). Eklenenlerin kimlikleri sırayla döner.
+  Future<List<String>> replace({required Iterable<String> deleteIds, required List<NewStroke> adds}) async =>
+      (await replaceDetailed(deleteIds: deleteIds, adds: adds)).added;
+
+  /// [replace] + [archive]: kaydı hiç yazılmamış özgün çizgiler önce eklenir, aynı işlemde
+  /// hemen yumuşak silinir (geri al onları da geri getirebilsin). Kimlikler sırayla döner.
+  Future<({List<String> added, List<String> archived})> replaceDetailed({
+    required Iterable<String> deleteIds,
+    required List<NewStroke> adds,
+    List<NewStroke> archive = const [],
+  }) => _db.transaction(() async {
+    Future<String> put(NewStroke a) => add(
+      owner: a.owner,
+      points: a.points,
+      startedAtMs: a.startedAtMs,
+      layer: a.layer,
+      tag: a.tag,
+      attemptNo: a.attemptNo,
+      questionId: a.questionId,
+      tool: a.tool,
+      color: a.color,
+      width: a.width,
+    );
+    final archived = <String>[];
+    for (final a in archive) {
+      archived.add(await put(a));
+    }
+    final added = <String>[];
+    for (final a in adds) {
+      added.add(await put(a));
+    }
+    await softDeleteMany([...deleteIds, ...archived]);
+    return (added: added, archived: archived);
+  });
+
+  /// Kement taşıma/boyutlandırma/döndürme: çizgilerin NOKTALARI yerinde yeniden yazılır
+  /// (aynı kimlik, aynı satır); tek işlem, ya hep ya hiç (yeniden deneme güvenli).
+  ///
+  /// Neden yerinde güncelleme (yumuşak sil + yeni satır değil): (1) her taşıma BLOB'u
+  /// ikiye katlamaz, defter şişmez; (2) kimlik değişmez, geri al kayıtları, soru bağı
+  /// ve defterin senkron satırı tutarlı kalır; (3) tek satırlık UPDATE atomiktir.
+  /// Bedel: özgün noktalar veritabanında kalmaz; geri al için bellekteki eylem
+  /// ([InkAction.before]) taşır. Eşleşmeyen kimlik varsa işlem geri sarılır (StateError).
+  Future<void> updatePoints(Map<String, List<StrokePoint>> byId) => _db.transaction(() async {
+    final now = _clock();
+    for (final e in byId.entries) {
+      final n = await (_db.update(_db.inkStrokes)..where((s) => s.id.equals(e.key))).write(
+        InkStrokesCompanion(
+          points: Value(StrokeCodec.encode(e.value)),
+          pointCount: Value(e.value.length),
+          updatedAt: Value(now),
+        ),
+      );
+      if (n != 1) throw MissingStrokeError(e.key);
+    }
+  });
+
+  /// Geri al / yinele: [deleteIds] yumuşak silinir, [restoreIds] geri gelir; tek işlem.
+  Future<void> swap({required Iterable<String> deleteIds, required Iterable<String> restoreIds}) =>
+      _db.transaction(() async {
+        await softDeleteMany(deleteIds);
+        for (final id in restoreIds) {
+          await restore(id);
+        }
+      });
+
+  SimpleSelectStatement<$InkStrokesTable, InkStrokeRow> _query(
+    StrokeOwner owner, {
+    int? attemptNo,
+    int? layer,
+    String? questionId,
+    bool noQuestion = false,
+    String? tag,
+  }) {
+    return _db.select(_db.inkStrokes)
+      ..where((s) {
+        Expression<bool> w = s.deleted.equals(false);
+        w =
+            w &
+            switch (owner) {
+              PdfPageOwner o =>
+                s.pdfDocumentId.equals(o.documentId) &
+                    s.pdfPage.equals(o.page) &
+                    // `tag` (noteId sütunu): katman penceresi çizgileri ana okuyucuda görünmez.
+                    (tag == null ? s.noteId.isNull() : s.noteId.equals(tag)),
+              NotePageOwner o => s.noteId.equals(o.noteId) & s.notePage.equals(o.page),
+              QuestionImageOwner o =>
+                s.questionId.equals(o.questionId) & s.pdfDocumentId.isNull() & s.noteId.isNull(),
+            };
+        if (attemptNo != null) w = w & s.attemptNo.equals(attemptNo);
+        if (layer != null) w = w & s.layer.equals(layer);
+        if (questionId != null) w = w & s.questionId.equals(questionId);
+        if (noQuestion) w = w & s.questionId.isNull();
+        return w;
+      })
+      ..orderBy([(s) => OrderingTerm.asc(s.startedAtMs), (s) => OrderingTerm.asc(s.id)]);
+  }
+
+  /// Sayfadaki (silinmemiş) çizgiler, çizim sırasıyla.
+  ///
+  /// [questionId]: yalnızca o sorunun çözüm çizgileri; [noQuestion]: yalnızca
+  /// bir soruya bağlı OLMAYAN çizgiler (okuyucunun serbest çizgileri).
+  Future<List<InkStroke>> forPage(
+    StrokeOwner owner, {
+    int? attemptNo,
+    int? layer,
+    String? questionId,
+    bool noQuestion = false,
+    String? tag,
+  }) async => _decodeAll(
+    await _query(owner, attemptNo: attemptNo, layer: layer, questionId: questionId, noQuestion: noQuestion, tag: tag).get(),
+  );
+
+  Stream<List<InkStroke>> watchPage(
+    StrokeOwner owner, {
+    int? attemptNo,
+    int? layer,
+    String? questionId,
+    bool noQuestion = false,
+    String? tag,
+  }) => _query(
+    owner,
+    tag: tag,
+    attemptNo: attemptNo,
+    layer: layer,
+    questionId: questionId,
+    noQuestion: noQuestion,
+  ).watch().map(_decodeAll);
+
+  /// Sorunun (silinmemiş) çizgi zamanları, tüm denemeler; noktalar çözülmez.
+  Stream<List<StrokeTime>> watchSolveTimes(String questionId) {
+    final q = _db.selectOnly(_db.inkStrokes)
+      ..addColumns([_db.inkStrokes.attemptNo, _db.inkStrokes.startedAtMs, _db.inkStrokes.durationMs])
+      ..where(_db.inkStrokes.questionId.equals(questionId) & _db.inkStrokes.deleted.equals(false));
+    return q.watch().map(
+      (rows) => [
+        for (final r in rows)
+          StrokeTime(
+            attemptNo: r.read(_db.inkStrokes.attemptNo)!,
+            startedAtMs: r.read(_db.inkStrokes.startedAtMs)!,
+            durationMs: r.read(_db.inkStrokes.durationMs)!,
+          ),
+      ],
+    );
+  }
+
+  /// Tüm soruların (silinmemiş) çizgi zamanları, soru kimliğine göre; galeri işareti için.
+  Stream<Map<String, List<StrokeTime>>> watchAllSolveTimes() {
+    final t = _db.inkStrokes;
+    final q = _db.selectOnly(t)
+      ..addColumns([t.questionId, t.attemptNo, t.startedAtMs, t.durationMs])
+      ..where(t.questionId.isNotNull() & t.deleted.equals(false));
+    return q.watch().map((rows) {
+      final out = <String, List<StrokeTime>>{};
+      for (final r in rows) {
+        out
+            .putIfAbsent(r.read(t.questionId)!, () => [])
+            .add(StrokeTime(
+              attemptNo: r.read(t.attemptNo)!,
+              startedAtMs: r.read(t.startedAtMs)!,
+              durationMs: r.read(t.durationMs)!,
+            ));
+      }
+      return out;
+    });
+  }
+
+  final Set<String> _corruptIds = {};
+
+  /// Çözülemeyen (bozuk blob) çizgilerin kimlikleri. Satırlara dokunulmaz,
+  /// yalnızca listeden atlanır; kullanıcıya bildirmek çağıranın işidir.
+  Set<String> get corruptIds => Set.unmodifiable(_corruptIds);
+
+  List<InkStroke> _decodeAll(List<InkStrokeRow> rows) {
+    final out = <InkStroke>[];
+    for (final r in rows) {
+      try {
+        out.add(_toStroke(r));
+      } on FormatException {
+        _corruptIds.add(r.id);
+      }
+    }
+    return out;
+  }
+
+  /// Yumuşak silme; satır senkronla karşıya gider. Bulunamazsa false.
+  Future<bool> softDelete(String id) async => await softDeleteMany([id]) == 1;
+
+  Future<int> softDeleteMany(Iterable<String> ids) async {
+    final list = ids.toList();
+    if (list.isEmpty) return 0;
+    return (_db.update(_db.inkStrokes)..where((s) => s.id.isIn(list) & s.deleted.equals(false))).write(
+      InkStrokesCompanion(deleted: const Value(true), updatedAt: Value(_clock())),
+    );
+  }
+
+  /// Silinmiş çizgiyi geri getirir (geri al).
+  Future<bool> restore(String id) async =>
+      await (_db.update(_db.inkStrokes)..where((s) => s.id.equals(id) & s.deleted.equals(true))).write(
+        InkStrokesCompanion(deleted: const Value(false), updatedAt: Value(_clock())),
+      ) ==
+      1;
+
+  InkStroke _toStroke(InkStrokeRow r) => InkStroke(
+    id: r.id,
+    owner: r.pdfDocumentId != null
+        ? PdfPageOwner(r.pdfDocumentId!, r.pdfPage ?? 0)
+        : r.noteId == null && r.questionId != null
+        ? QuestionImageOwner(r.questionId!)
+        : NotePageOwner(r.noteId ?? '', r.notePage ?? 0),
+    points: StrokeCodec.decode(r.points),
+    startedAtMs: r.startedAtMs,
+    layer: r.layer,
+    attemptNo: r.attemptNo,
+    questionId: r.questionId,
+    tool: r.tool,
+    color: r.color,
+    width: r.width,
+    durationMs: r.durationMs,
+    deleted: r.deleted,
+  );
+}
+
+/// [InkStrokeRepository.replace] ile eklenecek yeni çizgi.
+class NewStroke {
+  const NewStroke({
+    required this.owner,
+    required this.points,
+    required this.startedAtMs,
+    this.layer = 0,
+    this.attemptNo = 0,
+    this.questionId,
+    this.tool = 'pen',
+    this.color = 0xFF000000,
+    this.width = 1.0,
+    this.tag,
+  });
+
+  /// PDF çizgisi için `noteId` sütununa yazılan ayırt edici (katman penceresi).
+  final String? tag;
+  final StrokeOwner owner;
+  final List<StrokePoint> points;
+  final int startedAtMs;
+  final int layer;
+  final int attemptNo;
+  final String? questionId;
+  final String tool;
+  final int color;
+  final double width;
+}

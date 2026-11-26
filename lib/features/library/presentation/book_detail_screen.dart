@@ -6,9 +6,13 @@ import '../../../app/routes.dart';
 import '../../../core/di/core_providers.dart';
 import '../../question_bank/domain/question_card.dart';
 import '../../question_bank/question_bank_providers.dart';
+import '../../pdf/domain/book_analysis.dart' show pdfPageRoute;
+import '../../pdf/domain/pdf_document_record.dart';
+import '../../pdf/pdf_providers.dart';
 import '../domain/library.dart';
 import '../domain/progress.dart';
 import '../library_providers.dart';
+import 'books_screen.dart' show pdfsByBook;
 import 'library_sheet.dart';
 import 'widgets/progress_widgets.dart';
 
@@ -49,6 +53,7 @@ class BookDetailScreen extends ConsumerWidget {
     final results = ref.watch(testResultsProvider).value ?? const <String, TestResult>{};
     final mistakes = ref.watch(_mistakesByNodeProvider(bookId)).value ?? const <String, int>{};
     final p = bookProgress(book, results);
+    final pdf = pdfsByBook(ref.watch(pdfDocumentsProvider).value ?? const <PdfDocumentRecord>[])[bookId];
 
     return Scaffold(
       appBar: AppBar(
@@ -98,6 +103,28 @@ class BookDetailScreen extends ConsumerWidget {
               ),
             ],
           ),
+          if (pdf != null) ...[
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                key: const Key('book-detail-open-pdf'),
+                onPressed: () => context.push(AppRoutes.pdfReader(pdf.id)),
+                icon: const Icon(Icons.picture_as_pdf_outlined),
+                label: const Text("PDF'te aç"),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                key: const Key('book-detail-open-pdf-analysis'),
+                onPressed: () => context.push(pdfPageRoute(pdf.id, analysis: true)),
+                icon: const Icon(Icons.fact_check_outlined),
+                label: const Text("PDF'te analiz modunda aç"),
+              ),
+            ),
+          ],
           const SizedBox(height: 20),
           Text('Kitap haritası', style: theme.textTheme.titleSmall),
           const SizedBox(height: 8),

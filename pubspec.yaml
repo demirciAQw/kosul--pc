@@ -1,10 +1,10 @@
 name: kocum
 description: "Koçum: YKS öğrencileri için tamamen çevrimdışı çalışma, süre ve hata analizi takipçisi."
 publish_to: 'none'
-version: 8.6.0+40
+version: 9.23.2+86
 
 environment:
-  sdk: ^3.8.0
+  sdk: ^3.14.0
 
 dependencies:
   flutter:
@@ -25,6 +25,9 @@ dependencies:
   path_provider: ^2.1.5
   path: ^1.9.0
 
+  # PDF motoru (MIT, PDFium): tablet PDF modu. Arayüz domain'de, uygulama data'da.
+  pdfrx: ^3.1.0
+
   # Fotoğraf: çekim/seçim + otomatik sıkıştırma (WebP).
   # Kırpma/döndürme uygulamanın kendi ekranında (lib/core/media/crop_screen.dart).
   image_picker: ^1.1.2
@@ -42,6 +45,9 @@ dependencies:
   flutter_local_notifications: ^19.0.0
   # Fotoğraftaki metni telefonda okuma (Latin modeli gömülü, internetsiz)
   google_mlkit_text_recognition: ^0.15.0
+  # El yazısı tanıma (kalem çizgileri -> metin). MIT. Türkçe model ilk kullanımda
+  # indirilir (~20 MB), APK'ya gömülmez. Yalnız Android; masaüstünde çağrılmaz.
+  google_mlkit_digital_ink_recognition: ^0.14.0
   # Zamanlanmış hatırlatıcılar için (flutter_local_notifications da bunu kullanır)
   timezone: any
 
@@ -50,6 +56,9 @@ dependencies:
   # Kablosuz aktarımda imza (HMAC-SHA256) ve özet (SHA-256). dart.dev'in
   # paketi; uuid zaten buna bağlı olduğu için uygulamaya yeni kod girmez.
   crypto: ^3.0.3
+  desktop_drop: ^0.8.4
+  perfect_freehand: ^2.5.2+1 # MIT; kalem çizgisi şekli (features/ink)
+  pointycastle: ^4.0.0 # MIT; ChaCha20-Poly1305 (kablosuz aktarım şifrelemesi, saf Dart)
 
 dev_dependencies:
   flutter_test:

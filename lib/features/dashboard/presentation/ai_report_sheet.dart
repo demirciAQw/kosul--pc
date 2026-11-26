@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../health/health_providers.dart';
 import '../../../core/di/core_providers.dart';
 import '../../../core/export/zip_writer.dart';
 import '../../curriculum/curriculum_providers.dart';
@@ -21,6 +22,7 @@ import '../dashboard_providers.dart';
 import '../domain/ai_report.dart';
 import '../../ocr/ocr_providers.dart';
 import '../../ocr/auto_tag_providers.dart';
+import '../../claude_api/presentation/claude_reply_sheet.dart';
 
 /// "Yapay zekâ raporu": istatistikleri ve yanlışları bir yapay zekâ sohbetine
 /// (Claude, ChatGPT…) yapıştırılacak metne çevirir. API anahtarı gerekmez.
@@ -55,6 +57,7 @@ class _AiReportSheetState extends ConsumerState<_AiReportSheet> {
         questionTexts: ocrQuestionTextsWithFigures(ref.read(ocrRecordsProvider).value ?? const {},
             tags: ref.read(autoTagsProvider)),
         stems: ref.read(stemReportProvider),
+        healthSection: ref.read(healthReportSectionProvider).value,
       );
 
   Future<void> _copy() async {
@@ -66,6 +69,12 @@ class _AiReportSheetState extends ConsumerState<_AiReportSheet> {
     messenger.showSnackBar(const SnackBar(
       content: Text('Rapor kopyalandı. Yapay zekâ sohbetine yapıştır.'),
     ));
+  }
+
+  /// Raporun AYNI metni önizlenir, açık onaydan sonra Claude'a gönderilir.
+  Future<void> _sendToClaude() async {
+    final text = _build().markdown;
+    await sendReportToClaude(context, ref, text);
   }
 
   Future<void> _share() async {
@@ -107,6 +116,7 @@ class _AiReportSheetState extends ConsumerState<_AiReportSheet> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    ref.watch(healthReportSectionProvider); // ayar açıksa özet hazır olsun
     final cards = ref.watch(allQuestionsProvider).value ?? const <QuestionCard>[];
     final subjects = {for (final c in cards) c.subject}.toList()..sort();
     final preview = _build();
@@ -202,6 +212,16 @@ class _AiReportSheetState extends ConsumerState<_AiReportSheet> {
               ),
             ),
           ],
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.tonalIcon(
+            key: const Key('claude-send'),
+            onPressed: _busy ? null : _sendToClaude,
+            icon: const Icon(Icons.auto_awesome_rounded),
+            label: const Text('Claude\'a gönder'),
+          ),
         ),
       ],
     );

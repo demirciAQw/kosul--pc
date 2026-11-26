@@ -3,6 +3,20 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/utils/formatters.dart';
 import '../desktop_providers.dart';
+import '../today/today_page.dart';
+import '../anlik/notes_page.dart';
+import '../anlik/people_page.dart';
+import '../../features/ledger/presentation/ledger_views.dart';
+import '../analysis/analysis_page.dart';
+import '../entry/books_page.dart';
+import '../entry/exams_page.dart';
+import '../entry/optic_page.dart';
+import '../entry/plans_page.dart';
+import '../entry/sessions_page.dart';
+import '../../features/notes/presentation/ink_notebook_screen.dart';
+import '../../features/notes/presentation/notebooks_screen.dart';
+import '../../features/pdf/presentation/pdf_library_page.dart';
+import '../../features/pdf/presentation/pdf_reader_page.dart';
 import '../import/import_providers.dart';
 import '../import/presentation/auto_import.dart';
 import '../import/presentation/import_flow.dart';
@@ -21,6 +35,8 @@ class DesktopShell extends ConsumerWidget {
     // İzlenen klasör ve (açıksa) kablosuz alma uygulama açıldığı andan
     // itibaren dinlenir.
     ref.watch(autoImportProvider);
+    // Başka bir süreç (kocum aracı) veriyi değiştirirse ekranlar yenilenir.
+    ref.watch(externalChangeWatcherProvider);
     // Kablosuz almanın her olayında (ör. her fotoğraf) kabuk yeniden
     // çizilmesin: yalnızca canlı tutulur.
     ref.listen(wirelessProvider, (previous, next) {});
@@ -68,13 +84,41 @@ class DesktopShell extends ConsumerWidget {
 }
 
 Widget _page(DesktopSection section) => switch (section) {
+      DesktopSection.today => const DesktopTodayPage(),
       DesktopSection.notebook => const NotebookPage(),
-      DesktopSection.books => DesktopPlaceholder(title: section.label, icon: section.icon),
-      DesktopSection.exams => DesktopPlaceholder(title: section.label, icon: section.icon),
-      DesktopSection.sessions => DesktopPlaceholder(title: section.label, icon: section.icon),
-      DesktopSection.analysis => DesktopPlaceholder(title: section.label, icon: section.icon),
-      DesktopSection.plans => DesktopPlaceholder(title: section.label, icon: section.icon),
-      DesktopSection.notes => DesktopPlaceholder(title: section.label, icon: section.icon),
+      DesktopSection.books => const DesktopBooksPage(),
+      DesktopSection.optic => const DesktopOpticPage(),
+      DesktopSection.exams => const DesktopExamsPage(),
+      DesktopSection.sessions => const DesktopSessionsPage(),
+      DesktopSection.analysis => const DesktopAnalysisPage(),
+      DesktopSection.plans => const DesktopPlansPage(),
+      DesktopSection.notes => const DesktopNotesPage(),
+      DesktopSection.people => const DesktopPeoplePage(),
+      DesktopSection.tags => const DesktopTagsPage(),
+      DesktopSection.changes => const DesktopPage(title: 'Claude\'un değişiklikleri', subtitle: 'Oturum oturum; geri alınabilir', child: ClaudeChangesView()),
+      DesktopSection.conflicts => const DesktopPage(title: 'Çakışmalar', subtitle: 'Telefonla bilgisayarın ikisinde de değişen satırlar', child: ConflictsView()),
+      DesktopSection.pdf => DesktopPage(
+          title: 'PDF\'ler',
+          subtitle: 'İçe aktar, oku, kalemle yaz',
+          child: Builder(
+            builder: (context) => PdfLibraryPage(
+              embedded: true,
+              onOpen: (context, d) => Navigator.of(context)
+                  .push(MaterialPageRoute<void>(builder: (_) => PdfReaderPage(documentId: d.id))),
+            ),
+          ),
+        ),
+      DesktopSection.notebooks => DesktopPage(
+          title: 'Defterler',
+          subtitle: 'Kalemli defterler ve sayfalar',
+          child: Builder(
+            builder: (context) => NotebooksScreen(
+              embedded: true,
+              onOpen: (context, n) => Navigator.of(context)
+                  .push(MaterialPageRoute<void>(builder: (_) => InkNotebookScreen(notebookId: n.id))),
+            ),
+          ),
+        ),
       DesktopSection.settings => const DesktopSettingsPage(),
     };
 

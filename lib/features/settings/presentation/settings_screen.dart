@@ -1,11 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../app/palette.dart';
+import '../../../app/platform.dart';
+import '../../../app/routes.dart';
 import '../../../app/widgets/tone_icon.dart';
+import '../../handwriting/presentation/handwriting_settings_card.dart';
+import '../../claude_api/presentation/claude_api_card.dart';
+import '../../health/presentation/health_settings_card.dart';
 import '../../ocr/data/genai_describer.dart';
 import '../../ocr/ocr_providers.dart';
 import '../domain/settings.dart';
+import '../../welcome/welcome_providers.dart';
 import '../settings_providers.dart';
 
 /// Ayarlar: hatırlatıcılar ve görünüm.
@@ -60,6 +67,59 @@ class _SettingsBody extends ConsumerWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
       children: [
+        _Section('Araçlar'),
+        Card(
+          child: ListTile(
+            key: const Key('settings-tools'),
+            leading: ToneIcon(Icons.handyman_outlined, color: KocumColors.blue),
+            title: const Text('Araçlar'),
+            subtitle: const Text('Dışa aktarma, Claude paketleri, test oluşturma, bilgisayarla eşitleme, Claude\'un değişiklikleri'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => context.push(AppRoutes.tools),
+          ),
+        ),
+        // Kalem denemesi yalnızca Android'de (tablet kalem gecikmesi ölçümü).
+        if (isAndroid)
+          Card(
+            child: ListTile(
+              key: const Key('settings-ink-lab'),
+              leading: ToneIcon(Icons.edit_outlined, color: KocumColors.blue),
+              title: const Text('Kalem denemesi (tablet için)'),
+              subtitle: const Text('Kalem gecikmesini karşılaştır (A / B)'),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => context.push(AppRoutes.inkLab),
+            ),
+          ),
+        // El yazısı tanıma (ML Kit modeli indirme/silme) yalnızca Android'de.
+        if (isAndroid) const HandwritingSettingsCard(),
+        // Claude API (anahtar yalnız Android Keystore / Linux 0600 dosyası).
+        if (isAndroid || isLinuxDesktop) const ClaudeApiCard(),
+        // Sağlık verisi (Health Connect, Huawei ZIP) yalnızca Android'de.
+        if (isAndroid) const HealthSettingsCard(),
+        // PDF kitaplığı ve okuyucu yalnızca Android'de (tablet için).
+        if (isAndroid)
+          Card(
+            child: ListTile(
+              key: const Key('settings-pdf'),
+              leading: ToneIcon(Icons.picture_as_pdf_outlined, color: KocumColors.blue),
+              title: const Text('PDF\'ler (tablet için)'),
+              subtitle: const Text('PDF ekle, oku, kalemle yaz'),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => context.push(AppRoutes.pdfLibrary),
+            ),
+          ),
+        // Telefonda kalemli defter anlamsız: yalnız kısa kenarı 600dp ve üstü ekranlarda (tablet).
+        if (isAndroid && MediaQuery.sizeOf(context).shortestSide >= 600)
+          Card(
+            child: ListTile(
+              key: const Key('settings-notebooks'),
+              leading: ToneIcon(Icons.draw_outlined, color: KocumColors.blue),
+              title: const Text('Defterler (tablet için)'),
+              subtitle: const Text('Kalemle yazılan defterler ve sayfalar'),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => context.push(AppRoutes.notebooks),
+            ),
+          ),
         _Section('Hatırlatıcılar'),
         Card(
           child: Column(
@@ -200,7 +260,18 @@ class _SettingsBody extends ConsumerWidget {
               child: Image.asset('assets/icon/logo.png', width: 36, height: 36),
             ),
             title: const Text('Koçum'),
-            subtitle: const Text('Sürüm 6.5. Tüm veriler bu telefonda saklanır.'),
+            subtitle: const Text('Tüm veriler bu telefonda saklanır.'),
+          ),
+        ),
+        Card(
+          child: ListTile(
+            key: const Key('settings-welcome'),
+            leading: const Icon(Icons.waving_hand_outlined),
+            title: const Text('Hoş geldin ekranını tekrar göster'),
+            onTap: () {
+              context.go(AppRoutes.home);
+              ref.read(welcomeSeenProvider.notifier).reset();
+            },
           ),
         ),
       ],

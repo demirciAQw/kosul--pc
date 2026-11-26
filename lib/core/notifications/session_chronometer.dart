@@ -14,21 +14,24 @@ class SessionChronometer {
   final FlutterLocalNotificationsPlugin _plugin;
   static const _notificationId = 4207;
 
-  Future<void> init() async {
-    const settings = InitializationSettings(
-      android: AndroidInitializationSettings('@mipmap/ic_launcher'),
-    );
-    await _plugin.initialize(settings);
-  }
+  Future<void>? _ready;
+
+  /// Eklenti kurulumu bir kez yapılır; açılışı yavaşlatmamak için ilk kareden
+  /// sonra başlatılır, kullanım öncesi de beklenir.
+  Future<void> init() => _ready ??= _plugin.initialize(const InitializationSettings(
+        android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+      ));
 
   /// Android 13+ çalışma zamanı izni. Reddedilse bile sayaç doğru çalışır.
   Future<bool> requestPermission() async {
+    await init();
     final android = _plugin
         .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
     return await android?.requestNotificationsPermission() ?? true;
   }
 
-  Future<void> show({required DateTime startedAt, required int itemCount}) {
+  Future<void> show({required DateTime startedAt, required int itemCount}) async {
+    await init();
     final android = AndroidNotificationDetails(
       'study_session',
       'Çalışma oturumu',
@@ -52,5 +55,8 @@ class SessionChronometer {
     );
   }
 
-  Future<void> hide() => _plugin.cancel(_notificationId);
+  Future<void> hide() async {
+    await init();
+    await _plugin.cancel(_notificationId);
+  }
 }

@@ -1,3 +1,4 @@
+import '../../../anlik/presentation/widgets/card_links.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -7,9 +8,11 @@ import '../../../../core/text/turkish_text.dart';
 import '../../../../core/utils/formatters.dart';
 import '../../../curriculum/curriculum_providers.dart';
 import '../../../curriculum/domain/curriculum.dart';
+import '../../../pdf/presentation/solve_time_section.dart';
 import '../../domain/question_card.dart';
 import '../../question_bank_providers.dart';
 import '../widgets/media_image.dart';
+import '../widgets/question_actions.dart';
 import '../../../../app/palette.dart';
 import '../../../settings/settings_providers.dart';
 import '../../../ocr/ocr_providers.dart';
@@ -61,16 +64,8 @@ class _QuestionDetailScreenState extends ConsumerState<QuestionDetailScreen> {
               color: card.isStarred ? KocumColors.star : null,
             ),
           ),
-          IconButton(
-            tooltip: 'Düzenle',
-            onPressed: () => context.push(AppRoutes.editQuestion(card.id)),
-            icon: const Icon(Icons.edit_outlined),
-          ),
-          PopupMenuButton<String>(
-            onSelected: (_) => _confirmDelete(card),
-            itemBuilder: (context) => const [PopupMenuItem(value: 'delete', child: Text('Soruyu sil'))],
-          ),
         ],
+        bottom: QuestionActionBar(card: card, keyPrefix: 'detail', onAction: (a) => _onAction(card, a)),
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
@@ -111,6 +106,9 @@ class _QuestionDetailScreenState extends ConsumerState<QuestionDetailScreen> {
               meta(formatShortDate(card.createdAt)),
             ],
           ),
+          const SizedBox(height: 12),
+          CardTagsSection(cardId: card.id),
+          SolveTimeSection(questionId: card.id),
           const SizedBox(height: 16),
           if (!card.hasSolution)
             OutlinedButton.icon(
@@ -162,22 +160,20 @@ class _QuestionDetailScreenState extends ConsumerState<QuestionDetailScreen> {
     );
   }
 
-  Future<void> _confirmDelete(QuestionCard card) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (dialog) => AlertDialog(
-        title: const Text('Soruyu sil?'),
-        content: const Text('Soru, çözümü ve fotoğrafları kalıcı olarak silinir.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialog, false), child: const Text('Vazgeç')),
-          FilledButton(onPressed: () => Navigator.pop(dialog, true), child: const Text('Sil')),
-        ],
-      ),
-    );
-    if (ok != true || !mounted) return;
+  Future<void> _onAction(QuestionCard card, QuestionAction action) async {
     final router = GoRouter.of(context);
-    await ref.read(deleteQuestionCardProvider).call(card.id);
-    if (router.canPop()) router.pop();
+    final deleted = await performQuestionAction(context, ref, card, action);
+    if (!mounted) return;
+    if (action == QuestionAction.select) {
+      final n = ref.read(questionSelectionProvider).length;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(
+          content: Text(n == 0 ? 'Seçim kalktı.' : '$n soru seçili. Defterde devam edebilirsin.'),
+          duration: const Duration(seconds: 2),
+        ));
+    }
+    if (deleted && router.canPop()) router.pop();
   }
 }
 

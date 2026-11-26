@@ -3,13 +3,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../app/routes.dart';
-import '../../../core/di/core_providers.dart';
-import '../../../core/utils/formatters.dart';
+import '../../pdf/domain/pdf_document_record.dart';
+import '../../pdf/pdf_providers.dart';
 import '../domain/library.dart';
 import '../domain/progress.dart';
 import '../library_providers.dart';
 import 'library_sheet.dart';
+import 'widgets/book_shelf_view.dart';
 import 'widgets/progress_widgets.dart';
+import '../../../app/widgets/home_logo_button.dart';
 
 /// Kitaplar sekmesi: her kitabın ne kadarı bitti, ne kadarı duruyor.
 /// Kitap kategorisi: sınav türüne ve yayıncıya göre üç sekme.
@@ -28,6 +30,16 @@ enum BookShelf {
   }
 }
 
+/// Kitaba bağlı PDF'ler. İki PDF aynı kitaba bağlıysa liste sırasındaki İLK
+/// (başlığa göre; kitap ayrıntısı ve raf aynı kuralı kullanır).
+Map<String, PdfDocumentRecord> pdfsByBook(Iterable<PdfDocumentRecord> docs) {
+  final out = <String, PdfDocumentRecord>{};
+  for (final d in docs) {
+    if (d.bookId != null) out.putIfAbsent(d.bookId!, () => d);
+  }
+  return out;
+}
+
 /// Kitaplar sekmesi: TYT, AYT ve MEB kitapları ayrı sekmelerde; her kitabın ne
 /// kadarı bitti, ne kadarı duruyor.
 class BooksScreen extends ConsumerWidget {
@@ -37,12 +49,16 @@ class BooksScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final progress = ref.watch(bookProgressProvider);
     final all = progress.value ?? const <BookProgress>[];
+    // Kitaba bağlı PDF'ler (kapakta rozet, uzun basınca "PDF'te aç").
+    final pdfs = pdfsByBook(ref.watch(pdfDocumentsProvider).value ?? const <PdfDocumentRecord>[]);
     int count(BookShelf s) => all.where((p) => BookShelf.of(p.book) == s).length;
 
     return DefaultTabController(
       length: BookShelf.values.length,
       child: Scaffold(
         appBar: AppBar(
+          leading: const HomeLogoButton(),
+          leadingWidth: HomeLogoButton.width,
           title: const Text('Kitaplarım'),
           bottom: TabBar(
             tabs: [
@@ -63,7 +79,11 @@ class BooksScreen extends ConsumerWidget {
           data: (list) => TabBarView(
             children: [
               for (final shelf in BookShelf.values)
-                _ShelfView(shelf: shelf, items: [for (final p in list) if (BookShelf.of(p.book) == shelf) p]),
+                _ShelfView(
+                  shelf: shelf,
+                  pdfs: pdfs,
+                  items: [for (final p in list) if (BookShelf.of(p.book) == shelf) p],
+                ),
             ],
           ),
         ),
@@ -73,24 +93,63 @@ class BooksScreen extends ConsumerWidget {
 }
 
 class _ShelfView extends StatelessWidget {
-  const _ShelfView({required this.shelf, required this.items});
+  const _ShelfView({required this.shelf, required this.items, required this.pdfs});
   final BookShelf shelf;
   final List<BookProgress> items;
+
+  /// Kitap kimliği → bağlı PDF.
+  final Map<String, PdfDocumentRecord> pdfs;
 
   @override
   Widget build(BuildContext context) {
     if (items.isEmpty) return _EmptyBooks(shelf: shelf);
     final done = items.fold<int>(0, (a, p) => a + p.doneLeaves);
     final total = items.fold<int>(0, (a, p) => a + p.totalLeaves);
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
-      children: [
-        _Overview(done: done, total: total, books: items.length),
-        const SizedBox(height: 12),
-        for (final p in items) _BookCard(progress: p),
-      ],
+    return BookShelfView(
+      items: items,
+      onOpen: (book) => context.push(AppRoutes.book(book.id)),
+      pdfBookIds: pdfs.keys.toSet(),
+      pdfShaByBook: {for (final e in pdfs.entries) e.key: e.value.sha256},
+      onLongPress: (book) {
+        final pdf = pdfs[book.id];
+        if (pdf != null) _showBookSheet(context, book, pdf);
+      },
+      header: _Overview(done: done, total: total, books: items.length),
     );
   }
+}
+
+/// Kapağa uzun basınca: kitabı ya da bağlı PDF'i aç.
+Future<void> _showBookSheet(BuildContext context, Book book, PdfDocumentRecord pdf) {
+  return showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    builder: (sheet) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(title: Text(book.title, maxLines: 2, overflow: TextOverflow.ellipsis)),
+          ListTile(
+            key: const Key('book-open-pdf'),
+            leading: const Icon(Icons.picture_as_pdf_outlined),
+            title: const Text("PDF'te aç"),
+            onTap: () {
+              Navigator.pop(sheet);
+              context.push(AppRoutes.pdfReader(pdf.id));
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.menu_book_outlined),
+            title: const Text('Kitabı aç'),
+            onTap: () {
+              Navigator.pop(sheet);
+              context.push(AppRoutes.book(book.id));
+            },
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 class _Overview extends StatelessWidget {
@@ -121,69 +180,6 @@ class _Overview extends StatelessWidget {
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _BookCard extends ConsumerWidget {
-  const _BookCard({required this.progress});
-  final BookProgress progress;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final p = progress;
-    final b = p.book;
-    final now = ref.watch(clockProvider)();
-    final last = p.lastSolvedAt;
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: () => context.push(AppRoutes.book(b.id)),
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Row(
-            children: [
-              ProgressRing(value: p.ratio),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(b.title, style: theme.textTheme.titleMedium, maxLines: 2, overflow: TextOverflow.ellipsis),
-                    Text(
-                      [b.examType, b.subject, if (b.publisher != null) b.publisher!].join(', '),
-                      style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      '${p.doneLeaves}/${p.totalLeaves} ${p.unitName} bitti, ${p.remainingLeaves} duruyor',
-                      style: theme.textTheme.bodyMedium,
-                    ),
-                    if (p.answered > 0) ...[
-                      const SizedBox(height: 6),
-                      ResultBar(correct: p.correct, wrong: p.wrong, blank: p.blank, height: 6),
-                      const SizedBox(height: 4),
-                      Text(
-                        '${p.correct} D, ${p.wrong} Y, ${p.blank} B'
-                        '${p.accuracy == null ? '' : ', başarı %${(p.accuracy! * 100).round()}'}',
-                        style: theme.textTheme.labelSmall,
-                      ),
-                    ],
-                    if (last != null)
-                      Text(
-                        'Son çalışma: ${formatRelativeDay(last, now)}',
-                        style: theme.textTheme.labelSmall?.copyWith(color: scheme.onSurfaceVariant),
-                      ),
-                  ],
-                ),
-              ),
-              const Icon(Icons.chevron_right_rounded),
-            ],
-          ),
         ),
       ),
     );
