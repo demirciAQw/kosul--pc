@@ -5,6 +5,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:kocum/features/notes/data/note_view_mode_store.dart';
 import 'package:kocum/features/notes/presentation/note_tool_settings.dart';
 import 'package:kocum/core/database/app_database.dart';
 import 'package:kocum/core/di/core_providers.dart';
@@ -110,7 +111,10 @@ Offset _view(WidgetTester t, double x, double y) {
 List<Offset> _loop(Rect r) => [r.topLeft, r.topRight, r.bottomRight, r.bottomLeft, r.topLeft + const Offset(0, 4)];
 
 void main() {
-  setUpAll(() => NoteToolSettings.defaultRail = false); // eski yuva davranışı
+  setUpAll(() {
+    NoteToolSettings.defaultRail = false; // eski yuva davranışı
+    NoteViewModeStore.defaultMode = NoteViewMode.single; // tek sayfa düzenleyici
+  });
   testWidgets('kement: seç, taşı (tek kalıcı işlem), boyutlandır, geri al, sil; yeniden açınca kalıcı', (t) async {
     final h = await _db(t);
     final (nb, pageId) = await _openPage(t, h);

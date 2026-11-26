@@ -189,7 +189,9 @@ class _PdfReaderViewState extends ConsumerState<PdfReaderView> {
     // PDFium belgesi bir kez açılır).
     _docRef = r.PdfDocumentRefFile(
       widget.info.path!,
-      // Sayfa boyutları tek tek, açılış sayfası öncelikli yüklenir: büyük PDF hemen açılır.
+      // Büyük PDF'te sayfa boyutları tek tek, açılış sayfası öncelikli yüklenir (hemen açılır).
+      // Küçük belgede hepsi baştan: sayfa geçişlerinde tahmini boyutla düzen kaymaz.
+      useProgressiveLoading: widget.info.record.pageCount > 150,
     );
     _errorSub = _session.errors.listen((m) {
       if (!mounted) return;

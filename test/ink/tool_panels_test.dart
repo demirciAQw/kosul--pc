@@ -235,9 +235,10 @@ void main() {
         final rows = await _saved(t, s, repo);
         expect(rows, hasLength(1));
         final p = rows.single.points;
-        expect(p, hasLength(5));
-        expect((p[0].x, p[0].y), (100.0, 100.0));
-        expect((p[2].x, p[2].y), (300.0, 220.0));
+        // Kenarlar sıklaştırılır (yakınlaştırmada köşeler yuvarlanmasın); köşeler korunur.
+        expect(p.length, greaterThan(5));
+        expect((p.first.x, p.first.y), (100.0, 100.0));
+        expect(p.any((q) => q.x == 300.0 && q.y == 220.0), isTrue);
       },
     );
 
@@ -281,7 +282,7 @@ void main() {
         await g.up();
         await t.pump();
         final rows = await _saved(t, s, repo);
-        expect(rows.last.points, hasLength(n), reason: tool.name);
+        expect(rows.last.points.length, greaterThan(n), reason: tool.name);
       }
     });
   });

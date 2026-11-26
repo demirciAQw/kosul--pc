@@ -15,6 +15,7 @@ import 'package:kocum/features/notes/domain/page_size.dart';
 import 'package:kocum/features/notes/domain/page_template.dart';
 import 'package:kocum/features/notes/presentation/ink_notebook_screen.dart';
 import 'package:kocum/features/notes/presentation/note_page_editor.dart';
+import 'package:kocum/features/notes/data/note_view_mode_store.dart';
 import 'package:kocum/features/notes/presentation/note_tool_settings.dart';
 
 Future<AppDatabase> _db(WidgetTester t, [Size size = const Size(1200, 900)]) async {
@@ -53,7 +54,10 @@ Future<void> _mount(WidgetTester t, AppDatabase db, String nb) async {
 }
 
 void main() {
-  setUpAll(() => NoteToolSettings.defaultRail = false); // eski yuva davranışı
+  setUpAll(() {
+    NoteToolSettings.defaultRail = false; // eski yuva davranışı
+    NoteViewModeStore.defaultMode = NoteViewMode.single; // tek sayfa düzenleyici
+  });
   group('sonsuz sayfa (saf)', () {
     test('eşik: ekrana-tam en çok 4212; eski 14040 sonsuz sayılır', () {
       expect(isInfinitePage(1984), isFalse);

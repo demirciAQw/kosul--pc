@@ -2,6 +2,7 @@ import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:kocum/features/notes/data/note_view_mode_store.dart';
 import 'package:kocum/features/notes/presentation/note_tool_settings.dart';
 import 'package:kocum/app/tablet.dart';
 import 'package:kocum/core/database/app_database.dart';
@@ -61,7 +62,10 @@ double _scale(WidgetTester t) =>
     t.widget<InteractiveViewer>(find.byType(InteractiveViewer)).transformationController!.value.getMaxScaleOnAxis();
 
 void main() {
-  setUpAll(() => NoteToolSettings.defaultRail = false); // eski yuva davranışı
+  setUpAll(() {
+    NoteToolSettings.defaultRail = false; // eski yuva davranışı
+    NoteViewModeStore.defaultMode = NoteViewMode.single; // tek sayfa düzenleyici
+  });
   group('sayfa boyutu (saf)', () {
     test('A4, ekrana tam ve sınırsız boyutları; genişlik hep 1404', () {
       expect(pageDimensions(PageSizeKind.a4), (width: 1404.0, height: 1984.0));

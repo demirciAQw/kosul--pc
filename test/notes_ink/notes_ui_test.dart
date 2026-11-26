@@ -6,6 +6,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:kocum/features/notes/data/note_view_mode_store.dart';
 import 'package:kocum/features/notes/presentation/note_tool_settings.dart';
 import 'package:kocum/core/database/app_database.dart';
 import 'package:kocum/core/di/core_providers.dart';
@@ -112,7 +113,10 @@ double _scale(WidgetTester t) =>
     t.widget<InteractiveViewer>(find.byType(InteractiveViewer)).transformationController!.value.getMaxScaleOnAxis();
 
 void main() {
-  setUpAll(() => NoteToolSettings.defaultRail = false); // eski yuva davranışı
+  setUpAll(() {
+    NoteToolSettings.defaultRail = false; // eski yuva davranışı
+    NoteViewModeStore.defaultMode = NoteViewMode.single; // tek sayfa düzenleyici
+  });
   testWidgets('defter oluştur, sayfa ekle, şablon değiştir, kalemle çiz; yeniden açılınca görünür', (t) async {
     final h = await _db(t);
     late String nb;

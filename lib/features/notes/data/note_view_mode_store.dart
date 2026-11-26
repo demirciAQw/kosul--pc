@@ -21,12 +21,17 @@ class NoteViewModeStore {
 
   static const metaKey = 'defter.gorunum';
 
+  /// Kayıt yokken kullanılan görünüm (uygulamada akış). Tek sayfa düzenleyiciyi doğrudan
+  /// sınayan eski testler bunu [NoteViewMode.single] yapar.
+  static NoteViewMode defaultMode = NoteViewMode.flow;
+
   Future<NoteViewMode> load() async {
     try {
       final row = await (_db.select(_db.appMeta)..where((m) => m.metaKey.equals(metaKey))).getSingleOrNull();
-      return NoteViewMode.parse(row?.metaValue);
+      final v = row?.metaValue;
+      return v == null ? defaultMode : NoteViewMode.parse(v);
     } catch (_) {
-      return NoteViewMode.flow;
+      return defaultMode;
     }
   }
 
